@@ -58,7 +58,7 @@ Use whichever pattern fits the work breakdown:
   - Keep every existing public storage interface unchanged so the existing suite runs unmodified.
   - Observable: a unit test shows the configured wait is in effect on the connection, and a lock that clears within the timeout no longer produces an error.
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 9.4_
-- [ ] 2.2 Read-only store opening for reporting
+- [x] 2.2 Read-only store opening for reporting
   - Add a sibling open mode that never creates files or applies the schema, opens with read-only flags, and clearly reports a missing store file to the caller instead of inventing an empty one.
   - Observable: unit tests show no file is created when absent, writes are refused, and reads work against a pre-populated store.
   - _Requirements: 8.5, 8.6_

@@ -61,6 +61,27 @@ impl Db {
         Self::open_at_with_timeout(db_path, DEFAULT_BUSY_TIMEOUT_MS)
     }
 
+    /// Read-only sibling of [`Db::open_at`] for reporting surfaces (Req
+    /// 8.5/8.6): never creates files, never applies the schema. `Ok(None)`
+    /// reports a store that does not exist yet. Bounded busy-waiting still
+    /// applies (Req 6.2) so a read alongside an active writer waits rather
+    /// than failing.
+    pub fn open_read_only(db_path: &Path) -> Result<Option<Db>> {
+        if !db_path.is_file() {
+            return Ok(None);
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .with_context(|| format!("cannot open sqlite db read-only {}", db_path.display()))?;
+        conn.busy_timeout(Duration::from_millis(DEFAULT_BUSY_TIMEOUT_MS))
+            .with_context(|| format!("cannot set busy timeout on {}", db_path.display()))?;
+        Ok(Some(Db {
+            conn: Arc::new(Mutex::new(conn)),
+        }))
+    }
+
     /// Opens the database file at `db_path`, sets WAL, `synchronous=NORMAL`
     /// and `busy_timeout`, and applies the schema idempotently. The timeout
     /// is set BEFORE the schema batch so a concurrent first-open by another
@@ -292,6 +313,49 @@ mod tests {
         assert_eq!(version, schema::SCHEMA_VERSION);
         assert_eq!(fts_rowids(&db, "\"trigger\"").await, vec![id]);
         drop(db);
+    }
+
+    #[tokio::test]
+    async fn read_only_open_reports_missing_store_without_creating_it() {
+        // Req 8.5/8.6: `mmhmem stats` must not invent a store.
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join(DB_FILE_NAME);
+        let res = Db::open_read_only(&db_path).unwrap();
+        assert!(res.is_none(), "missing store must be Ok(None)");
+        assert!(!db_path.exists(), "no store file may be created");
+        assert!(
+            !dir.path().join(format!("{DB_FILE_NAME}-wal")).exists()
+                && !dir.path().join(format!("{DB_FILE_NAME}-shm")).exists(),
+            "no wal/shm side files may be created"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_open_reads_seeded_rows_and_refuses_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let db = Db::open(dir.path()).unwrap();
+            db.with_conn(insert_observation).await.unwrap();
+            drop(db);
+        }
+        let ro = Db::open_read_only(&dir.path().join(DB_FILE_NAME))
+            .unwrap()
+            .expect("seeded store must open read-only");
+        let count: i64 = ro
+            .with_conn(|c| c.query_row("SELECT COUNT(*) FROM observations", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "reads work through the read-only connection");
+        let write = ro
+            .with_conn(|c| c.execute("DELETE FROM observations", []))
+            .await;
+        assert!(write.is_err(), "writes must be refused (Req 8.6)");
+        // The refused write left the data intact.
+        let count: i64 = ro
+            .with_conn(|c| c.query_row("SELECT COUNT(*) FROM observations", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
