@@ -41,3 +41,11 @@ tempfile = "=3.27.0"
 # `cargo build --release --features otel` build; the opentelemetry deps are
 # added with task 9.1.
 otel = []
+
+# Req 13.1/13.2: make the complexity cap BLOCKING under the canonical gate
+# command `cargo clippy --all-targets -- -D warnings`. On the pinned toolchain
+# (clippy 0.1.98) cognitive-complexity is allow-by-default (restriction group),
+# so -D warnings alone would not enforce it; promote it to warn here. The
+# threshold itself lives in clippy.toml (cognitive-complexity-threshold = 15).
+[lints.clippy]
+cognitive-complexity = "warn"

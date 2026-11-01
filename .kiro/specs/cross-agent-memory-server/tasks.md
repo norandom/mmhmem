@@ -10,7 +10,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Observable: `cargo build --release` succeeds and the binary runs; the plain build contains no OTel code path
   - Complexity caps (Req 13): non-test diff ≤ 400 lines (13.4); CC ≤ 10 / cognitive ≤ 15 per function (13.1–13.2); ≤ 500 LOC per src file, ≤ 80 LOC per function (13.3)
   - _Requirements: 8.1, 11.2, 13.1, 13.2, 13.3, 13.4, 13.5_
-- [ ] 1.2 Add the blocking lint/metrics gate
+- [x] 1.2 Add the blocking lint/metrics gate
   - `clippy.toml` with `cyclomatic-complexity-threshold = 10` and `cognitive-complexity-threshold = 15`; CI step running `cargo clippy --all-targets -- -D warnings`; informational `tokei` per-file LOC report (dev tool only, never a runtime dependency)
   - Observable: a deliberately branchy function fails clippy with the configured thresholds; the skeleton passes
   - _Requirements: 13.1, 13.2, 13.5, 13.6_
@@ -210,3 +210,5 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
 - `.gitignore` must stay UTF-8 — a UTF-16LE copy written via PowerShell once broke git's parsing of it (fixed 2026-11-01); keep `/target`, `/.env`, `*.env`.
 - rmcp 3.x's real cargo feature name is `transport-streamable-http-server` (design text abbreviates it as "streamable-http-server").
 - `Cargo.lock` is a generated lockfile and is excluded from the Req 13.4 non-test LOC cap; hand-written diffs are what count.
+- clippy 0.1.98 / rustc 1.98.1: the `cyclomatic_complexity` lint is a deprecated alias of `cognitive_complexity` (two-key clippy.toml aborts with "duplicate field"). Enforce the McCabe-style cap via `cognitive-complexity-threshold = 15` in clippy.toml plus `[lints.clippy] cognitive-complexity = "warn"` in Cargo.toml so `-D warnings` blocks. Req 13.1 amended accordingly (2026-11-01).
+- `tokei` is not installed on this host; scripts/lint.ps1 prints a skip note and CI (task 14.1) should install it for the informational LOC report. Never a runtime dependency (Req 13.5).

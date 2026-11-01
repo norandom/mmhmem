@@ -1,0 +1,19 @@
+# Blocking lint thresholds for the Req 13 complexity caps (anti-explosion gate).
+# Enforced by `cargo clippy --all-targets -- -D warnings`
+#   local gate: scripts/lint.ps1 (task 1.2)
+#   CI gate:    .github/workflows (task 14.1)
+#
+# Req 13.2: cognitive complexity <= 15 per function. The lint itself is promoted
+# to warn in Cargo.toml [lints.clippy] because on the pinned toolchain
+# (clippy 0.1.98 / rustc 1.98.1) cognitive-complexity is allow-by-default
+# (restriction group), so `-D warnings` alone would not enforce the threshold.
+cognitive-complexity-threshold = 15
+#
+# Req 13.1 asked for a second key `cyclomatic-complexity-threshold = 10`. On the
+# pinned toolchain that key is only a DEPRECATED ALIAS of
+# cognitive-complexity-threshold (the old cyclomatic_complexity lint was renamed
+# to cognitive_complexity in clippy 1.35 and no longer exists as a separate
+# lint), and setting both keys makes clippy abort config parsing with
+# "duplicate field" on every run (captured in the task 1.2 status report).
+# It is therefore kept here as documentation only:
+# cyclomatic-complexity-threshold = 10
