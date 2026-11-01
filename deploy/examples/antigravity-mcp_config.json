@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mmhmem": {
+      "serverUrl": "http://mmhmem.internal:8443/mcp",
+      "headers": {
+        "Authorization": "Bearer change-me"
+      },
+      "timeoutSeconds": 600
+    }
+  }
+}

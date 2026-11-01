@@ -179,7 +179,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Observable: `systemd-analyze verify` passes on the unit; `logrotate --debug` parses the config without error
   - _Depends: 10.4_
   - _Requirements: 8.1, 8.2, 7.4, 8.5_
-- [ ] 12.2 Ship the SKILL.md playbook and example harness connection configs
+- [x] 12.2 Ship the SKILL.md playbook and example harness connection configs
   - Playbook under 200 tokens: resume first; prefer `smart_read` over raw reads of large files (offset/limit for edits); search the memory index before fetching details; checkpoint before switching harnesses; example configs for Claude Code CLI, Antigravity, OpenCode, Claude Desktop; a snippet documenting agent-side OTLP export to OpenObserve configured in the harness itself; verify the design's data-lifecycle table still matches implemented behavior
   - Observable: playbook ≤ 200 tokens by the documented estimate; each example config is syntactically valid
   - _Depends: 10.4_
