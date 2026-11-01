@@ -1,16 +1,16 @@
 {
   "feature_name": "local-mode",
   "created_at": "2026-11-01T19:44:28+01:00",
-  "updated_at": "2026-11-01T19:51:43+01:00",
+  "updated_at": "2026-11-01T19:55:54+01:00",
   "language": "en",
-  "phase": "requirements-approved",
+  "phase": "design-generated",
   "approvals": {
     "requirements": {
       "generated": true,
       "approved": true
     },
     "design": {
-      "generated": false,
+      "generated": true,
       "approved": false
     },
     "tasks": {
