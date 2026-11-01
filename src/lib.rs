@@ -6,6 +6,7 @@
 //! worker-model client (`services::worker`). The session bus, shunt engine,
 //! and the MCP server land in later tasks per design.md "File Structure Plan".
 
+pub mod cli;
 pub mod config;
 pub mod mcp;
 pub mod services;

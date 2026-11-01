@@ -90,7 +90,7 @@ Use whichever pattern fits the work breakdown:
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6, 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 4. Core: token-savings statistics command
-- [ ] 4.1 Read-only stats aggregation and rendering
+- [x] 4.1 Read-only stats aggregation and rendering
   - Implement the report behind the future `stats` subcommand: open the local store read-only (using 2.2), and when the store is missing print a clear no-statistics message and exit successfully.
   - Aggregate the token-stats records by day, project, and harness, summing separately the estimated avoided input tokens (all non-client-reported kinds) and the client-reported values, plus the worker prompt and completion tokens spent.
   - Render a fixed-width human-readable table with an estimate label and a totals row, and emit the same aggregates as machine-readable JSON when the JSON flag is passed.
