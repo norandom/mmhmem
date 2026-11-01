@@ -110,7 +110,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 11.1, 11.2, 11.3, 8.5, 13.3_
 
 - [ ] 10. Integration: MCP server, bearer auth, six tool handlers, entrypoint
-- [ ] 10.1 Implement the Streamable HTTP MCP server with bearer auth
+- [x] 10.1 Implement the Streamable HTTP MCP server with bearer auth
   - Configurable path (default `/mcp`) and port (default 8443); every request requires `Authorization: Bearer` compared in constant time; failures → HTTP 401 before tool dispatch and audited; unauthenticated `GET /healthz` → 200 for container healthchecks; graceful shutdown on SIGTERM; HTTP integration tests (no/wrong token → 401; valid token → MCP initialize succeeds)
   - Observable: `curl` without a token returns 401; with a token the MCP handshake completes; `/healthz` returns 200 unauthenticated
   - _Depends: 1.3, 2.2_

@@ -67,6 +67,7 @@ pub const DEFAULT_OTEL_SERVICE_NAME: &str = "mmhmem";
 pub const REDACTED: &str = "[REDACTED]";
 
 /// Effective runtime configuration, loaded once at startup from the env.
+#[derive(Clone)]
 pub struct Config {
     /// Durable state directory (`AGENT_MEM_DATA_DIR`).
     pub data_dir: PathBuf,

@@ -16,6 +16,11 @@ rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server"] }
 rusqlite = { version = "=0.41.1", features = ["bundled"] }
 # Async runtime.
 tokio = { version = "=1.54.1", features = ["full"] }
+# HTTP binding for the rmcp Streamable HTTP service (task 10.1; design.md
+# "Technology Stack": axum via the rmcp transport).
+axum = "=0.8.9"
+# Cancellation token for graceful shutdown (same version rmcp uses).
+tokio-util = "=0.7.20"
 # The only HTTP egress: the worker-model endpoint (rustls, no default/native TLS).
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json"] }
 serde = { version = "=1.0.229", features = ["derive"] }

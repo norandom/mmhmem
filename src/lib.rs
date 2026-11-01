@@ -7,6 +7,7 @@
 //! and the MCP server land in later tasks per design.md "File Structure Plan".
 
 pub mod config;
+pub mod mcp;
 pub mod services;
 pub mod storage;
 pub mod telemetry;
