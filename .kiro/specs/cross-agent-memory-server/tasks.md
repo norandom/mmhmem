@@ -44,7 +44,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 3.5, 4.1, 9.4, 10.2, 13.3_
 
 - [ ] 4. Core: live cross-agent session bus
-- [ ] 4.1 (P) Implement session resume, checkpoint, and automatic breadcrumbs
+- [x] 4.1 (P) Implement session resume, checkpoint, and automatic breadcrumbs
   - Resume returns working state + last active harness + objective + the 15 most recent breadcrumbs; checkpoint upserts by project/task; a new task ID is initialized when no session exists; breadcrumb API for every tool call; working state capped at 6,000 chars (1,500 tokens at ~4 chars/token) truncated at the last complete line; handoff performs zero LLM calls; the checkpoint accepts the optional client-reported frontier usage payload and returns it in the ack — SessionBus does NOT call StatsCollector and does NOT write token_stats; forwarding into StatsCollector (8.1) happens only in the 10.2 wiring
   - Unit tests for each behavior incl. the truncation boundary
   - Observable: checkpoint from harness A, then resume from harness B returns A's state and breadcrumbs with no worker call; a > 6,000-char state is truncated at a line boundary
