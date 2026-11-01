@@ -173,8 +173,8 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 1.2, 6.3, 9.1, 9.2, 13.5_
 
-- [ ] 12. Validation: deployment configuration artifacts
-- [ ] 12.1 Ship the systemd unit and logrotate configuration
+- [x] 12. Validation: deployment configuration artifacts
+- [x] 12.1 Ship the systemd unit and logrotate configuration
   - Unit with env-file reference + restart policy; logrotate daily, 90-day retention, compress, dateext, 0640, optional postrotate batch ship to a self-hosted OpenObserve or S3-compatible store
   - Observable: `systemd-analyze verify` passes on the unit; `logrotate --debug` parses the config without error
   - _Depends: 10.4_

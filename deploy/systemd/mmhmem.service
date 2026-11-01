@@ -1,0 +1,60 @@
+# mmhmem systemd unit (Req 8.1; task 12.1).
+#
+# Install:
+#   sudo install -d -m 0750 /etc/mmhmem
+#   sudo cp deploy/examples/mmhmem.env /etc/mmhmem/mmhmem.env   # then edit it
+#   sudo cp target/release/mmhmem /usr/local/bin/mmhmem
+#   sudo cp deploy/systemd/mmhmem.service /etc/systemd/system/mmhmem.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mmhmem
+#
+# One-time user/dirs (the unit runs as the static system user so logrotate
+# can hand the rotated audit file back to the daemon):
+#   sudo useradd --system --home-dir /var/lib/agent-memory \
+#        --create-home --shell /usr/sbin/nologin agent-memory
+#   sudo install -d -o agent-memory -g agent-memory /var/log/agent-memory
+
+[Unit]
+Description=mmhmem cross-agent memory and I/O optimization MCP server
+Documentation=https://github.com/norandom/mmhmem
+After=network-online.target
+Wants=network-online.target
+# Start-rate limiting keeps a bad env file from hot-looping the unit.
+StartLimitIntervalSec=30s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=agent-memory
+Group=agent-memory
+# All runtime configuration is env-only (Req 8.1): the token, allowed roots,
+# port/path, worker endpoint, and optional OTLP vars live in this file.
+EnvironmentFile=/etc/mmhmem/mmhmem.env
+ExecStart=/usr/local/bin/mmhmem
+# Graceful shutdown (task 10.4): the daemon handles SIGTERM, flushes optional
+# OTel state, and exits cleanly.
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+# Restart policy (Req 8.1). Fail-fast config errors exit non-zero immediately;
+# the rate limits live in [Unit] (systemd 257 rejects them in [Service]).
+Restart=on-failure
+RestartSec=5s
+# /var/lib/agent-memory and /var/log/agent-memory are created with correct
+# ownership at start (implicit ReadWritePaths under ProtectSystem=strict).
+StateDirectory=agent-memory
+LogsDirectory=agent-memory
+# Hardening: the daemon needs no privileges and no write access anywhere
+# except the two dirs above and the AGENT_MEM_ALLOWED_ROOTS entries.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+# The daemon reads (smart_read) AND writes (boilerplate_write) inside every
+# AGENT_MEM_ALLOWED_ROOTS entry, so each root must be writable by this unit.
+# Add one line per root configured in the env file, e.g.:
+#ReadWritePaths=/srv/workspace
+#ReadWritePaths=/home/dev/project
+
+[Install]
+WantedBy=multi-user.target

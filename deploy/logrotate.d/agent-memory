@@ -1,0 +1,33 @@
+# logrotate config for the mmhmem audit trail (Req 8.2, 7.4; task 12.1).
+#
+# Install:
+#   sudo cp deploy/logrotate.d/agent-memory /etc/logrotate.d/agent-memory
+#
+# The daemon opens the audit file O_APPEND per write (Req 7.4), so rotation
+# needs no signal and no daemon restart: logrotate renames the live file and
+# creates a fresh one; the next append simply lands in the new file.
+
+/var/log/agent-memory/audit.jsonl {
+    daily
+    rotate 90
+    maxage 90
+    compress
+    dateext
+    missingok
+    notifempty
+    # 0640, owned by the daemon user (Req 8.2): logrotate creates the new
+    # audit file as agent-memory so the daemon can keep appending.
+    su agent-memory agent-memory
+    create 0640 agent-memory agent-memory
+    # Optional batch ship of each rotated archive to a self-hosted OpenObserve
+    # (or S3-compatible store). Uncomment and fill in your endpoint; keep
+    # credentials in /etc/mmhmem/ship.env (mode 0600), never in this file.
+    #postrotate
+    #    . /etc/mmhmem/ship.env
+    #    curl -fsS --retry 3 -X POST \
+    #        -H "Authorization: ${OPENOBSERVE_AUTH}" \
+    #        -H "Content-Type: application/json" \
+    #        --data-binary @"$1.gz" \
+    #        "${OPENOBSERVE_URL}/api/${OPENOBSERVE_ORG}/_bulk" || true
+    #endscript
+}
