@@ -22,6 +22,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::config::Config;
+use crate::services::paths::{AllowedRoots, PathError};
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt_cache as cache;
 pub use crate::services::shunt_types::{BypassReason, ReadOutcome, ShuntError};
@@ -58,7 +59,7 @@ pub struct ShuntEngine {
     config: Config,
     bus: Option<SessionBus>,
     worker: Option<WorkerClient>,
-    allowed_roots: Vec<PathBuf>,
+    roots: AllowedRoots,
 }
 
 impl ShuntEngine {
@@ -70,18 +71,13 @@ impl ShuntEngine {
         bus: Option<SessionBus>,
         worker: Option<WorkerClient>,
     ) -> Self {
-        let allowed_roots = config
-            .allowed_roots
-            .iter()
-            .filter_map(|r| std::fs::canonicalize(r).ok())
-            .collect();
         Self {
             db,
             audit,
+            roots: AllowedRoots::from_config(&config),
             config,
             bus,
             worker,
-            allowed_roots,
         }
     }
 
@@ -93,22 +89,22 @@ impl ShuntEngine {
     /// Canonicalize `raw` and require it to lie under an allowed root;
     /// violations are audited (design.md Security Considerations).
     pub fn confine(&self, raw: &str, ctx: &CallCtx<'_>) -> Result<PathBuf, ShuntError> {
-        let path =
-            std::fs::canonicalize(raw).map_err(|_| ShuntError::FileNotFound(raw.to_string()))?;
-        let ok = self.allowed_roots.iter().any(|root| path.starts_with(root));
-        if !ok {
-            let _ = self.audit.write_event(
-                AuditEventType::Error,
-                ctx.harness,
-                ctx.project,
-                serde_json::json!({
-                    "error": "path_outside_allowed_roots",
-                    "path": path.display().to_string(),
-                }),
-            );
-            return Err(ShuntError::OutsideAllowedRoots(path));
+        match self.roots.confine(raw) {
+            Ok(path) => Ok(path),
+            Err(PathError::NotFound(p)) => Err(ShuntError::FileNotFound(p)),
+            Err(PathError::OutsideRoots(path)) => {
+                let _ = self.audit.write_event(
+                    AuditEventType::Error,
+                    ctx.harness,
+                    ctx.project,
+                    serde_json::json!({
+                        "error": "path_outside_allowed_roots",
+                        "path": path.display().to_string(),
+                    }),
+                );
+                Err(ShuntError::OutsideAllowedRoots(path))
+            }
         }
-        Ok(path)
     }
 
     /// Full smart_read: evaluate, then stages 3-4 for shuntable files.

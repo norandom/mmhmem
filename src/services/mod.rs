@@ -5,6 +5,8 @@
 //! Dependency rule (steering structure.md "Import Organization"): services
 //! may import `config` and `storage`, never `mcp`.
 
+pub mod boilerplate;
+pub mod paths;
 pub mod session_bus;
 pub mod shunt;
 pub mod shunt_cache;

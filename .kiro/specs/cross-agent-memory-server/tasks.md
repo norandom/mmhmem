@@ -71,7 +71,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 3.4, 3.5, 3.6, 3.7, 9.2, 10.1, 13.3_
 
 - [ ] 6. Core: boilerplate write shunting
-- [ ] 6.1 (P) Implement boilerplate generation written straight to disk
+- [x] 6.1 (P) Implement boilerplate generation written straight to disk
   - Reference + spec sent to the worker ("follow the reference file's conventions, output only raw source code"); strip markdown fences; create parent dirs; write to the target; one-line ack with output SHA-256, line count, worker model, latency; target AND reference canonicalized + confined to allowed roots (reference outside roots → reject + audit with zero bytes sent to the worker); missing reference → error, no write; audit + breadcrumb on success; avoided input/output estimate forwarded to StatsCollector (8.1/10.3)
   - Unit/integration tests incl. fence stripping and reference-outside-roots rejection
   - Observable: a generated stub lands at the confined target path with a one-line checksum ack; a traversal reference path is rejected with nothing sent to the worker
