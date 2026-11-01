@@ -61,7 +61,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Depends: 1.3, 2.1, 2.2, 3.1_
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 3.1, 3.2, 3.3, 3.8, 3.9, 13.3_
-- [ ] 5.2 Implement the content-addressed shunt cache and worker delegation
+- [x] 5.2 Implement the content-addressed shunt cache and worker delegation
   - SHA-256 of the file + 16-char normalized-question fingerprint; cache key (path, hash, fingerprint); hit → cached summary < 50 ms with zero worker calls; miss → line-numbered file + question to the worker with the strict bullet prompt (every bullet begins with an exact symbol name and `[L<start>-L<end>]` range) → store; content change invalidates; the avoided-token estimate is forwarded to StatsCollector (persisted in 8.1, wired in 10.3)
   - Integration tests with a stub worker: repeat read = identical summary with worker call count 0; after editing the file, cache miss
   - Observable: a repeat read of an unchanged 600-line file returns the identical cached summary in < 50 ms with zero worker invocations; editing one line forces re-delegation
