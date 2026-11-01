@@ -184,7 +184,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Observable: playbook ≤ 200 tokens by the documented estimate; each example config is syntactically valid
   - _Depends: 10.4_
   - _Requirements: 8.3, 8.4, 1.3, 11.4, 11.5_
-- [ ] 12.3 Ship the Docker image and docker-compose setup
+- [x] 12.3 Ship the Docker image and docker-compose setup
   - Multi-stage Dockerfile (builder compiles with `--features otel`; runtime stage = minimal non-root image containing only the `mmhmem` binary); compose with env_file, MCP port, volumes for the data dir, the audit log dir (host-side logrotate rotates the bind mount, no container restart), and allowed roots read-only; healthcheck via `/healthz`; restart policy; `.env.example` documenting every variable
   - Observable: `docker compose config` validates; the built image's payload is only the binary; the container becomes healthy and audit lines land on the host-mounted log volume
   - _Depends: 10.4, 9.1_

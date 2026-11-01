@@ -24,6 +24,7 @@ fn main() -> ExitCode {
             print!("{}", mmhmem::help_text());
             ExitCode::SUCCESS
         }
+        Some("healthcheck") => run_healthcheck(),
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }
@@ -34,6 +35,53 @@ fn unknown_arg(other: &str) -> ExitCode {
     eprintln!("unknown argument: {other}");
     eprint!("{}", mmhmem::help_text());
     ExitCode::FAILURE
+}
+
+/// `healthcheck` subcommand (task 12.3): GET the local daemon's `/healthz`
+/// (Req 1.1) and exit 0 only on HTTP 200. The Docker runtime image contains
+/// ONLY this binary — no shell, no curl — so container healthchecks (Docker
+/// HEALTHCHECK / docker-compose) must run through it (Req 8.6).
+fn run_healthcheck() -> ExitCode {
+    let url = format!("http://127.0.0.1:{}/healthz", env_port());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build();
+    match runtime {
+        Ok(rt) => match rt.block_on(probe_healthz(&url)) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => {
+                eprintln!("mmhmem healthcheck: {url} answered non-200");
+                ExitCode::FAILURE
+            }
+            Err(e) => {
+                eprintln!("mmhmem healthcheck: {url} unreachable: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Err(e) => {
+            eprintln!("mmhmem healthcheck: cannot start the tokio runtime: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `AGENT_MEM_PORT` for the probe (trimmed), defaulting to the documented
+/// port so the subcommand works with an empty env inside containers.
+fn env_port() -> String {
+    std::env::var(mmhmem::config::ENV_PORT)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| mmhmem::config::DEFAULT_PORT.to_string())
+}
+
+/// One bounded GET; true iff the daemon answered 200.
+async fn probe_healthz(url: &str) -> Result<bool, reqwest::Error> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+    let resp = client.get(url).send().await?;
+    Ok(resp.status() == reqwest::StatusCode::OK)
 }
 
 /// No-flag path: tracing, fail-fast config, multi-thread tokio runtime, serve.

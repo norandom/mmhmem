@@ -1,0 +1,15 @@
+# Keep the docker build context tiny: the local target/ dir can be many GB.
+target
+.git
+.kiro
+.opencode
+.config
+scripts
+tests
+deploy
+data
+log
+workspace
+.env
+*.env
+Self-Hosted Cross-Agent Memory Solutions.md

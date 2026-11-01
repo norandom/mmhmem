@@ -1,0 +1,39 @@
+# mmhmem compose stack (Req 8.6/8.7, task 12.3).
+#
+# All daemon configuration comes from .env via env_file (Req 8.1); the
+# ${...} substitutions below are compose-level knobs for the host side.
+# Validate: `docker compose config` (also a CI check); start:
+#   docker compose up -d --wait    # healthcheck drives readiness via /healthz
+#
+# Audit-log rotation WITHOUT container restarts (Req 8.7): the audit
+# DIRECTORY is bind-mounted, and the daemon opens the audit file
+# O_APPEND per write — host-side logrotate (deploy/logrotate.d/agent-memory,
+# with the path adjusted to your host log dir) can rotate the file at any
+# time; the next append simply lands in the fresh file.
+
+services:
+  mmhmem:
+    build: .
+    image: mmhmem:latest
+    env_file: .env
+    ports:
+      # Host ${MMHMEM_PORT} (default 8443) -> container port. Keep
+      # AGENT_MEM_PORT=8443 in .env unless you also change EXPOSE/healthcheck.
+      - "${MMHMEM_PORT:-8443}:8443"
+    volumes:
+      # Durable state (SQLite WAL + FTS5).
+      - ${MMHMEM_DATA_DIR:-./data}:/var/lib/agent-memory
+      # Audit JSONL dir: bind-mounted so host logrotate rotates it (Req 8.7).
+      # Point deploy/logrotate.d/agent-memory at ${MMHMEM_LOG_DIR}/audit.jsonl.
+      - ${MMHMEM_LOG_DIR:-./log}:/var/log/agent-memory
+      # Workspace roots the agents read/write. Read-only by default (Req 8.6);
+      # change `:ro` to `:rw` if boilerplate_write must write inside containers.
+      # Keep this path in sync with AGENT_MEM_ALLOWED_ROOTS in .env.
+      - ${MMHMEM_WORKSPACE_ROOT:-./workspace}:/srv/workspace:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mmhmem", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

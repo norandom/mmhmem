@@ -1,6 +1,10 @@
 //! Shared integration-test harness (design.md "File Structure Plan"
 //! tests/common/mod.rs): ephemeral-port server, env-only config in tempdirs,
 //! raw MCP-over-HTTP client helpers with SSE parsing.
+//!
+//! Each test binary links this module but uses only part of it, so unused
+//! helpers are expected per-binary (dead_code allowed for the shared harness).
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
