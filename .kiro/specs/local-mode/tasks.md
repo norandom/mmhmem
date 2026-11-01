@@ -152,12 +152,12 @@ Use whichever pattern fits the work breakdown:
   - _Requirements: 11.2, 11.3_
 
 - [ ] 8. Final validation: serve-mode non-regression and house gates
-- [ ] 8.1 Full regression and unmodified-suite proof
+- [x] 8.1 Full regression and unmodified-suite proof
   - Run the complete local gate chain (format check, deny-warnings clippy, full test suite) and prove the serve contract held: the pre-existing test files are byte-identical (no modifications to any test that existed before this feature), the suite passes, and the complexity and size cap test passes on all new files.
   - Confirm the serve surface end to end: the daemon starts from the no-argument path exactly as before, healthcheck still answers, and the blocking gates run at unchanged strictness in the container pipeline.
   - Observable: a clean run of the full gate chain passes with zero modifications to pre-existing tests, plus a recorded diff proof.
   - _Requirements: 9.1, 9.3, 9.4, 13.1, 13.2, 13.3, 13.4, 13.5_
-- [ ] 8.2 Plain-binary guards and deployment-artifact checks
+- [x] 8.2 Plain-binary guards and deployment-artifact checks
   - Verify the plain binary guarantees survive the feature: the dependency-tree check still shows zero observability crates in the plain build, no telemetry or SaaS calls exist anywhere in the local path, and standard-error diagnostics never leak the token or secrets.
   - Confirm every serve deployment artifact (container image definition, compose file, service unit, logrotate configuration) is unchanged.
   - Observable: the guard checks pass and the deployment artifacts show zero diff.
