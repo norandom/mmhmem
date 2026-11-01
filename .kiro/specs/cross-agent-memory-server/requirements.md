@@ -137,7 +137,7 @@ mmhmem is a self-hosted, cross-agent memory and I/O optimization server for AI c
 **Objective:** As a maintainer, I want hard, machine-enforced caps on code complexity and size, so the codebase cannot explode while the feature is implemented.
 
 #### Acceptance Criteria
-1. Every function in `src/` shall have cyclomatic complexity (McCabe CC) ≤ 10, enforced by clippy's `cyclomatic_complexity` lint with the threshold set in `clippy.toml` and `-D warnings` in CI. `#[allow]` on this lint requires a written justification in the change.
+1. Every function in `src/` shall have a hard McCabe-style complexity cap, machine-enforced and blocking in CI: cognitive complexity ≤ 15 via clippy's `cognitive_complexity` lint with `cognitive-complexity-threshold = 15` in `clippy.toml` and `-D warnings` (on clippy ≥ 1.98 the former `cyclomatic_complexity` lint is only a deprecated alias, so the cognitive cap at 15 is the enforced guard, complemented by the ≤ 80-LOC-per-function cap in 13.3). `#[allow]` on this lint requires a written justification in the change.
 2. Every function in `src/` shall have cognitive complexity ≤ 15 (clippy `cognitive_complexity`, threshold in `clippy.toml`, same enforcement).
 3. No source file in `src/` shall exceed 500 lines and no function shall exceed 80 lines; when a module reaches the cap it shall be split by responsibility, not silenced with `#[allow]`. Test files are exempt from the per-function caps but capped at 800 lines per file.
 4. Every implementation task shall keep its non-test diff at or under 400 added lines; work that would exceed this shall be split into multiple tasks at task-generation time.

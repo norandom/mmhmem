@@ -108,14 +108,14 @@ graph TB
 ### Complexity Budget
 Adopt-don't-build: ~12 crates total (details in `research.md` → "Minimal dependency set"). Single process; one SQLite connection behind a `tokio::sync::Mutex` serviced via `spawn_blocking` (WAL, no pool; lock never held across an await); synchronous tool logic (only the worker-model HTTP call awaits); env-only config; bearer auth via one small axum middleware + constant-time compare (`subtle`); TLS at a reverse proxy, not in-process; logrotate owns rotation; schema via `CREATE TABLE IF NOT EXISTS` + `PRAGMA user_version` (no migration framework); no background workers/queues; no `unsafe`; `clippy -D warnings`; committed `Cargo.lock`; the optional `otel` cargo feature (opentelemetry-otlp) is compiled only into the Docker image, keeping the plain release binary at the minimal dependency set. Build order: port the Python reference 1:1, one tool E2E first, then the rest plus workspace path confinement.
 
-Code-metrics caps (Req 13 — enforced by CI and baked into every task's acceptance criteria): cyclomatic complexity ≤ 10 and cognitive complexity ≤ 15 per function (clippy lints + `clippy.toml` thresholds, `-D warnings`, no unjustified `#[allow]`); ≤ 500 lines per `src/` file and ≤ 80 lines per function (split by responsibility at the cap; test files ≤ 800 lines); each implementation task ≤ 400 added non-test lines — larger work is split at task-generation time; CI also prints an informational `tokei` LOC report. Rationale: McCabe-style caps keep every function auditable on one screen, which matters most on the security-critical paths (path confinement, redaction, bearer auth); the LOC caps force the layered module split already in this design instead of god-modules. Task-generation note: `/kiro-spec-tasks` shall copy Req 13 into every implementation task's acceptance criteria.
+Code-metrics caps (Req 13 — enforced by CI and baked into every task's acceptance criteria): cognitive complexity ≤ 15 per function via clippy's `cognitive_complexity` lint + `clippy.toml` threshold + `[lints.clippy]` warn + `-D warnings` (on clippy ≥ 1.98 the `cyclomatic_complexity` lint is a deprecated alias, so the cognitive cap is the machine-enforced McCabe-style guard; no unjustified `#[allow]`); ≤ 500 lines per `src/` file and ≤ 80 lines per function (split by responsibility at the cap; test files ≤ 800 lines); each implementation task ≤ 400 added non-test lines — larger work is split at task-generation time; CI also prints an informational `tokei` LOC report. Rationale: McCabe-style caps keep every function auditable on one screen, which matters most on the security-critical paths (path confinement, redaction, bearer auth); the LOC caps force the layered module split already in this design instead of god-modules. Task-generation note: `/kiro-spec-tasks` shall copy Req 13 into every implementation task's acceptance criteria.
 
 ## File Structure Plan
 
 ```
 Cargo.toml                     # deps pinned; features: rmcp streamable-http-server, rusqlite bundled; optional `otel` feature (Docker image only)
 rust-toolchain.toml            # pinned stable toolchain
-clippy.toml                    # lint thresholds (Req 13): cyclomatic-complexity-threshold = 10, cognitive-complexity-threshold = 15
+clippy.toml                    # lint threshold (Req 13): cognitive-complexity-threshold = 15 (clippy >= 1.98: the cyclomatic key is a deprecated alias, kept as a comment; the cognitive cap is the enforced McCabe-style guard, complemented by the 80-LOC/fn cap)
 Dockerfile                     # multi-stage: rust builder -> minimal non-root runtime image containing ONLY the mmhmem binary
 docker-compose.yml             # env_file config, MCP port, volumes: data dir, audit log dir (host logrotate), allowed roots (ro), healthcheck
 src/
@@ -271,7 +271,7 @@ Flow-level decisions: every tool invocation appends a breadcrumb automatically (
 | 11.4 | data-lifecycle table (what passes, what remains, retention) | design.md "Data Lifecycle" section | doc | — |
 | 11.5 | agent-side OTel configured in the harness, documented only | deploy/examples/ | docs | — |
 | 12.1–12.3 | E2E measured savings with real harness, gated by E2E_LLM | tests/e2e/ + docker-compose.yml | compose + OpenCode | — |
-| 13.1–13.2 | CC ≤ 10, cognitive ≤ 15 per function via clippy + clippy.toml, -D warnings | clippy.toml + CI gate | lint config | — |
+| 13.1–13.2 | cognitive ≤ 15 per function via clippy.toml + [lints.clippy] + -D warnings (McCabe-style guard; cyclomatic lint is a deprecated alias on clippy ≥ 1.98) | clippy.toml + CI gate | lint config | — |
 | 13.3 | ≤ 500 LOC/src file, ≤ 80 LOC/function, ≤ 800 LOC/test file | module split rule | internal | — |
 | 13.4 | ≤ 400 non-test LOC per task; split at generation time | tasks.md acceptance criteria | process | — |
 | 13.5–13.6 | blocking clippy gate + tokei report; caps copied into every task | CI + /kiro-spec-tasks | process | — |

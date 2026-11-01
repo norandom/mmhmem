@@ -28,7 +28,7 @@ token_stats       = "Per-harness / per-task token-savings statistics over time: 
 otel_optional     = "Optional OTLP export (spans/metrics/logs) to a self-hosted OpenObserve; cargo feature, off by default; JSONL audit stays system of record (Req 11)"
 data_lifecycle    = "Documented map of what data passes the server and which logs/traces remain on disk, with retention (Req 11.4)"
 e2e_measurement   = "End-to-end measurement suite: compose stack + scripted OpenCode (Mistral) sessions on a fixture repo, baseline vs mmhmem; asserts MEASURED token savings from harness-reported usage (Req 12)"
-complexity_caps   = "McCabe-style caps enforced by CI and baked into every implementation task's acceptance criteria: CC <= 10 and cognitive complexity <= 15 per function (clippy + clippy.toml, -D warnings), <= 500 LOC per src file, <= 80 LOC per function, <= 400 non-test LOC per task (Req 13)"
+complexity_caps   = "McCabe-style caps enforced by CI and baked into every implementation task's acceptance criteria: cognitive complexity <= 15 per function as the machine-enforced guard (clippy cognitive_complexity + clippy.toml + -D warnings; the cyclomatic lint is a deprecated alias on clippy >= 1.98), <= 500 LOC per src file, <= 80 LOC per function, <= 400 non-test LOC per task (Req 13)"
 
 [features.out]
 prompt_injection_scanning = "Rejected 2026-11-01: the main injection channels (native reads, web fetches, bash output) never transit the server, so server-side scanning is mostly blind; the hash-verified audit trail remains the forensic record. Keep the project focused."
