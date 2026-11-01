@@ -6,4 +6,5 @@
 //! may import `config` and `storage`, never `mcp`.
 
 pub mod session_bus;
+pub mod shunt;
 pub mod worker;

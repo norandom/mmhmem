@@ -54,7 +54,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 10.4, 13.3_
 
 - [ ] 5. Core: deterministic read shunting (smart_read)
-- [ ] 5.1 (P) Implement the four-stage read evaluation with path confinement
+- [x] 5.1 (P) Implement the four-stage read evaluation with path confinement
   - Targeted offset/limit slice with exact `L<n>:` numbering (never delegated); below-threshold direct read; security-critical path regex bypass (case-insensitive) with the bypass reason audited; canonicalize + allowed-roots confinement (reject + audit); missing-file error; unit tests per stage plus traversal attempts
   - Observable: an offset/limit read returns exactly the requested lines; an auth-path file returns full content with `bypass_reason` in the audit; a path outside the allowed roots is rejected and audited
   - _Boundary: ShuntEngine_

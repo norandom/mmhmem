@@ -291,8 +291,9 @@ fn redact_details(details: &Value) -> Value {
     serde_json::from_str(&redacted).unwrap_or(Value::String(redacted))
 }
 
-/// SHA-256 hex digest of `bytes`.
-fn sha256_hex(bytes: &[u8]) -> String {
+/// SHA-256 hex digest of `bytes` (pub: reused by the shunt engine's content
+/// addressing and by the stats collector).
+pub fn sha256_hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(digest.len() * 2);
