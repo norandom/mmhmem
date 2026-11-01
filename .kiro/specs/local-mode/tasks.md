@@ -52,7 +52,7 @@ Use whichever pattern fits the work breakdown:
   - _Requirements: 3.3, 12.5_
 
 - [ ] 2. Core storage: multi-process access and local audit
-- [ ] 2.1 Multi-process-safe store access
+- [x] 2.1 Multi-process-safe store access
   - Make every store connection wait for a busy store up to the configurable timeout (default 5 seconds) instead of failing immediately, so multiple local processes on one machine serialize through the store engine without corruption, lost updates, or partial actions.
   - Apply the timeout at open, keep it configurable through the profile variable, and restate the storage concurrency invariant: per-process connection, lock never held across an await within a process, store-level serialization across processes, no lock files or coordination services.
   - Keep every existing public storage interface unchanged so the existing suite runs unmodified.

@@ -1,25 +1,30 @@
 //! The `Db` component (design.md "storage layer"): one embedded SQLite
-//! connection in WAL mode, schema applied at open, and an async-friendly
-//! accessor that never holds the DB lock across an `.await`.
+//! connection per process in WAL mode, schema applied at open, and an
+//! async-friendly accessor that never holds the DB lock across an `.await`.
 //!
-//! Concurrency model (design.md "Complexity Budget" + amended invariant):
-//! rusqlite's `Connection` is `Send` but not `Sync`, so the single
-//! connection is owned in an `Arc<std::sync::Mutex<Connection>>` and is ONLY
-//! ever touched inside `tokio::task::spawn_blocking` closures run through
-//! [`Db::with_conn`]. The mutex guard is created and dropped entirely inside
-//! the blocking task, so the DB lock is NEVER held across an `.await`, and
-//! blocking SQLite work never runs on an async worker thread. Single-writer
-//! WAL is correct under concurrent harnesses (Req 9.1) and eliminates
-//! locking bugs; local-only durable state (Req 9.3).
+//! Concurrency model (local-mode supersession of the upstream invariant):
+//! EACH PROCESS opens its own connection to the shared store. Within a
+//! process, the single connection is owned in an `Arc<std::sync::Mutex<
+//! Connection>>` and is ONLY ever touched inside `tokio::task::
+//! spawn_blocking` closures run through [`Db::with_conn`]; the mutex guard
+//! lives entirely inside the blocking task, so the DB lock is NEVER held
+//! across an `.await`, and blocking SQLite work never runs on an async
+//! worker thread. ACROSS processes, safety comes from SQLite itself: WAL
+//! plus `busy_timeout` (Req 6.2, default 5 s, `AGENT_MEM_BUSY_TIMEOUT_MS`)
+//! serialize writers with bounded waiting — no lock files, no coordination
+//! service (Req 6.4). Single-writer WAL is correct under concurrent
+//! harnesses (Req 9.1) and eliminates locking bugs; local-only durable
+//! state (Req 9.3).
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use super::schema;
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_BUSY_TIMEOUT_MS};
 
 /// Database file name inside the configured data dir (`<data_dir>/memory.db`).
 pub const DB_FILE_NAME: &str = "memory.db";
@@ -31,23 +36,40 @@ pub struct Db {
 }
 
 impl Db {
-    /// Opens `<config.data_dir>/memory.db` (Req 7.5 env-configurable data dir).
+    /// Opens `<config.data_dir>/memory.db` (Req 7.5 env-configurable data
+    /// dir) with the profile's busy timeout (`AGENT_MEM_BUSY_TIMEOUT_MS`).
     pub fn open_for_config(config: &Config) -> Result<Db> {
-        Self::open(&config.data_dir)
+        Self::open_with_timeout(&config.data_dir, config.busy_timeout_ms)
     }
 
-    /// Opens the database in `data_dir`, creating the directory if missing.
+    /// Opens the database in `data_dir` with the default busy timeout,
+    /// creating the directory if missing.
     pub fn open(data_dir: &Path) -> Result<Db> {
+        Self::open_with_timeout(data_dir, DEFAULT_BUSY_TIMEOUT_MS)
+    }
+
+    /// Opens `<data_dir>/memory.db`, creating the directory if missing.
+    fn open_with_timeout(data_dir: &Path, busy_timeout_ms: u64) -> Result<Db> {
         std::fs::create_dir_all(data_dir)
             .with_context(|| format!("cannot create data dir {}", data_dir.display()))?;
-        Self::open_at(&data_dir.join(DB_FILE_NAME))
+        Self::open_at_with_timeout(&data_dir.join(DB_FILE_NAME), busy_timeout_ms)
     }
 
-    /// Opens the database file at `db_path` (its parent directory must exist),
-    /// sets WAL + `synchronous=NORMAL`, and applies the schema idempotently.
+    /// Opens the database file at `db_path` (its parent directory must
+    /// exist) with the default busy timeout.
     pub fn open_at(db_path: &Path) -> Result<Db> {
+        Self::open_at_with_timeout(db_path, DEFAULT_BUSY_TIMEOUT_MS)
+    }
+
+    /// Opens the database file at `db_path`, sets WAL, `synchronous=NORMAL`
+    /// and `busy_timeout`, and applies the schema idempotently. The timeout
+    /// is set BEFORE the schema batch so a concurrent first-open by another
+    /// process waits instead of failing (Req 6.1/6.2).
+    fn open_at_with_timeout(db_path: &Path, busy_timeout_ms: u64) -> Result<Db> {
         let conn = Connection::open(db_path)
             .with_context(|| format!("cannot open sqlite db {}", db_path.display()))?;
+        conn.busy_timeout(Duration::from_millis(busy_timeout_ms))
+            .with_context(|| format!("cannot set busy timeout on {}", db_path.display()))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         schema::apply(&conn)?;
@@ -182,6 +204,50 @@ mod tests {
         assert!(journal.eq_ignore_ascii_case("wal"), "journal={journal}");
         assert_eq!(sync, 1, "synchronous=NORMAL is pragma value 1");
         assert_eq!(version, schema::SCHEMA_VERSION);
+        drop(db);
+    }
+
+    #[tokio::test]
+    async fn busy_timeout_is_set_at_open() {
+        // Req 6.2: multi-process safety — the connection waits for a busy
+        // store up to the configurable timeout (default 5 s) instead of
+        // failing immediately.
+        let (_dir, db) = open_temp();
+        let timeout_ms: i64 = db
+            .with_conn(|c| c.query_row("PRAGMA busy_timeout", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(
+            timeout_ms,
+            i64::try_from(crate::config::DEFAULT_BUSY_TIMEOUT_MS).unwrap()
+        );
+        drop(db);
+    }
+
+    #[tokio::test]
+    async fn busy_timeout_config_override_applies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut env = std::collections::HashMap::new();
+        env.insert(crate::config::ENV_TOKEN.to_string(), "tok".to_string());
+        env.insert(
+            crate::config::ENV_ALLOWED_ROOTS.to_string(),
+            "/ws".to_string(),
+        );
+        env.insert(
+            crate::config::ENV_BUSY_TIMEOUT_MS.to_string(),
+            "12000".to_string(),
+        );
+        env.insert(
+            crate::config::ENV_DATA_DIR.to_string(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+        let cfg = Config::from_env(&|k| env.get(k).cloned()).unwrap();
+        let db = Db::open_for_config(&cfg).unwrap();
+        let timeout_ms: i64 = db
+            .with_conn(|c| c.query_row("PRAGMA busy_timeout", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(timeout_ms, 12_000);
         drop(db);
     }
 
