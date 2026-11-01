@@ -30,6 +30,10 @@ fn main() -> ExitCode {
         Some("serve") => run_daemon(),
         // Local mode: the harness-spawned stdio child (Req 1.2, 2.1).
         Some("stdio") => mmhmem::mcp::stdio::run_stdio(),
+        // Local token-savings report (Req 1.3, 8.1-8.6).
+        Some("stats") => {
+            mmhmem::cli::run_stats(std::env::args().nth(2).as_deref() == Some("--json"))
+        }
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }

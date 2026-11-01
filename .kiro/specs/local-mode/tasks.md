@@ -98,11 +98,11 @@ Use whichever pattern fits the work breakdown:
   - Observable: unit tests against a seeded temporary store show correct per-day aggregates, table and JSON output agree, and the store is untouched afterwards.
   - _Depends: 2.2_
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
-- [ ] 4.2 Stats subcommand wiring
+- [x] 4.2 Stats subcommand wiring
   - Wire the `stats` subcommand (with its JSON flag) into the dispatch and document it in the help text additively.
   - Observable: `mmhmem stats` prints the local report; `mmhmem stats --json` prints machine-readable output; `--help` documents it.
   - _Requirements: 1.3, 1.4_
-- [ ] 4.3 Stats CLI integration tests
+- [x] 4.3 Stats CLI integration tests
   - Seed a temporary store through the library API with varied kinds, days, projects, and harnesses; run the real binary as a child process and verify the table rows, totals, the JSON flag's payload, and the labeling.
   - Verify the empty-store path end to end: a fresh user directory yields the friendly message and exit code 0.
   - Verify read-only behavior: the store file's bytes are identical before and after running the command.
