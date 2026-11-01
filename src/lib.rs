@@ -1,9 +1,12 @@
 //! mmhmem — self-hosted cross-agent memory and I/O optimization server.
 //!
-//! Scaffolding (task 1.1): exposes the crate identity behind the
-//! `--version` / `--help` CLI surface. Module wiring for config, storage,
-//! services, and the MCP server lands in later tasks per design.md
-//! "File Structure Plan".
+//! Scaffolding (task 1.1) exposes the crate identity behind the
+//! `--version` / `--help` CLI surface; task 1.3 adds env-only configuration
+//! (`config`); task 2.1 adds durable storage (`storage`). Services and the
+//! MCP server land in later tasks per design.md "File Structure Plan".
+
+pub mod config;
+pub mod storage;
 
 /// Crate name from Cargo.toml.
 pub const NAME: &str = env!("CARGO_PKG_NAME");
@@ -27,8 +30,10 @@ pub fn help_text() -> String {
          \x20   -h, --help       Print this help text and exit\n\
          \x20   -V, --version    Print the version and exit\n\
          \n\
-         The daemon wiring (env config, storage, MCP endpoint) is added in a later\n\
-         task; this build only provides the CLI surface.\n"
+         With no flag the daemon loads its env-only configuration (AGENT_MEM_*,\n\
+         SHUNT_MIN_LINES, WORKER_*, OTEL_*) fail-fast and exits non-zero when a\n\
+         required variable is missing; storage and MCP server wiring lands in a\n\
+         later task.\n"
     )
 }
 

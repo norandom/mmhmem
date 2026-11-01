@@ -14,7 +14,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - `clippy.toml` with `cyclomatic-complexity-threshold = 10` and `cognitive-complexity-threshold = 15`; CI step running `cargo clippy --all-targets -- -D warnings`; informational `tokei` per-file LOC report (dev tool only, never a runtime dependency)
   - Observable: a deliberately branchy function fails clippy with the configured thresholds; the skeleton passes
   - _Requirements: 13.1, 13.2, 13.5, 13.6_
-- [ ] 1.3 Implement env-only configuration with fail-fast validation
+- [x] 1.3 Implement env-only configuration with fail-fast validation
   - All env vars with documented defaults: data dir, audit log file, allowed roots, bearer token, MCP port/path, shunt threshold (default 150 lines), worker URL/model/API key, `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` / `OTEL_SERVICE_NAME`; startup refuses to run without the bearer token and allowed roots; unit tests for defaults and validation errors
   - Observable: the binary exits non-zero with a clear message when the bearer token is unset; the startup log prints the effective config with the token redacted
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)

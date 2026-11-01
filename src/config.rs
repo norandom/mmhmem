@@ -1,0 +1,415 @@
+//! Env-only runtime configuration (task 1.3; design.md "File Structure Plan"
+//! config.rs entry and "Components and Interfaces" Config row).
+//!
+//! All configuration comes from environment variables — no config files are
+//! parsed at runtime (steering structure.md "Code Organization Principles").
+//! Validation is fail-fast: `AGENT_MEM_TOKEN` and `AGENT_MEM_ALLOWED_ROOTS`
+//! are required, and any malformed value aborts startup with a clear error
+//! before any socket or database work (design.md "Error Handling").
+
+use std::fmt;
+use std::path::PathBuf;
+
+/// `AGENT_MEM_DATA_DIR` — durable state directory.
+pub const ENV_DATA_DIR: &str = "AGENT_MEM_DATA_DIR";
+/// `AGENT_MEM_LOG_FILE` — audit JSONL path.
+pub const ENV_LOG_FILE: &str = "AGENT_MEM_LOG_FILE";
+/// `AGENT_MEM_ALLOWED_ROOTS` — comma-separated confinement roots (required).
+pub const ENV_ALLOWED_ROOTS: &str = "AGENT_MEM_ALLOWED_ROOTS";
+/// `AGENT_MEM_TOKEN` — bearer token for the MCP endpoint (required, never logged).
+pub const ENV_TOKEN: &str = "AGENT_MEM_TOKEN";
+/// `AGENT_MEM_HOST` — bind host.
+pub const ENV_HOST: &str = "AGENT_MEM_HOST";
+/// `AGENT_MEM_PORT` — bind port (u16).
+pub const ENV_PORT: &str = "AGENT_MEM_PORT";
+/// `AGENT_MEM_MCP_PATH` — MCP Streamable HTTP path.
+pub const ENV_MCP_PATH: &str = "AGENT_MEM_MCP_PATH";
+/// `SHUNT_MIN_LINES` — smart_read shunt threshold in lines (u32 > 0, Req 3.9).
+pub const ENV_SHUNT_MIN_LINES: &str = "SHUNT_MIN_LINES";
+/// `WORKER_API_URL` — OpenAI-compatible chat completions endpoint (Req 6.1).
+pub const ENV_WORKER_API_URL: &str = "WORKER_API_URL";
+/// `WORKER_MODEL` — worker model name (optional).
+pub const ENV_WORKER_MODEL: &str = "WORKER_MODEL";
+/// `WORKER_API_KEY` — worker bearer key (optional, never logged).
+pub const ENV_WORKER_API_KEY: &str = "WORKER_API_KEY";
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` — optional OTLP endpoint (Req 11.1).
+pub const ENV_OTEL_ENDPOINT: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
+/// `OTEL_EXPORTER_OTLP_HEADERS` — optional OTLP headers (Req 11.1, redacted in logs).
+pub const ENV_OTEL_HEADERS: &str = "OTEL_EXPORTER_OTLP_HEADERS";
+/// `OTEL_SERVICE_NAME` — OTLP service name (Req 11.1).
+pub const ENV_OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
+
+/// Default for [`ENV_DATA_DIR`] on the Linux deployment host (Req 7.5):
+/// `/var/lib/agent-memory`.
+#[cfg(not(windows))]
+pub const DEFAULT_DATA_DIR: &str = "/var/lib/agent-memory";
+/// Default for [`ENV_DATA_DIR`] on a Windows dev host. The Linux production
+/// default is `/var/lib/agent-memory` (Req 7.5), kept documented above.
+#[cfg(windows)]
+pub const DEFAULT_DATA_DIR: &str = r"C:\ProgramData\agent-memory";
+
+/// Default for [`ENV_LOG_FILE`] (Req 7.3/7.5): `/var/log/agent-memory/audit.jsonl`.
+pub const DEFAULT_LOG_FILE: &str = "/var/log/agent-memory/audit.jsonl";
+/// Default bind host.
+pub const DEFAULT_HOST: &str = "0.0.0.0";
+/// Default bind port (Req 1.1).
+pub const DEFAULT_PORT: u16 = 8443;
+/// Default MCP Streamable HTTP path (Req 1.1).
+pub const DEFAULT_MCP_PATH: &str = "/mcp";
+/// Default shunt threshold in lines (Req 3.9).
+pub const DEFAULT_SHUNT_MIN_LINES: u32 = 150;
+/// Default worker endpoint: local Ollama-compatible chat completions (Req 6.1).
+pub const DEFAULT_WORKER_API_URL: &str = "http://127.0.0.1:11434/v1/chat/completions";
+/// Default OTLP service name (Req 11.1).
+pub const DEFAULT_OTEL_SERVICE_NAME: &str = "mmhmem";
+
+/// Marker printed in place of secret values in debug output.
+pub const REDACTED: &str = "[REDACTED]";
+
+/// Effective runtime configuration, loaded once at startup from the env.
+pub struct Config {
+    /// Durable state directory (`AGENT_MEM_DATA_DIR`).
+    pub data_dir: PathBuf,
+    /// Audit JSONL file (`AGENT_MEM_LOG_FILE`).
+    pub log_file: PathBuf,
+    /// Path-confinement roots (`AGENT_MEM_ALLOWED_ROOTS`, required).
+    pub allowed_roots: Vec<PathBuf>,
+    /// Bearer token for the MCP endpoint (`AGENT_MEM_TOKEN`, required, never logged).
+    pub token: String,
+    /// Bind host (`AGENT_MEM_HOST`).
+    pub host: String,
+    /// Bind port (`AGENT_MEM_PORT`).
+    pub port: u16,
+    /// MCP Streamable HTTP path (`AGENT_MEM_MCP_PATH`).
+    pub mcp_path: String,
+    /// smart_read shunt threshold in lines (`SHUNT_MIN_LINES`).
+    pub shunt_min_lines: u32,
+    /// Worker chat-completions URL (`WORKER_API_URL`).
+    pub worker_api_url: String,
+    /// Worker model name (`WORKER_MODEL`, optional).
+    pub worker_model: Option<String>,
+    /// Worker API key (`WORKER_API_KEY`, optional, never logged).
+    pub worker_api_key: Option<String>,
+    /// OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`, optional).
+    pub otel_endpoint: Option<String>,
+    /// OTLP headers (`OTEL_EXPORTER_OTLP_HEADERS`, optional, redacted in logs).
+    pub otel_headers: Option<String>,
+    /// OTLP service name (`OTEL_SERVICE_NAME`).
+    pub otel_service_name: String,
+}
+
+/// Fail-fast configuration error (design.md "Error Handling").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigError {
+    /// `AGENT_MEM_TOKEN` missing or blank.
+    MissingToken,
+    /// `AGENT_MEM_ALLOWED_ROOTS` missing, blank, or with no non-empty entry.
+    MissingAllowedRoots,
+    /// `AGENT_MEM_PORT` is not a valid u16.
+    InvalidPort(String),
+    /// `SHUNT_MIN_LINES` is not a u32 > 0.
+    InvalidShuntMinLines(String),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigError::MissingToken => write!(
+                f,
+                "required env var {ENV_TOKEN} is not set or empty (bearer token for the MCP endpoint)"
+            ),
+            ConfigError::MissingAllowedRoots => write!(
+                f,
+                "required env var {ENV_ALLOWED_ROOTS} is not set, empty, or has no non-blank entry \
+                 (comma-separated workspace roots)"
+            ),
+            ConfigError::InvalidPort(raw) => {
+                write!(f, "{ENV_PORT}={raw:?} is not a valid port (u16, 0-65535)")
+            }
+            ConfigError::InvalidShuntMinLines(raw) => {
+                write!(f, "{ENV_SHUNT_MIN_LINES}={raw:?} is not a valid shunt threshold (u32 > 0)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+impl Config {
+    /// Loads the effective config from the process environment.
+    pub fn load() -> Result<Self, ConfigError> {
+        Self::from_env(&|key| std::env::var(key).ok())
+    }
+
+    /// Pure env parser. Tests inject a lookup closure instead of touching the
+    /// real process env, so tests stay hermetic and parallel-safe.
+    pub fn from_env(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let token = present(get, ENV_TOKEN).ok_or(ConfigError::MissingToken)?;
+        let allowed_roots = parse_allowed_roots(get)?;
+        let port = parse_port(get)?;
+        let shunt_min_lines = parse_shunt_min_lines(get)?;
+        Ok(Self {
+            data_dir: PathBuf::from(optional(get, ENV_DATA_DIR, DEFAULT_DATA_DIR)),
+            log_file: PathBuf::from(optional(get, ENV_LOG_FILE, DEFAULT_LOG_FILE)),
+            allowed_roots,
+            token,
+            host: optional(get, ENV_HOST, DEFAULT_HOST),
+            port,
+            mcp_path: optional(get, ENV_MCP_PATH, DEFAULT_MCP_PATH),
+            shunt_min_lines,
+            worker_api_url: optional(get, ENV_WORKER_API_URL, DEFAULT_WORKER_API_URL),
+            worker_model: present(get, ENV_WORKER_MODEL),
+            worker_api_key: present(get, ENV_WORKER_API_KEY),
+            otel_endpoint: present(get, ENV_OTEL_ENDPOINT),
+            otel_headers: present(get, ENV_OTEL_HEADERS),
+            otel_service_name: optional(get, ENV_OTEL_SERVICE_NAME, DEFAULT_OTEL_SERVICE_NAME),
+        })
+    }
+
+    /// All fields rendered with secrets (`token`, `worker_api_key`,
+    /// `otel_headers`) masked as `[REDACTED]` — safe to log at startup.
+    pub fn redacted_debug(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+/// Manual `Debug` so the bearer token and API keys can never leak into logs
+/// via `{:?}` (design.md "Security Considerations": token supplied via env,
+/// never logged).
+impl fmt::Debug for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Config")
+            .field("data_dir", &self.data_dir)
+            .field("log_file", &self.log_file)
+            .field("allowed_roots", &self.allowed_roots)
+            .field("token", &REDACTED)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("mcp_path", &self.mcp_path)
+            .field("shunt_min_lines", &self.shunt_min_lines)
+            .field("worker_api_url", &self.worker_api_url)
+            .field("worker_model", &self.worker_model)
+            .field(
+                "worker_api_key",
+                &self.worker_api_key.as_ref().map(|_| REDACTED),
+            )
+            .field("otel_endpoint", &self.otel_endpoint)
+            .field(
+                "otel_headers",
+                &self.otel_headers.as_ref().map(|_| REDACTED),
+            )
+            .field("otel_service_name", &self.otel_service_name)
+            .finish()
+    }
+}
+
+/// Non-empty trimmed value for `key`, or `None` when unset/blank.
+fn present(get: &dyn Fn(&str) -> Option<String>, key: &str) -> Option<String> {
+    get(key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Value for `key`, falling back to `default` when unset or blank.
+fn optional(get: &dyn Fn(&str) -> Option<String>, key: &str, default: &str) -> String {
+    present(get, key).unwrap_or_else(|| default.to_string())
+}
+
+/// Comma-separated `AGENT_MEM_ALLOWED_ROOTS`, split and trimmed; blank-only
+/// input is an error (fail-fast, design.md "Error Handling").
+fn parse_allowed_roots(get: &dyn Fn(&str) -> Option<String>) -> Result<Vec<PathBuf>, ConfigError> {
+    let raw = present(get, ENV_ALLOWED_ROOTS).ok_or(ConfigError::MissingAllowedRoots)?;
+    let roots: Vec<PathBuf> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    if roots.is_empty() {
+        return Err(ConfigError::MissingAllowedRoots);
+    }
+    Ok(roots)
+}
+
+/// `AGENT_MEM_PORT` parsed as u16.
+fn parse_port(get: &dyn Fn(&str) -> Option<String>) -> Result<u16, ConfigError> {
+    match present(get, ENV_PORT) {
+        Some(raw) => raw
+            .parse::<u16>()
+            .map_err(|_| ConfigError::InvalidPort(raw)),
+        None => Ok(DEFAULT_PORT),
+    }
+}
+
+/// `SHUNT_MIN_LINES` parsed as u32 and required to be > 0 (Req 3.9).
+fn parse_shunt_min_lines(get: &dyn Fn(&str) -> Option<String>) -> Result<u32, ConfigError> {
+    match present(get, ENV_SHUNT_MIN_LINES) {
+        Some(raw) => {
+            let n = raw
+                .parse::<u32>()
+                .map_err(|_| ConfigError::InvalidShuntMinLines(raw.clone()))?;
+            if n == 0 {
+                return Err(ConfigError::InvalidShuntMinLines(raw));
+            }
+            Ok(n)
+        }
+        None => Ok(DEFAULT_SHUNT_MIN_LINES),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Builds an owned lookup map; tests never touch the real process env.
+    fn lookup(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// Minimal valid env: required token + roots, plus overrides.
+    fn base(overrides: &[(&str, &str)]) -> HashMap<String, String> {
+        let mut map = lookup(&[(ENV_TOKEN, "test-token"), (ENV_ALLOWED_ROOTS, "/workspace")]);
+        for (k, v) in overrides {
+            map.insert(k.to_string(), v.to_string());
+        }
+        map
+    }
+
+    fn parse(map: &HashMap<String, String>) -> Result<Config, ConfigError> {
+        Config::from_env(&|k| map.get(k).cloned())
+    }
+
+    #[test]
+    fn defaults_applied_when_only_required_vars_set() {
+        let cfg = parse(&base(&[])).unwrap();
+        assert_eq!(cfg.data_dir, PathBuf::from(DEFAULT_DATA_DIR));
+        assert_eq!(cfg.log_file, PathBuf::from(DEFAULT_LOG_FILE));
+        assert_eq!(cfg.allowed_roots, vec![PathBuf::from("/workspace")]);
+        assert_eq!(cfg.token, "test-token");
+        assert_eq!(cfg.host, DEFAULT_HOST);
+        assert_eq!(cfg.port, DEFAULT_PORT);
+        assert_eq!(cfg.mcp_path, DEFAULT_MCP_PATH);
+        assert_eq!(cfg.shunt_min_lines, DEFAULT_SHUNT_MIN_LINES);
+        assert_eq!(cfg.worker_api_url, DEFAULT_WORKER_API_URL);
+        assert!(cfg.worker_model.is_none());
+        assert!(cfg.worker_api_key.is_none());
+        assert!(cfg.otel_endpoint.is_none());
+        assert!(cfg.otel_headers.is_none());
+        assert_eq!(cfg.otel_service_name, DEFAULT_OTEL_SERVICE_NAME);
+    }
+
+    #[test]
+    fn missing_token_is_an_error() {
+        let map = lookup(&[(ENV_ALLOWED_ROOTS, "/workspace")]);
+        assert_eq!(parse(&map).unwrap_err(), ConfigError::MissingToken);
+    }
+
+    #[test]
+    fn blank_token_is_an_error() {
+        let map = base(&[(ENV_TOKEN, "   ")]);
+        assert_eq!(parse(&map).unwrap_err(), ConfigError::MissingToken);
+    }
+
+    #[test]
+    fn missing_allowed_roots_is_an_error() {
+        let map = lookup(&[(ENV_TOKEN, "t")]);
+        assert_eq!(parse(&map).unwrap_err(), ConfigError::MissingAllowedRoots);
+    }
+
+    #[test]
+    fn blank_allowed_roots_is_an_error() {
+        for raw in ["", "   ", " , , "] {
+            let map = base(&[(ENV_ALLOWED_ROOTS, raw)]);
+            assert_eq!(
+                parse(&map).unwrap_err(),
+                ConfigError::MissingAllowedRoots,
+                "raw={raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn allowed_roots_are_split_trimmed_and_deduped_of_blanks() {
+        let map = base(&[(ENV_ALLOWED_ROOTS, " /a , C:\\b ,, /c ")]);
+        let cfg = parse(&map).unwrap();
+        assert_eq!(
+            cfg.allowed_roots,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from(r"C:\b"),
+                PathBuf::from("/c")
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_port_is_an_error() {
+        for raw in ["abc", "70000", "-1", "8443x"] {
+            let map = base(&[(ENV_PORT, raw)]);
+            assert!(
+                matches!(parse(&map), Err(ConfigError::InvalidPort(_))),
+                "raw={raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_port_parses_as_u16() {
+        let map = base(&[(ENV_PORT, "9000")]);
+        assert_eq!(parse(&map).unwrap().port, 9000);
+    }
+
+    #[test]
+    fn shunt_min_lines_must_be_a_positive_u32() {
+        for raw in ["0", "-1", "abc", "1.5"] {
+            let map = base(&[(ENV_SHUNT_MIN_LINES, raw)]);
+            assert!(
+                matches!(parse(&map), Err(ConfigError::InvalidShuntMinLines(_))),
+                "raw={raw:?}"
+            );
+        }
+        let map = base(&[(ENV_SHUNT_MIN_LINES, "250")]);
+        assert_eq!(parse(&map).unwrap().shunt_min_lines, 250);
+    }
+
+    #[test]
+    fn optional_worker_and_otel_vars_parse() {
+        let map = base(&[
+            (ENV_WORKER_API_URL, "http://worker:9/v1/chat/completions"),
+            (ENV_WORKER_MODEL, "qwen3"),
+            (ENV_WORKER_API_KEY, "wk-secret"),
+            (ENV_OTEL_ENDPOINT, "http://otel:4318"),
+            (ENV_OTEL_HEADERS, "Authorization=Bearer otlp-secret"),
+            (ENV_OTEL_SERVICE_NAME, "mmhmem-prod"),
+        ]);
+        let cfg = parse(&map).unwrap();
+        assert_eq!(cfg.worker_api_url, "http://worker:9/v1/chat/completions");
+        assert_eq!(cfg.worker_model.as_deref(), Some("qwen3"));
+        assert_eq!(cfg.worker_api_key.as_deref(), Some("wk-secret"));
+        assert_eq!(cfg.otel_endpoint.as_deref(), Some("http://otel:4318"));
+        assert_eq!(cfg.otel_service_name, "mmhmem-prod");
+    }
+
+    #[test]
+    fn redacted_debug_masks_token_worker_key_and_otel_headers() {
+        let map = base(&[
+            (ENV_TOKEN, "super-secret-token"),
+            (ENV_WORKER_API_KEY, "wk-secret"),
+            (ENV_OTEL_HEADERS, "Authorization=Bearer otlp-secret"),
+        ]);
+        let cfg = parse(&map).unwrap();
+        let dbg = cfg.redacted_debug();
+        assert!(dbg.contains(REDACTED));
+        assert!(!dbg.contains("super-secret-token"), "token leaked: {dbg}");
+        assert!(!dbg.contains("wk-secret"), "worker key leaked: {dbg}");
+        assert!(!dbg.contains("otlp-secret"), "otel headers leaked: {dbg}");
+        // Non-secret fields remain visible for operability.
+        assert!(dbg.contains(DEFAULT_MCP_PATH));
+        assert!(dbg.contains("8443"));
+        assert!(dbg.contains("/workspace"));
+    }
+}
