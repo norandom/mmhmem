@@ -135,14 +135,14 @@ Use whichever pattern fits the work breakdown:
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
 - [ ] 7. Client-first documentation
-- [ ] 7.1 (P) README and install restructure
+- [x] 7.1 (P) README and install restructure
   - Restructure the README and installation docs to lead with the local story: download or build the binary, connect each harness to the spawned local mode, optionally configure a worker model for shunting, and present the server as the optional upgrade for cross-machine access, central audit and compliance, central operations, and multi-user bearer auth.
   - Document the local trust boundary and egress contract explicitly: no token, per-user store, the worker endpoint as the only outbound connection.
   - Validate the quickstart by following it as written against a fresh directory: every command runs and the efficiency layer works without the server.
   - Observable: the quickstart commands are executable exactly as documented and the docs present local-first with the server as optional.
   - _Boundary: README and install documentation_
   - _Requirements: 11.1, 11.4, 11.5_
-- [ ] 7.2 (P) Per-harness stdio examples and skill update
+- [x] 7.2 (P) Per-harness stdio examples and skill update
   - Add stdio connection examples for each supported harness (Claude Code CLI, Google Antigravity, OpenCode, Claude Desktop) beside the existing server examples, using the documented spawn-based stdio form.
   - Update the skill playbook so its tool guidance is connection-neutral (applies identically to local and serve mode), and verify it remains under its 200-token cap.
   - Re-check every example command against the implemented CLI surface once tasks 3.2 and 4.2 have landed.

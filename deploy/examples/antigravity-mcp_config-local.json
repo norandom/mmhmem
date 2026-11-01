@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mmhmem": {
+      "command": "mmhmem",
+      "args": ["stdio"]
+    }
+  }
+}

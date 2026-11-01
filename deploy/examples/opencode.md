@@ -29,6 +29,22 @@ See `opencode.json` next to this file. Fields:
 opencode mcp list       # mmhmem should be connected, not "needs authentication"
 ```
 
+## Local mode (no server; local-mode Req 1.2, 2.1, 2.5)
+
+OpenCode can spawn mmhmem directly as a stdio child — no token, no server,
+no network. Either CLI:
+
+```sh
+opencode mcp add mmhmem --global --command mmhmem --args stdio
+```
+
+or hand-edit `~/.config/opencode/opencode.json` using `opencode-local.json`
+next to this file: `type: "local"`, `command: ["mmhmem", "stdio"]`. The
+per-user store (`~/.local/share/mmhmem`, `%APPDATA%\mmhmem`, or
+`~/Library/Application Support/mmhmem` by OS) is created on first use and
+shared by every OpenCode (and other harness) session on the machine. Check
+savings with `mmhmem stats`.
+
 ## Playbook
 
 Point the agent instructions at the shipped playbook:

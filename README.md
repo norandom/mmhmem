@@ -1,17 +1,29 @@
 # mmhmem
 
-A self-hosted memory and I/O-optimization server for AI coding agents. One
-daemon gives Claude Code, Google Antigravity, OpenCode, and Claude Desktop a
+A self-hosted memory and I/O-optimization layer for AI coding agents. One
+binary gives Claude Code, Google Antigravity, OpenCode, and Claude Desktop a
 shared place to keep live session state, so you can switch tools mid-task
 without losing context, and so bulk file reads stop costing frontier-model
 tokens.
 
-mmhmem replaces per-tool memory plugins and their fragile client-side hooks
-with a single Linux service. Agents connect to one MCP endpoint (Streamable
-HTTP with a bearer token), a portable SKILL.md playbook teaches them the
-workflow, and every action the server takes lands in a redacted,
-hash-verified audit log that plain logrotate can rotate. No SaaS, no
-telemetry, no proxy between your agents and their model providers.
+mmhmem runs in two modes from the same binary:
+
+- **Local mode (the default install, no server).** Each harness spawns
+  `mmhmem stdio` as a child process. Zero configuration: no token, no
+  daemon, no network. One per-user store holds sessions, the shunt cache,
+  project memory, and token stats — every harness on the machine shares
+  it, so checkpointing in your terminal agent and resuming in your IDE
+  works with nothing installed in between. `mmhmem stats` shows your
+  savings any time.
+- **Serve mode (the optional upgrade).** One Linux daemon serves all the
+  same six tools over Streamable HTTP with bearer auth for cross-machine
+  access, central audit/compliance, central ops (logrotate, OTel), and
+  multi-user deployments.
+
+Agents connect through standard protocol-native interfaces; a portable
+SKILL.md playbook teaches them the workflow; every action lands in a
+redacted, hash-verified audit log. No SaaS, no telemetry, no proxy between
+your agents and their model providers.
 
 ## What you get
 
@@ -33,16 +45,54 @@ telemetry, no proxy between your agents and their model providers.
 
 | Component | Required | Notes |
 |---|---|---|
-| Linux host or Docker | one of the two | systemd on a Linux host, or any Docker host for the compose route |
-| mmhmem binary | yes | build with Rust (pinned in `rust-toolchain.toml`, `cargo build --release`) or let the multi-stage Dockerfile build it; the runtime image contains the binary and nothing else |
-| SQLite, runtimes, services | no | SQLite (WAL + FTS5) is compiled into the binary; there are no runtime dependencies |
+| mmhmem binary | yes | build with Rust (pinned in `rust-toolchain.toml`, `cargo build --release`) or grab a CI release artifact for Linux, Windows, or macOS; SQLite (WAL + FTS5) is compiled in, there are no runtime dependencies |
 | Worker model endpoint | optional | any OpenAI-compatible chat-completions endpoint (Ollama, vLLM, or an API key). Without it, shunting is off; session memory, project memory, and targeted reads all still work |
-| Reverse proxy | optional, recommended for TLS | the daemon serves plain HTTP; terminate TLS in front of it |
+| Linux host or Docker | only for serve mode | the local layer needs nothing but the binary; the server adds systemd on a Linux host, or any Docker host for the compose route |
+| Reverse proxy | optional, recommended for serve-mode TLS | the daemon serves plain HTTP; terminate TLS in front of it |
 | OpenObserve or any OTLP endpoint | optional | for OTel traces/metrics/logs and the logrotate batch ship of audit archives |
+
+## Quickstart: local mode (no server)
+
+Install the binary on your machine and point each harness at it — the
+harness spawns mmhmem per session:
+
+```sh
+claude mcp add --transport stdio --scope user mmhmem -- mmhmem stdio
+```
+
+That is the whole install for Claude Code; OpenCode, Antigravity, and
+Claude Desktop have equivalent one-liners in `deploy/examples/` (the
+`*-local` files). The per-user store is created on first use —
+`~/.local/share/mmhmem` on Linux, `%APPDATA%\mmhmem` on Windows,
+`~/Library/Application Support/mmhmem` on macOS. No environment variables
+are required; optional ones (worker model, data-dir override, audit
+rotation) are listed under Configure below.
+
+Check what the layer saved you:
+
+```sh
+mmhmem stats            # per day, project, and harness
+mmhmem stats --json     # machine-readable
+```
+
+Install the playbook once per machine (see Connect your agents), and
+you have the full efficiency layer without a server anywhere.
 
 ## Configure
 
-The daemon is env-only and fails fast at startup. Two variables are required:
+**Local mode is env-optional**: nothing is required. The per-user defaults
+cover a fresh machine; every variable is still honored when set.
+
+| Variable | Default (local) | Meaning |
+|---|---|---|
+| `AGENT_MEM_DATA_DIR` / `AGENT_MEM_LOG_FILE` | per-OS user dir / `<data dir>/audit.jsonl` | relocate the store or the audit file |
+| `AGENT_MEM_ALLOWED_ROOTS` | unset = unconfined | comma-separated workspace roots; when set, reads/writes are confined and denials are audited |
+| `AGENT_MEM_BUSY_TIMEOUT_MS` | `5000` | how long concurrent local processes wait for the shared store before erroring |
+| `AGENT_MEM_AUDIT_MAX_BYTES` / `AGENT_MEM_AUDIT_ROTATE_KEEP` | `10485760` / `5` | local audit rotation threshold and retention (no logrotate needed on user machines) |
+| `SHUNT_MIN_LINES` / `WORKER_API_URL` / `WORKER_MODEL` / `WORKER_API_KEY` | `150` / unset | the shunt threshold and worker model |
+
+**Serve mode is env-only and fails fast at startup.** Two variables are
+required:
 
 | Variable | Meaning |
 |---|---|
@@ -62,7 +112,12 @@ The ones most people touch next:
 The full annotated list is `.env.example` at the repo root. It doubles as
 the template for both install paths.
 
-## Install
+## Install the server (optional upgrade)
+
+Reach for serve mode when you need cross-machine access, central audit and
+compliance, central ops, or multiple users behind one bearer token. Both
+paths below start the same daemon (`mmhmem serve`, also the no-argument
+default).
 
 ### Path A: Docker Compose (fastest)
 
@@ -97,18 +152,19 @@ reads and writes inside those roots.
 
 ## Connect your agents
 
-Each harness needs the endpoint URL and the token. Ready-made snippets are
-in `deploy/examples/`:
+Local mode (spawned stdio child, no token) and serve mode (Streamable
+HTTP with bearer auth) both connect with ready-made snippets in
+`deploy/examples/`:
 
-| Harness | Example |
-|---|---|
-| Claude Code CLI | `deploy/examples/claude-code.md` |
-| Google Antigravity | `deploy/examples/antigravity-mcp_config.json` |
-| OpenCode | `deploy/examples/opencode.md` |
-| Claude Desktop | `deploy/examples/claude-desktop.md` |
-| Agent-side OTLP export to OpenObserve | `deploy/examples/agent-otel.md` |
+| Harness | Local mode (stdio) | Serve mode (HTTP) |
+|---|---|---|
+| Claude Code CLI | `claude mcp add --transport stdio --scope user mmhmem -- mmhmem stdio` | `deploy/examples/claude-code.md` |
+| OpenCode | `deploy/examples/opencode-local.json` | `deploy/examples/opencode.md` |
+| Google Antigravity | `deploy/examples/antigravity-mcp_config-local.json` | `deploy/examples/antigravity-mcp_config.json` |
+| Claude Desktop | `deploy/examples/claude-desktop.md` (local section) | `deploy/examples/claude-desktop.md` |
+| Agent-side OTLP export to OpenObserve | — | `deploy/examples/agent-otel.md` |
 
-For Claude Code it is one command:
+For Claude Code against a server it is one command:
 
 ```sh
 claude mcp add --transport http --scope user mmhmem \
@@ -130,11 +186,14 @@ The playbook is under 200 tokens and works in every supported harness; see
 
 ## Day-to-day operation
 
-- Liveness: `GET /healthz` (no auth) or `mmhmem healthcheck` from the host.
-- Audit: `/var/log/agent-memory/audit.jsonl` (or your `AGENT_MEM_LOG_FILE`).
-  One JSON line per action, every line self-verifying via its SHA-256
-  digest. Logrotate keeps 90 compressed days at 0640; a commented
-  `postrotate` block ships archives to OpenObserve if you want that.
+- Savings: `mmhmem stats` (human table) or `mmhmem stats --json`, from the
+  per-user store — no server needed.
+- Liveness (serve mode): `GET /healthz` (no auth) or `mmhmem healthcheck`
+  from the host.
+- Audit: serve mode writes `/var/log/agent-memory/audit.jsonl` (or your
+  `AGENT_MEM_LOG_FILE`) rotated by logrotate; local mode writes
+  `<data dir>/audit.jsonl` with built-in size rotation. One JSON line per
+  action, every line self-verifying via its SHA-256 digest.
 - State: one SQLite file under the data dir (sessions, breadcrumbs, shunt
   cache, observations, token stats). Back it up with any file-level tool.
 - Six MCP tools do the work: `session_resume_or_handoff`, `smart_read`,
@@ -148,7 +207,9 @@ and in GitHub Actions (`.github/workflows/ci.yml`): fmt, clippy with the
 complexity caps on both the default and the `otel` feature build, the full
 deterministic test suite, a release build, the Docker image with `--features
 otel`, compose-config validation, and pristine systemd/logrotate checks; a
-tokei LOC report is informational. An optional model-gated job
+tokei LOC report is informational. Windows and macOS jobs run the same
+blocking clippy and test suite plus release builds on native runners and
+upload the per-OS binaries as artifacts. An optional model-gated job
 (`E2E_LLM_ENABLED=true` plus worker and provider secrets) measures real
 token savings with an OpenCode harness, baseline versus mmhmem.
 
@@ -157,13 +218,21 @@ the same pipeline on the WSL build VM.
 
 ## Security model
 
-One bearer token, compared in constant time, required on every MCP request;
-`/healthz` is the only open route. Every agent-supplied path, including the
-`boilerplate_write` reference, is confined to `AGENT_MEM_ALLOWED_ROOTS`
-before anything is read or sent anywhere, and a reference outside the roots
-is rejected before a single byte reaches the worker model. The audit
-redaction filter scrubs key-assigned secrets, bearer headers, Slack tokens,
-and `<private>` spans before anything is written. The plain release binary
-makes no network calls except to the worker endpoint you configure; the
-optional OTel path is compiled only into the Docker image and stays inert
-until you point it at your own collector.
+**Local mode** is a spawned child inside your user session: it opens no
+network socket, requires no token (the harness that spawned it is the trust
+boundary), and stores everything under your user account. The only
+outbound connection is the optional worker model endpoint. The audit
+trail and redaction are identical to serve mode; `AGENT_MEM_ALLOWED_ROOTS`
+is optional but enforced when set, and every denial is audited.
+
+**Serve mode**: one bearer token, compared in constant time, required on
+every MCP request; `/healthz` is the only open route. Every agent-supplied
+path, including the `boilerplate_write` reference, is confined to
+`AGENT_MEM_ALLOWED_ROOTS` before anything is read or sent anywhere, and a
+reference outside the roots is rejected before a single byte reaches the
+worker model. The audit redaction filter scrubs key-assigned secrets,
+bearer headers, Slack tokens, and `<private>` spans before anything is
+written. The plain release binary makes no network calls except to the
+worker endpoint you configure; the optional OTel path is compiled only
+into the Docker image and stays inert until you point it at your own
+collector.

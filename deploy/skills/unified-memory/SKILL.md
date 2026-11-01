@@ -1,6 +1,6 @@
 ---
 name: unified-memory
-description: Playbook for the mmhmem cross-agent memory server — resume, smart reads, memory index, checkpoint.
+description: Playbook for mmhmem cross-agent memory (local or server) — resume, smart reads, memory index, checkpoint.
 ---
 
 1. **Resume first.** At session start call `session_resume_or_handoff` with your project name and harness to load working state and breadcrumbs.

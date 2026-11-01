@@ -1,12 +1,16 @@
 # Deploying mmhmem
 
-mmhmem is a single self-hosted daemon with env-only configuration. Two supported
-deployment shapes: systemd on a Linux host (default) or Docker Compose (repo
-root `Dockerfile` + `docker-compose.yml`, task 12.3).
+mmhmem is one self-hosted binary with env-only configuration. The local
+layer needs no deployment at all — the harness spawns `mmhmem stdio` per
+session against a per-user store (see the README "Quickstart: local mode").
+This page covers the SERVER deployment shapes: systemd on a Linux host
+(default) or Docker Compose (repo root `Dockerfile` + `docker-compose.yml`,
+task 12.3). The server is the optional upgrade for cross-machine access,
+central audit, and multi-user bearer auth.
 
-Required env vars (fail-fast at startup): `AGENT_MEM_TOKEN`,
-`AGENT_MEM_ALLOWED_ROOTS` (comma-separated). Everything else has defaults — see
-`.env.example` at the repo root for the full list.
+Server-required env vars (fail-fast at startup): `AGENT_MEM_TOKEN`,
+`AGENT_MEM_ALLOWED_ROOTS` (comma-separated). Everything else has defaults —
+see `.env.example` at the repo root for the full list.
 
 ## 1. systemd + logrotate (Linux host)
 
@@ -51,6 +55,8 @@ mount `rw` if you want `boilerplate_write` to write inside the container).
 
 ## 3. Connecting harnesses
 
-See `deploy/skills/unified-memory/SKILL.md` (the portable agent playbook) and
-`deploy/examples/` (Claude Code CLI, Google Antigravity, OpenCode, Claude
-Desktop, plus agent-side OTLP export to OpenObserve).
+See `deploy/skills/unified-memory/SKILL.md` (the portable agent playbook,
+identical for local and serve modes) and `deploy/examples/` (Claude Code
+CLI, Google Antigravity, OpenCode, Claude Desktop — each with a local
+stdio variant and a serve-mode HTTP variant — plus agent-side OTLP export
+to OpenObserve).

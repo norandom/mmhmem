@@ -19,6 +19,26 @@ an OpenAPI schema, so mmhmem sits behind your TLS reverse proxy:
 4. Enable the connector for chats that should share the mmhmem workspace
    project.
 
+## Local mode (no server; local-mode Req 1.2, 2.1, 2.5)
+
+Claude Desktop can also spawn mmhmem as a local stdio server via its
+developer config — no connector, no TLS proxy, no token. Edit
+`claude_desktop_config.json` (Settings → Developer → Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "mmhmem": { "command": "mmhmem", "args": ["stdio"] }
+  }
+}
+```
+
+Requirements: the `mmhmem` binary must be on the Desktop process's PATH
+(or use the absolute path to it). The per-user store is created on first
+use and shared with every other mmhmem-aware harness on the machine
+(`~/Library/Application Support/mmhmem` on macOS, `%APPDATA%\mmhmem` on
+Windows). Check savings with `mmhmem stats`.
+
 ## Playbook
 
 ```sh
