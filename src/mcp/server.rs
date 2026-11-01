@@ -21,24 +21,94 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
-use rmcp::model::InitializeResult;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use rmcp::{tool_handler, tool_router, ServerHandler};
 use subtle::ConstantTimeEq;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
+use crate::services::boilerplate::BoilerplateWriter;
+use crate::services::memory::MemoryService;
+use crate::services::session_bus::SessionBus;
+use crate::services::shunt::ShuntEngine;
+use crate::services::stats::{OtelSink, StatsCollector};
+use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter};
+use crate::storage::db::Db;
+use crate::telemetry::{self, Telemetry};
+
+/// Built service graph shared by all MCP sessions.
+#[derive(Clone)]
+pub struct Services {
+    /// Live cross-agent session bus.
+    pub bus: SessionBus,
+    /// Progressive-disclosure memory.
+    pub memory: MemoryService,
+    /// Token-savings stats collector (OTel sink wired when enabled).
+    pub stats: StatsCollector,
+    /// Read shunt engine (always present; worker may be absent, Req 9.4).
+    pub shunt: ShuntEngine,
+    /// Boilerplate writer (only when a worker model is configured).
+    pub boilerplate: Option<BoilerplateWriter>,
+}
 
 /// Shared application state handed to the MCP service factory and middleware.
-/// Services are attached in tasks 10.2/10.3/10.4.
 #[derive(Clone)]
 pub struct AppState {
     /// Effective env-only config.
     pub config: Config,
     /// Audit writer (the only write path to the audit log).
     pub audit: AuditWriter,
+    /// Optional OTel telemetry (task 9.1; no-op unless enabled).
+    pub telemetry: Arc<Telemetry>,
+    /// Service graph.
+    pub services: Services,
+}
+
+impl AppState {
+    /// Builds the full state from env-only config: opens storage, audit,
+    /// telemetry (inert without OTEL_EXPORTER_OTLP_ENDPOINT), and services.
+    pub fn build(config: Config) -> anyhow::Result<Self> {
+        let db = Db::open_for_config(&config)?;
+        let audit = AuditWriter::from_config(&config);
+        let telemetry = Arc::new(telemetry::init_from_config(&config));
+        let bus = SessionBus::new(db.clone(), audit.clone());
+        let memory = MemoryService::new(db.clone(), audit.clone(), Some(bus.clone()));
+        let stats = StatsCollector::with_sink(
+            db.clone(),
+            audit.clone(),
+            Arc::clone(&telemetry) as Arc<dyn OtelSink>,
+        );
+        let worker = WorkerClient::from_config(&config).ok();
+        let shunt = ShuntEngine::new(
+            db.clone(),
+            audit.clone(),
+            config.clone(),
+            Some(bus.clone()),
+            worker.clone(),
+        );
+        let boilerplate = worker.map(|w| {
+            BoilerplateWriter::new(
+                db.clone(),
+                audit.clone(),
+                &config,
+                Some(bus.clone()),
+                Some(w),
+            )
+        });
+        Ok(Self {
+            config,
+            audit,
+            telemetry,
+            services: Services {
+                bus,
+                memory,
+                stats,
+                shunt,
+                boilerplate,
+            },
+        })
+    }
 }
 
 /// The MCP service (one per session via the factory closure). Tools are
@@ -49,27 +119,9 @@ pub struct McpServer {
     pub state: Arc<AppState>,
 }
 
-// rmcp 3.x explicit pattern: empty tool router for now (tools land in tasks
-// 10.2/10.3), plus the ServerHandler impl via #[tool_handler].
-#[tool_router(allow_empty)]
-impl McpServer {}
-
-#[tool_handler]
-impl ServerHandler for McpServer {
-    fn get_info(&self) -> InitializeResult {
-        let mut info = InitializeResult::default();
-        info.server_info.name = "mmhmem".into();
-        info.server_info.version = env!("CARGO_PKG_VERSION").into();
-        info.instructions = Some(
-            "mmhmem: cross-agent memory + I/O shunt server. Call session_resume_or_handoff \
-             first; prefer smart_read over raw reads of large files (offset/limit for edits); \
-             search the memory index before fetching details; checkpoint before switching \
-             harnesses."
-                .into(),
-        );
-        info
-    }
-}
+// rmcp 3.x pattern: the tool router AND the ServerHandler impl (with
+// get_info) live together in tools.rs — the generated `tool_router` fn is
+// module-private in rmcp 3.x.
 
 /// Constant-time bearer-token comparison (design.md Security Considerations).
 fn token_matches(presented: &str, expected: &str) -> bool {

@@ -118,6 +118,7 @@ impl std::fmt::Display for BoilerplateError {
 impl std::error::Error for BoilerplateError {}
 
 /// The boilerplate write shunter (design.md BoilerplateWriter).
+#[derive(Clone)]
 pub struct BoilerplateWriter {
     db: Db,
     audit: AuditWriter,

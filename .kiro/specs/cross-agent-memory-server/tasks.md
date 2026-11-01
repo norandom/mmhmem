@@ -116,13 +116,13 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Depends: 1.3, 2.2_
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 1.1, 1.2, 1.3, 8.1, 13.3_
-- [ ] 10.2 Register the session and memory tools with thin handlers
+- [x] 10.2 Register the session and memory tools with thin handlers
   - Thin handlers for `session_resume_or_handoff`, `mem_search`, `mem_get_observations`, `mem_record_observation`: parse args, call services, format markdown, map errors to actionable MCP tool errors; every call appends a breadcrumb and an audit event; forwards the optional `client_usage` payload from the checkpoint into StatsCollector (the only place this wiring happens); no client hooks or proxies anywhere
   - Observable: over HTTP, harness A checkpoints and harness B resumes and sees the state + breadcrumbs; each call appears as a breadcrumb and an audit line
   - _Depends: 4.1, 7.1, 8.1_
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 1.4, 1.5, 2.4, 10.4, 13.3_
-- [ ] 10.3 Register the I/O tools (smart_read, boilerplate_write) with thin handlers
+- [x] 10.3 Register the I/O tools (smart_read, boilerplate_write) with thin handlers
   - Thin handlers for `smart_read` and `boilerplate_write` with the same breadcrumb/audit wrapper; wires the shunt and boilerplate avoided-token estimates into StatsCollector; error mapping per 3.8 / 4.3 / 6.3
   - Observable: over HTTP, `smart_read` returns the four outcomes and each produces the correct audit event type; `boilerplate_write` returns the one-line ack
   - _Depends: 3.1, 5.2, 6.1, 8.1_

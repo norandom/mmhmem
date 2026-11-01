@@ -80,6 +80,7 @@ pub struct CheckpointAck {
 }
 
 /// Live cross-agent session bus (design.md SessionBus).
+#[derive(Clone)]
 pub struct SessionBus {
     db: Db,
     audit: AuditWriter,
@@ -135,6 +136,19 @@ impl SessionBus {
                 "found_prior_session": row.is_some(),
             }),
         )?;
+        // Req 2.4: every tool invocation appends a breadcrumb (resume included).
+        let summary = format!("resumed session (prior: {last_harness})");
+        let crumb_project = project.clone();
+        let crumb_task = task_id.clone();
+        self.breadcrumb(
+            &crumb_project,
+            &crumb_task,
+            harness,
+            "session_resume_or_handoff",
+            Some(&crumb_project),
+            &summary,
+        )
+        .await?;
         Ok(ResumeView {
             task_id,
             objective,

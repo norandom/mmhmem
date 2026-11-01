@@ -53,6 +53,7 @@ struct ShuntAuditMeta<'a> {
 }
 
 /// The deterministic read-shunting engine (design.md ShuntEngine).
+#[derive(Clone)]
 pub struct ShuntEngine {
     db: Db,
     audit: AuditWriter,

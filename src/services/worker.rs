@@ -85,6 +85,7 @@ impl fmt::Display for WorkerError {
 impl std::error::Error for WorkerError {}
 
 /// Typed client for the OpenAI-compatible worker endpoint (Req 6.1).
+#[derive(Clone)]
 pub struct WorkerClient {
     client: reqwest::Client,
     url: String,

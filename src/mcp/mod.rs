@@ -6,4 +6,6 @@
 //! Dependency rule (steering structure.md "Import Organization"): `mcp` may
 //! import `services`, `storage`, `config`; never the reverse.
 
+pub mod params;
 pub mod server;
+pub mod tools;

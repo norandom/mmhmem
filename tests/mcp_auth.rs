@@ -5,12 +5,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN};
+use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN};
 use mmhmem::mcp::server::{router, AppState};
-use mmhmem::storage::audit::AuditWriter;
 
 fn test_state(token: &str) -> (tempfile::TempDir, tempfile::TempDir, Arc<AppState>) {
     let roots = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
     let logs = tempfile::tempdir().unwrap();
     let mut env: HashMap<String, String> = HashMap::new();
     env.insert(ENV_TOKEN.to_string(), token.to_string());
@@ -18,10 +18,14 @@ fn test_state(token: &str) -> (tempfile::TempDir, tempfile::TempDir, Arc<AppStat
         ENV_ALLOWED_ROOTS.to_string(),
         roots.path().display().to_string(),
     );
+    env.insert(ENV_DATA_DIR.to_string(), data.path().display().to_string());
+    env.insert(
+        ENV_LOG_FILE.to_string(),
+        logs.path().join("audit.jsonl").display().to_string(),
+    );
     let config = Config::from_env(&|k| env.get(k).cloned()).unwrap();
-    let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
-    let state = Arc::new(AppState { config, audit });
-    (roots, logs, state)
+    let state = Arc::new(AppState::build(config).unwrap());
+    (logs, roots, state)
 }
 
 async fn spawn_server(state: Arc<AppState>) -> (u16, tokio::task::JoinHandle<()>) {
@@ -38,7 +42,7 @@ const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"p
 
 #[tokio::test]
 async fn missing_or_wrong_token_is_401_and_audited() {
-    let (_r, logs, state) = test_state("secret-token");
+    let (logs, _r, state) = test_state("secret-token");
     let (port, _h) = spawn_server(state).await;
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/mcp");
@@ -62,7 +66,7 @@ async fn missing_or_wrong_token_is_401_and_audited() {
 
 #[tokio::test]
 async fn healthz_is_open_and_mcp_handshake_works_with_valid_token() {
-    let (_r, _l, state) = test_state("secret-token");
+    let (_logs, _r, state) = test_state("secret-token");
     let (port, _h) = spawn_server(state).await;
     let client = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");

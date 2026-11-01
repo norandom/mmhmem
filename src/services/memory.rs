@@ -114,6 +114,7 @@ impl<'a> RecordRequest<'a> {
 }
 
 /// The progressive-disclosure memory service (design.md MemoryService).
+#[derive(Clone)]
 pub struct MemoryService {
     db: Db,
     audit: AuditWriter,

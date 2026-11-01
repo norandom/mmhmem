@@ -133,6 +133,7 @@ impl OtelSink for NoopSink {}
 /// The stats collector (task 8.1): persists token_stats rows, audits them,
 /// and mirrors counters to the OTel sink. Server-side rows are estimates
 /// (labelled); client-reported rows carry the harness's true frontier totals.
+#[derive(Clone)]
 pub struct StatsCollector {
     db: Db,
     audit: AuditWriter,
