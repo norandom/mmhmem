@@ -31,7 +31,7 @@ Use whichever pattern fits the work breakdown:
 ## Tasks
 
 - [ ] 1. Foundation: local-mode configuration layer
-- [ ] 1.1 Per-OS user directory resolution
+- [x] 1.1 Per-OS user directory resolution
   - Resolve the per-user application-data location for each supported operating system from environment variables only (XDG data home with home-directory fallback on Linux, the standard Windows application-data variable, the macOS convention), joining the fixed `mmhmem` folder, with an injected-lookup design so tests never touch the real environment.
   - Fail fast with a clear configuration error naming the missing variable when the user-level location cannot be determined — never guess or fall back to a system path.
   - Provide the default local audit-file location derived from the data directory.

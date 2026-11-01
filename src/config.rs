@@ -10,6 +10,9 @@
 use std::fmt;
 use std::path::PathBuf;
 
+/// Per-OS per-user data-dir resolution for the local profile (Req 3.1).
+pub mod local_dirs;
+
 /// `AGENT_MEM_DATA_DIR` — durable state directory.
 pub const ENV_DATA_DIR: &str = "AGENT_MEM_DATA_DIR";
 /// `AGENT_MEM_LOG_FILE` — audit JSONL path.
@@ -110,6 +113,9 @@ pub enum ConfigError {
     InvalidPort(String),
     /// `SHUNT_MIN_LINES` is not a u32 > 0.
     InvalidShuntMinLines(String),
+    /// The per-user location variable (`HOME`/`APPDATA`) is unset or blank,
+    /// so the local profile cannot resolve its default data dir (Req 3.1).
+    MissingUserDirEnv(&'static str),
 }
 
 impl fmt::Display for ConfigError {
@@ -130,6 +136,11 @@ impl fmt::Display for ConfigError {
             ConfigError::InvalidShuntMinLines(raw) => {
                 write!(f, "{ENV_SHUNT_MIN_LINES}={raw:?} is not a valid shunt threshold (u32 > 0)")
             }
+            ConfigError::MissingUserDirEnv(var) => write!(
+                f,
+                "required per-user environment variable {var} is not set or empty \
+                 (the local profile resolves its default data dir from it)"
+            ),
         }
     }
 }
