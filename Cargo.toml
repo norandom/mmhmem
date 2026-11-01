@@ -10,8 +10,10 @@ publish = false
 # Cargo.lock is committed on top).
 [dependencies]
 # Official MCP Rust SDK; the Streamable HTTP server transport feature is
-# `transport-streamable-http-server` in rmcp 3.x.
-rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server"] }
+# `transport-streamable-http-server` in rmcp 3.x; `transport-io` adds the
+# stdio transport for local mode (local-mode Req 2.1; design.md
+# "Technology Stack").
+rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server", "transport-io"] }
 # Embedded SQLite (WAL + FTS5) compiled into the binary; no system libsqlite3.
 rusqlite = { version = "=0.41.1", features = ["bundled"] }
 # Async runtime.

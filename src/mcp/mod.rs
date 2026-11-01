@@ -8,4 +8,5 @@
 
 pub mod params;
 pub mod server;
+pub mod stdio;
 pub mod tools;

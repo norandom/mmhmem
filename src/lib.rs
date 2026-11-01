@@ -29,6 +29,8 @@ pub fn help_text() -> String {
          \n\
          USAGE:\n\
          \x20   {NAME} [FLAG]\n\
+         \x20   {NAME} serve\n\
+         \x20   {NAME} stdio\n\
          \x20   {NAME} healthcheck\n\
          \n\
          FLAGS:\n\
@@ -36,6 +38,10 @@ pub fn help_text() -> String {
          \x20   -V, --version    Print the version and exit\n\
          \n\
          COMMANDS:\n\
+         \x20   serve            Start the daemon (same as no argument)\n\
+         \x20   stdio            Local mode: serve MCP over stdin/stdout for\n\
+         \x20                    the spawning harness, using per-user paths and\n\
+         \x20                    no bearer token (AGENT_MEM_* optional)\n\
          \x20   healthcheck      Probe GET /healthz on the local daemon and exit 0 on\n\
          \x20                    HTTP 200 (container healthchecks; no curl in the image)\n\
          \n\

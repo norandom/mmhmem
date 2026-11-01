@@ -25,6 +25,11 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("healthcheck") => run_healthcheck(),
+        // `serve` is the explicit alias for today's no-argument daemon
+        // (Req 1.1); the no-arg path stays byte-identical (Req 9.3).
+        Some("serve") => run_daemon(),
+        // Local mode: the harness-spawned stdio child (Req 1.2, 2.1).
+        Some("stdio") => mmhmem::mcp::stdio::run_stdio(),
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }
