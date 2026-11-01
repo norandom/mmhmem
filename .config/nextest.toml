@@ -1,0 +1,7 @@
+# cargo-nextest configuration (task 14.1 will use this in CI too).
+# Tests run in separate processes, in parallel — much faster than
+# `cargo test`'s shared-process runner for this I/O-heavy suite.
+[profile.default]
+test-threads = "num-cpus"
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 2 }

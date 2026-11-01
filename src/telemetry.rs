@@ -88,7 +88,7 @@ mod imp {
         }
 
         /// Force-flush + shutdown all providers (graceful shutdown, task 10.4).
-        pub fn shutdown(self) {
+        pub fn shutdown(&self) {
             if let Some(p) = self.tracer_provider {
                 let _ = p.shutdown();
             }
@@ -292,7 +292,7 @@ mod imp {
         }
 
         /// No-op shutdown.
-        pub fn shutdown(self) {}
+        pub fn shutdown(&self) {}
     }
 
     impl OtelSink for Telemetry {}

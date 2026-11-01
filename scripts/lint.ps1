@@ -35,13 +35,31 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host '    PASS: cargo fmt --check' -ForegroundColor Green
 }
 
-Write-Host '==> [2/2] cargo clippy --all-targets -- -D warnings (clippy.toml caps: CC <= 10, cognitive <= 15)'
+Write-Host '==> [2/3] cargo clippy --all-targets -- -D warnings (clippy.toml caps cognitive complexity <= 15)'
 cargo clippy --all-targets -- -D warnings
 if ($LASTEXITCODE -ne 0) {
     $failed = $true
     Write-Host '    FAIL: cargo clippy --all-targets -- -D warnings' -ForegroundColor Red
 } else {
     Write-Host '    PASS: cargo clippy --all-targets -- -D warnings' -ForegroundColor Green
+}
+
+Write-Host '==> [3/3] tests via cargo nextest run (falls back to cargo test)'
+# A stale daemon process from an interrupted run holds target\debug\mmhmem.exe
+# and blocks the build — reap any stale ones first.
+Get-Process mmhmem -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+$nextest = Get-Command cargo-nextest -ErrorAction SilentlyContinue
+if ($null -ne $nextest) {
+    cargo nextest run
+} else {
+    Write-Host '    cargo-nextest not installed; falling back to cargo test'
+    cargo test
+}
+if ($LASTEXITCODE -ne 0) {
+    $failed = $true
+    Write-Host '    FAIL: tests' -ForegroundColor Red
+} else {
+    Write-Host '    PASS: tests' -ForegroundColor Green
 }
 
 # Informational size report (Req 13.5): tokei is a dev tool only and never a

@@ -128,7 +128,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Depends: 3.1, 5.2, 6.1, 8.1_
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 1.4, 3.8, 4.3, 6.3, 13.3_
-- [ ] 10.4 Wire the daemon entrypoint end to end
+- [x] 10.4 Wire the daemon entrypoint end to end
   - Config → storage init → services → tool registration → server run; starts with only token + allowed roots set, no worker needed; wires the StatsCollector OTel sink to the real Telemetry when the feature is enabled; graceful SIGTERM shutdown
   - Observable: `cargo run` boots, `/healthz` returns 200, authenticated MCP works end to end, audit lines are written, clean shutdown on SIGTERM
   - _Depends: 10.1, 10.2, 10.3_
@@ -212,3 +212,4 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
 - `Cargo.lock` is a generated lockfile and is excluded from the Req 13.4 non-test LOC cap; hand-written diffs are what count.
 - clippy 0.1.98 / rustc 1.98.1: the `cyclomatic_complexity` lint is a deprecated alias of `cognitive_complexity` (two-key clippy.toml aborts with "duplicate field"). Enforce the McCabe-style cap via `cognitive-complexity-threshold = 15` in clippy.toml plus `[lints.clippy] cognitive-complexity = "warn"` in Cargo.toml so `-D warnings` blocks. Req 13.1 amended accordingly (2026-11-01).
 - `tokei` is not installed on this host; scripts/lint.ps1 prints a skip note and CI (task 14.1) should install it for the informational LOC report. Never a runtime dependency (Req 13.5).
+- Tests run via `cargo nextest run` (cargo-nextest 0.9.150 installed in ~/.cargo/bin; config in .config/nextest.toml; per-process parallel — much faster than `cargo test` for this I/O-heavy suite). scripts/lint.ps1 gate step 3 uses nextest with a cargo test fallback. Beware long compile times: avoid `cargo clean`; build once, then iterate with nextest.
