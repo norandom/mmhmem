@@ -135,38 +135,38 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 8.1, 9.3, 9.4, 13.3_
 
-- [ ] 11. Validation: deterministic integration and security tests (worker stubbed, no model access)
-- [ ] 11.1 Shared ephemeral-port test harness + session handoff E2E tests
+- [x] 11. Validation: deterministic integration and security tests (worker stubbed, no model access)
+- [x] 11.1 Shared ephemeral-port test harness + session handoff E2E tests
   - Common harness (ephemeral port, temp data dir, test token, stub worker); E2E: resume → work → checkpoint → resume in a second harness; automatic breadcrumb append; 6,000-char truncation; zero-LLM handoff
   - Observable: the full handoff flow is green over real HTTP
   - _Depends: 10.4_
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
-- [ ] 11.2 smart_read four-stage, cache, and invalidation tests
+- [x] 11.2 smart_read four-stage, cache, and invalidation tests
   - Targeted slice, below-threshold direct, security bypass with audited reason, cache hit (identical summary, zero worker calls, < 50 ms), content-change invalidation, missing-file error, threshold env default 150
   - Observable: all stages green against the stub worker; the cache-hit test asserts worker call count 0 and latency < 50 ms
   - _Depends: 10.4_
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 9.2_
-- [ ] 11.3 boilerplate_write round-trip tests
+- [x] 11.3 boilerplate_write round-trip tests
   - Worker stub returns fenced code; assert fence stripping, file on disk with matching SHA-256, one-line ack, audit + breadcrumb; missing reference → error with no write
   - Observable: round-trip green; the missing-reference test writes nothing
   - _Depends: 10.4_
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
-- [ ] 11.4 memory search/get/record tests
+- [x] 11.4 memory search/get/record tests
   - Record → immediately searchable; compact index rows only; type filter; no-match message; batch get by validated IDs; FTS quote-injection attempt safe; index search < 15 ms
   - Observable: the mem cycle is green; the search-latency assert passes
   - _Depends: 10.4_
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
-- [ ] 11.5 audit redaction and record-integrity tests
+- [x] 11.5 audit redaction and record-integrity tests
   - Every redaction pattern class never appears in the raw log bytes; `<private>` spans scrubbed; every audit line parses as JSON and its `record_sha256` verifies
   - Observable: the audit suite is green; a planted secret is provably absent from the log file bytes
   - _Depends: 10.4_
   - Test file ≤ 800 LOC (13.3)
   - _Requirements: 7.1, 7.2, 7.3_
-- [ ] 11.6 security, concurrency, and performance tests
+- [x] 11.6 security, concurrency, and performance tests
   - Path traversal rejected + audited; boilerplate reference outside allowed roots rejected with zero bytes to the worker; wrong bearer token rejected; concurrent harness sessions with no state corruption; cached read/resume < 50 ms; worker endpoint down → explicit error + WORKER_ERROR audit
   - Observable: all green; the concurrency test runs N parallel sessions and asserts final state consistency
   - _Depends: 10.4_

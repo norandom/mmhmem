@@ -33,7 +33,7 @@ impl ServerHandler for McpServer {
         info
     }
 }
-use crate::services::boilerplate::{BoilerplateError, WriteRequest};
+use crate::services::boilerplate::WriteRequest;
 use crate::services::memory::{RecordRequest, SearchRequest};
 use crate::services::session_bus::ClientUsage;
 use crate::services::shunt::ReadOutcome;
@@ -145,9 +145,7 @@ impl McpServer {
             &p.agent_harness,
             &p.project,
             || async {
-                let Some(bp) = &state.services.boilerplate else {
-                    return Err(err(BoilerplateError::WorkerNotConfigured));
-                };
+                let bp = &state.services.boilerplate;
                 let req = WriteRequest {
                     project: &p.project,
                     harness: &p.agent_harness,

@@ -48,8 +48,9 @@ pub struct Services {
     pub stats: StatsCollector,
     /// Read shunt engine (always present; worker may be absent, Req 9.4).
     pub shunt: ShuntEngine,
-    /// Boilerplate writer (only when a worker model is configured).
-    pub boilerplate: Option<BoilerplateWriter>,
+    /// Boilerplate writer (always present; worker may be unconfigured, Req 9.4 —
+    /// confinement still runs before the worker check).
+    pub boilerplate: BoilerplateWriter,
 }
 
 /// Shared application state handed to the MCP service factory and middleware.
@@ -87,15 +88,13 @@ impl AppState {
             Some(bus.clone()),
             worker.clone(),
         );
-        let boilerplate = worker.map(|w| {
-            BoilerplateWriter::new(
-                db.clone(),
-                audit.clone(),
-                &config,
-                Some(bus.clone()),
-                Some(w),
-            )
-        });
+        let boilerplate = BoilerplateWriter::new(
+            db.clone(),
+            audit.clone(),
+            &config,
+            Some(bus.clone()),
+            worker,
+        );
         Ok(Self {
             config,
             audit,
