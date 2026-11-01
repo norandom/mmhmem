@@ -14,16 +14,17 @@ committed and pushed; the working tree is clean.
   hard-won gotchas), `breath.toml` (scope guard), `research.md`, `handover.md`.
 - Steering: `.kiro/steering/{product,tech,structure}.md`.
 
-## Status
+## Status (session end 2026-11-01 ~18:30 UTC, HEAD 920e68d + status commit)
 
 Tasks **1.1–1.3, 2.1–2.2, 3.1, 4.1, 5.1–5.2, 6.1, 7.1, 8.1, 9.1, 10.1–10.4, 11.1–11.6**
-are done, committed, pushed, and marked `[x]` in `tasks.md`.
+are done, committed, pushed, and marked `[x]` in `tasks.md` (24 sub-tasks;
+major headers 1–11 also `[x]`).
 **Remaining: 12.1–12.3 (deploy artifacts: systemd+logrotate, SKILL.md+examples,
 Dockerfile+compose+.env.example), 13.1 (E2E measurement suite, E2E_LLM=1),
 14.1 (CI).** After those: `/kiro-validate-impl cross-agent-memory-server`
 then `kiro-verify-completion` for the FEATURE_GO claim.
 
-Validation is green right now: **93/93 tests pass** via nextest in ~5 s;
+Validation is green: **93/93 tests pass** via nextest in ~4–6 s;
 `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean
 (cognitive-complexity ≤ 15 gate active via `clippy.toml` + `[lints.clippy]`).
 

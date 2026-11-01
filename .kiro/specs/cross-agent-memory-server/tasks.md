@@ -4,7 +4,7 @@ Scope guard: `breath.toml` in this directory is the feature map — only listed 
 
 Every implementation task carries the Req 13 complexity caps in its acceptance criteria (13.6): non-test diff ≤ 400 lines (13.4); cyclomatic complexity ≤ 10 and cognitive complexity ≤ 15 per function (13.1–13.2, enforced via `clippy.toml` + `-D warnings`); ≤ 500 LOC per `src/` file and ≤ 80 LOC per function (13.3). Test files are capped at 800 LOC.
 
-- [ ] 1. Foundation: build scaffolding, lint gate, and env-only configuration
+- [x] 1. Foundation: build scaffolding, lint gate, and env-only configuration
 - [x] 1.1 Create the Rust crate manifest and pinned toolchain
   - Pin all runtime dependencies (rmcp with Streamable HTTP server transport, rusqlite `bundled`, tokio, reqwest, serde/serde_json, sha2, subtle, regex, time, anyhow, tracing; dev-only tempfile) with an optional `otel` cargo feature held off by default; pin the stable toolchain; commit `Cargo.lock`; provide a minimal entrypoint
   - Observable: `cargo build --release` succeeds and the binary runs; the plain build contains no OTel code path
@@ -20,7 +20,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 3.9, 6.1, 7.5, 8.1, 11.1, 13.3_
 
-- [ ] 2. Foundation: durable storage (schema, WAL connection, audit writer)
+- [x] 2. Foundation: durable storage (schema, WAL connection, audit writer)
 - [x] 2.1 Implement the SQLite schema and concurrency-safe connection
   - All tables: active_sessions, session_breadcrumbs + index, observations + FTS5 external-content table + AFTER INSERT trigger, shunt_file_cache, token_stats + index; WAL + synchronous NORMAL; idempotent startup migrations via `PRAGMA user_version`; single connection behind a mutex serviced via `spawn_blocking`; the lock is never held across an `.await`
   - Observable: a fresh data dir initializes all tables; the `SELECT fts5(?)` smoke query works; an inserted observation is FTS-searchable immediately
@@ -33,7 +33,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file, ≤ 80 LOC per function (13.3)
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 3.3, 6.3, 6.4, 10.1, 13.3_
 
-- [ ] 3. Core: worker model client
+- [x] 3. Core: worker model client
 - [x] 3.1 Build the typed OpenAI-compatible worker client
   - Configurable URL/model/API key, temperature 0, 30 s read / 45 s write timeouts, explicit errors (never stale-or-empty-as-fresh), WORKER_ERROR audit event plus worker model name and round-trip latency recorded, returns the worker `usage` prompt/completion token counts; lazy — never touched on cache-hit, direct-read, or session paths
   - Tests against a local stub endpoint: success returns summary + usage; dead endpoint returns a clear error
@@ -43,7 +43,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 3.5, 4.1, 9.4, 10.2, 13.3_
 
-- [ ] 4. Core: live cross-agent session bus
+- [x] 4. Core: live cross-agent session bus
 - [x] 4.1 (P) Implement session resume, checkpoint, and automatic breadcrumbs
   - Resume returns working state + last active harness + objective + the 15 most recent breadcrumbs; checkpoint upserts by project/task; a new task ID is initialized when no session exists; breadcrumb API for every tool call; working state capped at 6,000 chars (1,500 tokens at ~4 chars/token) truncated at the last complete line; handoff performs zero LLM calls; the checkpoint accepts the optional client-reported frontier usage payload and returns it in the ack — SessionBus does NOT call StatsCollector and does NOT write token_stats; forwarding into StatsCollector (8.1) happens only in the 10.2 wiring
   - Unit tests for each behavior incl. the truncation boundary
@@ -53,7 +53,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 10.4, 13.3_
 
-- [ ] 5. Core: deterministic read shunting (smart_read)
+- [x] 5. Core: deterministic read shunting (smart_read)
 - [x] 5.1 (P) Implement the four-stage read evaluation with path confinement
   - Targeted offset/limit slice with exact `L<n>:` numbering (never delegated); below-threshold direct read; security-critical path regex bypass (case-insensitive) with the bypass reason audited; canonicalize + allowed-roots confinement (reject + audit); missing-file error; unit tests per stage plus traversal attempts
   - Observable: an offset/limit read returns exactly the requested lines; an auth-path file returns full content with `bypass_reason` in the audit; a path outside the allowed roots is rejected and audited
@@ -70,7 +70,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 3.4, 3.5, 3.6, 3.7, 9.2, 10.1, 13.3_
 
-- [ ] 6. Core: boilerplate write shunting
+- [x] 6. Core: boilerplate write shunting
 - [x] 6.1 (P) Implement boilerplate generation written straight to disk
   - Reference + spec sent to the worker ("follow the reference file's conventions, output only raw source code"); strip markdown fences; create parent dirs; write to the target; one-line ack with output SHA-256, line count, worker model, latency; target AND reference canonicalized + confined to allowed roots (reference outside roots → reject + audit with zero bytes sent to the worker); missing reference → error, no write; audit + breadcrumb on success; avoided input/output estimate forwarded to StatsCollector (8.1/10.3)
   - Unit/integration tests incl. fence stripping and reference-outside-roots rejection
@@ -80,7 +80,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 10.1, 13.3_
 
-- [ ] 7. Core: progressive-disclosure long-term memory
+- [x] 7. Core: progressive-disclosure long-term memory
 - [x] 7.1 (P) Implement memory search, batch detail fetch, and recording
   - `mem_search`: double-quote-escaped quoted-phrase FTS5 query, compact index rows (ID, type, harness, title, files touched), type filter, clear no-match message, < 15 ms; `mem_get_observations`: full narrative/facts/files for validated IDs only; `mem_record_observation`: durable insert immediately searchable via the trigger, redacted before persist; FTS-injection unit test
   - Observable: record → immediate search hit; search returns index rows only; get-by-ID returns the full narrative; quote injection does not break the query
@@ -89,7 +89,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 7.1, 13.3_
 
-- [ ] 8. Core: token-savings statistics
+- [x] 8. Core: token-savings statistics
 - [x] 8.1 (P) Implement the stats collector
   - Per-event estimates (delegated read: (raw chars − returned chars) ÷ 4; cache hit: raw chars ÷ 4; code write: (reference + generated chars) ÷ 4); captures worker usage; writes `token_stats` rows keyed (project, task, harness, ts, kind) plus TOKEN_STATS / TOKEN_STATS_CLIENT audit events; persists `client_reported` rows forwarded from the session bus; estimates labelled as estimates, client values labelled by source, nothing invented; OTel counters go through an injected sink that defaults to a no-op and is wired to the real Telemetry (9.1) in 10.4 — no direct dependency on 9.1 here
   - Unit tests for the arithmetic per kind and the labelling
@@ -99,7 +99,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 11.3, 13.3_
 
-- [ ] 9. Core: optional OTel telemetry (cargo feature `otel`)
+- [x] 9. Core: optional OTel telemetry (cargo feature `otel`)
 - [x] 9.1 (P) Implement the feature-gated OTLP exporter
   - Inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set; spans around each MCP tool call (tool, harness, project, outcome, latency); metrics (tool latency histogram, shunt cache hit rate, tokens-avoided counters, worker token counters); redacted audit log records exported; every payload passes the audit redaction filter; no other egress; the Docker image builds with `--features otel`, the plain release does not
   - Tests: with the endpoint unset, a local listener confirms zero OTLP traffic; with a local OTLP stub, one tool call produces a redacted span
@@ -109,7 +109,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file (13.3)
   - _Requirements: 11.1, 11.2, 11.3, 8.5, 13.3_
 
-- [ ] 10. Integration: MCP server, bearer auth, six tool handlers, entrypoint
+- [x] 10. Integration: MCP server, bearer auth, six tool handlers, entrypoint
 - [x] 10.1 Implement the Streamable HTTP MCP server with bearer auth
   - Configurable path (default `/mcp`) and port (default 8443); every request requires `Authorization: Bearer` compared in constant time; failures → HTTP 401 before tool dispatch and audited; unauthenticated `GET /healthz` → 200 for container healthchecks; graceful shutdown on SIGTERM; HTTP integration tests (no/wrong token → 401; valid token → MCP initialize succeeds)
   - Observable: `curl` without a token returns 401; with a token the MCP handshake completes; `/healthz` returns 200 unauthenticated
@@ -213,3 +213,4 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
 - clippy 0.1.98 / rustc 1.98.1: the `cyclomatic_complexity` lint is a deprecated alias of `cognitive_complexity` (two-key clippy.toml aborts with "duplicate field"). Enforce the McCabe-style cap via `cognitive-complexity-threshold = 15` in clippy.toml plus `[lints.clippy] cognitive-complexity = "warn"` in Cargo.toml so `-D warnings` blocks. Req 13.1 amended accordingly (2026-11-01).
 - `tokei` is not installed on this host; scripts/lint.ps1 prints a skip note and CI (task 14.1) should install it for the informational LOC report. Never a runtime dependency (Req 13.5).
 - Tests run via `cargo nextest run` (cargo-nextest 0.9.150 installed in ~/.cargo/bin; config in .config/nextest.toml; per-process parallel — much faster than `cargo test` for this I/O-heavy suite). scripts/lint.ps1 gate step 3 uses nextest with a cargo test fallback. Beware long compile times: avoid `cargo clean`; build once, then iterate with nextest.
+- Session ended 2026-11-01 ~18:30 UTC with tasks 1.1–11.6 done (93/93 tests green, all pushed to origin/main). See handover.md in this directory for the full resume guide. Remaining: 12.1–12.3, 13.1, 14.1, then /kiro-validate-impl + kiro-verify-completion.
