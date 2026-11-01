@@ -81,7 +81,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 10.1, 13.3_
 
 - [ ] 7. Core: progressive-disclosure long-term memory
-- [ ] 7.1 (P) Implement memory search, batch detail fetch, and recording
+- [x] 7.1 (P) Implement memory search, batch detail fetch, and recording
   - `mem_search`: double-quote-escaped quoted-phrase FTS5 query, compact index rows (ID, type, harness, title, files touched), type filter, clear no-match message, < 15 ms; `mem_get_observations`: full narrative/facts/files for validated IDs only; `mem_record_observation`: durable insert immediately searchable via the trigger, redacted before persist; FTS-injection unit test
   - Observable: record → immediate search hit; search returns index rows only; get-by-ID returns the full narrative; quote injection does not break the query
   - _Boundary: MemoryService_
