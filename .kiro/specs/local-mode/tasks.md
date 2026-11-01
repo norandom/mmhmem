@@ -83,6 +83,11 @@ Use whichever pattern fits the work breakdown:
   - Update the help text to document both subcommands additively, without altering existing lines' meaning.
   - Observable: `mmhmem --help` lists serve, stdio, and healthcheck; `mmhmem serve` starts the daemon; `mmhmem stdio` starts local mode; the existing CLI tests pass unmodified.
   - _Requirements: 1.1, 1.2, 1.4, 9.3_
+- [ ] 3.3 Stdio integration tests
+  - Spawn the real binary as a local-mode child process with piped standard input/output and drive the MCP handshake with hand-rolled JSON-RPC lines (no new dev-dependencies).
+  - Verify the full local contract: the initialize handshake answers with the serve-mode identity and tool surface; all six tools are listed; a direct read works with no worker configured; a read that requires shunting without a worker returns the clear worker-unconfigured error; a malformed input line is logged to standard error and the process keeps serving subsequent valid requests; closing standard input ends the process with exit code 0; standard output carries only protocol frames with all diagnostics on standard error.
+  - Observable: the stdio integration suite passes against the real binary, proving resilience to malformed input and clean EOF shutdown.
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6, 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 4. Core: token-savings statistics command
 - [ ] 4.1 Read-only stats aggregation and rendering
