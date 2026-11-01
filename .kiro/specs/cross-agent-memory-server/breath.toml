@@ -1,0 +1,44 @@
+# breath.toml — scope guard ("feature map") for the cross-agent-memory-server spec.
+#
+# Rule: if a feature is not listed under [features.in], it is OUT of scope.
+# Editing this file is the only way to change scope. Every [features.out] entry
+# records what was rejected and why, so feature creep is a deliberate decision,
+# not an accident.
+
+[meta]
+spec = "cross-agent-memory-server"
+feature = "mmhmem"
+updated = "2026-11-01"
+language = "en"
+
+[features.in]
+# Core server (Requirements 1-9)
+mcp_surface       = "Six tools over MCP Streamable HTTP with Bearer auth (Req 1)"
+session_bus       = "Live cross-agent handoff, automatic breadcrumbs, 6000-char / 1500-token cap (Req 2)"
+shunt_read        = "smart_read four-stage evaluation, security-critical bypass, SHA-256 content-addressed cache (Req 3)"
+boilerplate_write = "Worker-generated code written straight to confined paths (Req 4)"
+memory_fts        = "Progressive-disclosure FTS5 long-term memory: mem_search / mem_get_observations / mem_record_observation (Req 5)"
+worker_client     = "Configurable OpenAI-compatible worker endpoint, temperature 0, explicit timeouts (Req 6)"
+audit_jsonl       = "Redacted, hash-verified, append-only JSONL audit trail, logrotate-safe (Req 7)"
+deploy_systemd    = "systemd unit, logrotate config, SKILL.md playbook, example harness connection configs (Req 8)"
+nfr               = "Concurrency safety, <50 ms cached paths, local-only durable state (Req 9)"
+# Added 2026-11-01
+deploy_docker     = "Multi-stage Dockerfile whose runtime image contains ONLY the dedicated mmhmem binary (non-root) + docker-compose.yml (Req 8.6-8.7)"
+token_stats       = "Per-harness / per-task token-savings statistics over time: server-computed estimates + optional client-reported deltas in checkpoint args; token_stats table, audit events, OTel metrics (Req 10)"
+otel_optional     = "Optional OTLP export (spans/metrics/logs) to a self-hosted OpenObserve; cargo feature, off by default; JSONL audit stays system of record (Req 11)"
+data_lifecycle    = "Documented map of what data passes the server and which logs/traces remain on disk, with retention (Req 11.4)"
+e2e_measurement   = "End-to-end measurement suite: compose stack + scripted OpenCode (Mistral) sessions on a fixture repo, baseline vs mmhmem; asserts MEASURED token savings from harness-reported usage (Req 12)"
+complexity_caps   = "McCabe-style caps enforced by CI and baked into every implementation task's acceptance criteria: CC <= 10 and cognitive complexity <= 15 per function (clippy + clippy.toml, -D warnings), <= 500 LOC per src file, <= 80 LOC per function, <= 400 non-test LOC per task (Req 13)"
+
+[features.out]
+prompt_injection_scanning = "Rejected 2026-11-01: the main injection channels (native reads, web fetches, bash output) never transit the server, so server-side scanning is mostly blind; the hash-verified audit trail remains the forensic record. Keep the project focused."
+client_sdk_or_hooks       = "No client code and no hooks. Harnesses use native MCP + SKILL.md; client-reported token deltas ride inside checkpoint args only."
+web_ui_viewer             = "No viewer UI of any kind"
+realtime_siem             = "Batch ship of rotated logs only"
+clustering_replication    = "Single-host daemon; multi-host sync is future work"
+tls_in_binary             = "TLS terminates at a reverse proxy, not in the binary"
+worker_hosting            = "mmhmem only calls the worker endpoint; it never hosts a model"
+forking_claude_mem        = "No forking/patching existing memory plugins"
+prompt_level_audit        = "Server never sees prompts or native tool I/O; harness-side logging is the harness's own business"
+multi_token_oauth         = "Single bearer token; per-client tokens are future work"
+query_tool_for_stats      = "No extra MCP tool to read stats; stats are read from token_stats / audit JSONL / OTel (avoid growing the tool surface)"
