@@ -90,7 +90,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 7.1, 13.3_
 
 - [ ] 8. Core: token-savings statistics
-- [ ] 8.1 (P) Implement the stats collector
+- [x] 8.1 (P) Implement the stats collector
   - Per-event estimates (delegated read: (raw chars − returned chars) ÷ 4; cache hit: raw chars ÷ 4; code write: (reference + generated chars) ÷ 4); captures worker usage; writes `token_stats` rows keyed (project, task, harness, ts, kind) plus TOKEN_STATS / TOKEN_STATS_CLIENT audit events; persists `client_reported` rows forwarded from the session bus; estimates labelled as estimates, client values labelled by source, nothing invented; OTel counters go through an injected sink that defaults to a no-op and is wired to the real Telemetry (9.1) in 10.4 — no direct dependency on 9.1 here
   - Unit tests for the arithmetic per kind and the labelling
   - Observable: one delegated read produces a `shunt_delegated` row with `avoided_input_tokens_est > 0` and worker token counts; a checkpoint carrying client usage produces a `client_reported` row

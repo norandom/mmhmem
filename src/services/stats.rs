@@ -1,13 +1,17 @@
-//! Token-savings statistics primitives (introduced in task 5.2 for the shunt
-//! path; extended in task 8.1 with client_reported rows and OTel counters).
+//! Token-savings statistics (task 5.2 primitives; task 8.1 collector).
 //! requirements.md Req 10.1-10.5; design.md "Data Models" token_stats.
 //!
 //! The server never sees the frontier API, so server-side numbers are
 //! ESTIMATES at ~4 chars/token (Req 10.5): avoided frontier input tokens.
 //! True frontier counts arrive only as client_reported deltas (Req 10.4).
+//! OTel counters go through the injected [`OtelSink`] (no-op by default; the
+//! real exporter is task 9.1 behind the `otel` cargo feature, wired in 10.4).
 
 use serde_json::Value;
 
+use crate::services::session_bus::ClientUsage;
+use crate::services::shunt_types::CallCtx;
+use crate::storage::audit::{AuditEventType, AuditWriter};
 use crate::storage::db::Db;
 
 /// `token_stats.kind` values.
@@ -109,9 +113,121 @@ pub fn estimate_code_write(reference_chars: usize, generated_chars: usize) -> (u
     )
 }
 
+/// OTel sink for stats counters (Req 11.3). No-op unless the `otel` feature
+/// exporter (task 9.1) is wired in task 10.4.
+pub trait OtelSink: Send + Sync {
+    /// Tokens-avoided counters.
+    fn incr_tokens_avoided(&self, _input_est: u64, _output_est: u64) {}
+    /// Worker token counters.
+    fn incr_worker_tokens(&self, _prompt: u64, _completion: u64) {}
+    /// Shunt cache hit/miss counter.
+    fn incr_cache(&self, _hit: bool) {}
+}
+
+/// Default no-op sink (OTel disabled).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopSink;
+
+impl OtelSink for NoopSink {}
+
+/// The stats collector (task 8.1): persists token_stats rows, audits them,
+/// and mirrors counters to the OTel sink. Server-side rows are estimates
+/// (labelled); client-reported rows carry the harness's true frontier totals.
+pub struct StatsCollector {
+    db: Db,
+    audit: AuditWriter,
+    sink: std::sync::Arc<dyn OtelSink>,
+}
+
+impl StatsCollector {
+    /// New collector with the no-op sink.
+    pub fn new(db: Db, audit: AuditWriter) -> Self {
+        Self {
+            db,
+            audit,
+            sink: std::sync::Arc::new(NoopSink),
+        }
+    }
+
+    /// New collector with a custom OTel sink (wired in 10.4 when `otel` is on).
+    pub fn with_sink(db: Db, audit: AuditWriter, sink: std::sync::Arc<dyn OtelSink>) -> Self {
+        Self { db, audit, sink }
+    }
+
+    /// Persists a server-side (estimate) row: token_stats insert + TOKEN_STATS
+    /// audit + sink counters (Req 10.1-10.3).
+    pub async fn record_estimate(&self, row: TokenStatRow) -> anyhow::Result<()> {
+        let kind = row.kind;
+        let avoided_in = row.avoided_input_tokens_est;
+        let avoided_out = row.avoided_output_tokens_est;
+        let (wp, wc) = (row.worker_prompt_tokens, row.worker_completion_tokens);
+        let harness = row.harness.clone();
+        let project = row.project.clone();
+        let details = row.details.clone();
+        record(&self.db, row).await?;
+        let _ = self.audit.write_event(
+            AuditEventType::TokenStats,
+            &harness,
+            &project,
+            serde_json::json!({
+                "kind": kind, "avoided_input_tokens_est": avoided_in,
+                "avoided_output_tokens_est": avoided_out,
+                "worker_prompt_tokens": wp, "worker_completion_tokens": wc,
+                "label": "estimate", "details": details,
+            }),
+        );
+        self.sink.incr_tokens_avoided(avoided_in, avoided_out);
+        if let (Some(p), Some(c)) = (wp, wc) {
+            self.sink.incr_worker_tokens(p, c);
+        }
+        if kind == kind::SHUNT_CACHE_HIT {
+            self.sink.incr_cache(true);
+        } else if kind == kind::SHUNT_DELEGATED {
+            self.sink.incr_cache(false);
+        }
+        Ok(())
+    }
+
+    /// Persists a client-reported frontier usage delta (Req 10.4): stored
+    /// with kind=client_reported and audited as TOKEN_STATS_CLIENT; labelled
+    /// with its source; never required.
+    pub async fn record_client_usage(
+        &self,
+        ctx: &CallCtx<'_>,
+        usage: &ClientUsage,
+    ) -> anyhow::Result<()> {
+        let row = TokenStatRow {
+            project: ctx.project.to_string(),
+            task_id: ctx.task.map(str::to_string),
+            harness: ctx.harness.to_string(),
+            kind: kind::CLIENT_REPORTED,
+            avoided_input_tokens_est: 0,
+            avoided_output_tokens_est: 0,
+            worker_prompt_tokens: None,
+            worker_completion_tokens: None,
+            details: serde_json::json!({
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "source": usage.source,
+                "label": "client_reported",
+            }),
+        };
+        let audit_details = row.details.clone();
+        record(&self.db, row).await?;
+        let _ = self.audit.write_event(
+            AuditEventType::TokenStatsClient,
+            ctx.harness,
+            ctx.project,
+            audit_details,
+        );
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::audit::AuditWriter;
 
     #[test]
     fn estimates_use_chars_per_token_and_saturate() {
@@ -119,5 +235,73 @@ mod tests {
         assert_eq!(estimate_delegated_read(100, 400), 0, "saturates at 0");
         assert_eq!(estimate_cache_hit(4000), 1000);
         assert_eq!(estimate_code_write(800, 1200), (200, 300));
+    }
+
+    #[tokio::test]
+    async fn client_reported_row_is_persisted_and_audited_with_source_label() {
+        let data = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let db = Db::open(data.path()).unwrap();
+        let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
+        let collector = StatsCollector::new(db.clone(), audit);
+        let ctx = CallCtx {
+            project: "p",
+            harness: "opencode",
+            task: Some("t"),
+        };
+        let usage = ClientUsage {
+            prompt_tokens: 12_345,
+            completion_tokens: 678,
+            source: "opencode /status".to_string(),
+        };
+        collector.record_client_usage(&ctx, &usage).await.unwrap();
+
+        let rows: Vec<(String, String)> = db
+            .with_conn(|c| {
+                let mut s = c.prepare("SELECT kind, details FROM token_stats")?;
+                let rows =
+                    s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "client_reported");
+        assert!(
+            rows[0].1.contains("12345")
+                && rows[0].1.contains("client_reported")
+                && rows[0].1.contains("opencode /status")
+        );
+
+        let log = std::fs::read_to_string(logs.path().join("audit.jsonl")).unwrap();
+        assert!(log.contains("TOKEN_STATS_CLIENT"), "log={log}");
+        assert!(log.contains("12345"));
+    }
+
+    #[tokio::test]
+    async fn estimate_row_is_audited_as_estimate() {
+        let data = tempfile::tempdir().unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let db = Db::open(data.path()).unwrap();
+        let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
+        let collector = StatsCollector::new(db, audit);
+        collector
+            .record_estimate(TokenStatRow {
+                project: "p".to_string(),
+                task_id: None,
+                harness: "h".to_string(),
+                kind: kind::SHUNT_CACHE_HIT,
+                avoided_input_tokens_est: 500,
+                avoided_output_tokens_est: 0,
+                worker_prompt_tokens: None,
+                worker_completion_tokens: None,
+                details: serde_json::json!({}),
+            })
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(logs.path().join("audit.jsonl")).unwrap();
+        assert!(log.contains("TOKEN_STATS"));
+        assert!(log.contains("\"label\":\"estimate\""), "log={log}");
+        assert!(log.contains("500"));
     }
 }
