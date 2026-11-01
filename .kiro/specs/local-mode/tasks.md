@@ -110,18 +110,18 @@ Use whichever pattern fits the work breakdown:
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
 - [ ] 5. Integration: shared per-user store validation
-- [ ] 5.1 Same-machine multi-process sharing tests
+- [x] 5.1 Same-machine multi-process sharing tests
   - Spawn two local-mode child processes against one temporary user directory and prove the full sharing contract: one harness's checkpoint is fully visible to the other's resume (state, last harness, objective, breadcrumbs); a shunt summary seeded by one process is served to the other as a cache hit with zero worker calls; an observation recorded by one is immediately searchable by the other; token-stats rows from both accumulate in one shared table.
   - Include a concurrent first-open scenario (both processes started against a not-yet-existing store) and a concurrent write scenario proving no corruption, no lost updates, and no partial actions.
   - Prove no coordination beyond the processes themselves is needed: no lock files, no daemons, no setup steps.
   - Observable: the multiprocess integration tests pass deterministically on the development host.
   - _Requirements: 2.6, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.3, 6.4_
-- [ ] 5.2 Local configuration behavior integration tests
+- [x] 5.2 Local configuration behavior integration tests
   - Exercise the local profile end to end against the real binary: zero-environment spawn succeeds and the store is created on first use; explicit data-directory and audit-file overrides relocate everything; configured confinement roots are enforced with denials audited; unset roots leave reads unconfined.
   - Cover the fail-fast path: an unusable user directory produces a clear error and non-zero exit with no partial initialization.
   - Observable: the local-configuration integration suite covers defaults, overrides, confinement on/off, and startup failure against the real binary.
   - _Requirements: 2.5, 2.6, 3.2, 3.3, 3.4, 4.4_
-- [ ] 5.3 Audit rotation integration tests
+- [x] 5.3 Audit rotation integration tests
   - Drive real audit traffic through a local-mode process with a small rotation threshold and verify: rotation happens within the threshold boundary, the retention count is respected, and every record across the active and rotated files verifies against its digest with identical record shape and redaction as serve mode.
   - Observable: the rotation suite passes with records intact and the audit contract unchanged.
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
