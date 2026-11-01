@@ -6,5 +6,6 @@
 //! imports only `config`; it never imports `services` or `mcp`.
 
 pub mod audit;
+pub mod audit_rotate;
 pub mod db;
 pub mod schema;

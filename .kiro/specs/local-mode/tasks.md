@@ -62,7 +62,7 @@ Use whichever pattern fits the work breakdown:
   - Add a sibling open mode that never creates files or applies the schema, opens with read-only flags, and clearly reports a missing store file to the caller instead of inventing an empty one.
   - Observable: unit tests show no file is created when absent, writes are refused, and reads work against a pre-populated store.
   - _Requirements: 8.5, 8.6_
-- [ ] 2.3 (P) Size-bounded local audit rotation
+- [x] 2.3 (P) Size-bounded local audit rotation
   - Add a rotation step to the audit write path: when the configured size threshold is exceeded before an append, run the rename cascade (active file becomes the newest rotated file, older files shift, the oldest is dropped) keeping at most the configured number of rotated files.
   - Gate the step on the configuration so serve mode (rotation disabled) keeps today's external logrotate contract exactly.
   - Preserve record integrity: records are never truncated or rewritten, and every rotated file still contains only complete, digest-verifiable records.

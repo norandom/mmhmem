@@ -190,17 +190,41 @@ pub fn redact_secrets(input: &str) -> String {
 #[derive(Clone, Debug)]
 pub struct AuditWriter {
     path: PathBuf,
+    /// Rotation threshold in bytes; 0 disables rotation (serve mode keeps
+    /// the host-logrotate contract, Req 7.3/9.5).
+    audit_max_bytes: u64,
+    /// Rotated files retained when rotation is enabled (Req 7.3).
+    audit_rotate_keep: u32,
 }
 
 impl AuditWriter {
-    /// Writer targeting `path` (normally `config.log_file`, Req 7.5).
+    /// Writer targeting `path` (normally `config.log_file`, Req 7.5) with
+    /// rotation disabled.
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            audit_max_bytes: 0,
+            audit_rotate_keep: 0,
+        }
     }
 
-    /// Writer targeting `AGENT_MEM_LOG_FILE` from the config (Req 7.5).
+    /// Writer with size-bounded rotation enabled (local profile, Req 7.3).
+    pub fn with_rotation(path: impl Into<PathBuf>, max_bytes: u64, keep: u32) -> Self {
+        Self {
+            path: path.into(),
+            audit_max_bytes: max_bytes,
+            audit_rotate_keep: keep,
+        }
+    }
+
+    /// Writer targeting `AGENT_MEM_LOG_FILE` from the config (Req 7.5);
+    /// rotation knobs come from the profile's settings (Req 7.3).
     pub fn from_config(config: &Config) -> Self {
-        Self::new(config.log_file.clone())
+        Self {
+            path: config.log_file.clone(),
+            audit_max_bytes: config.audit_max_bytes,
+            audit_rotate_keep: config.audit_rotate_keep,
+        }
     }
 
     /// The configured log file path.
@@ -236,9 +260,21 @@ impl AuditWriter {
     /// O_APPEND open-per-write (Req 7.4): one open + one single-line write +
     /// close per record; no persistent handle, so logrotate rotation works
     /// without a daemon restart. Parent dirs are created at first write.
+    /// When size-bounded rotation is enabled (local profile, Req 7.3), the
+    /// active file is rotated between writes first; a rotation failure is
+    /// logged and never blocks the audit append itself.
     fn append_line(&self, line: &str) -> io::Result<()> {
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
+        }
+        if self.audit_max_bytes > 0 {
+            if let Err(e) = super::audit_rotate::rotate_if_needed(
+                &self.path,
+                self.audit_max_bytes,
+                self.audit_rotate_keep,
+            ) {
+                tracing::warn!("audit rotation failed (appending anyway): {e}");
+            }
         }
         let mut file = OpenOptions::new()
             .create(true)
