@@ -49,6 +49,11 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
         .with_mounted_cache("/usr/local/cargo/git", dag.cache_volume("mmhmem-cargo-git"))
         .with_mounted_cache("/cargo-target", dag.cache_volume("mmhmem-cargo-target"))
         .with_env_variable("CARGO_TARGET_DIR", "/cargo-target")
+        # One-shot CI builds: no incremental state, bounded rustc parallelism
+        # (the dev-host WSL engine VM has ~6 GB RAM; unbounded cargo builds
+        # OOM-kill the dagger engine mid-run — observed twice).
+        .with_env_variable("CARGO_INCREMENTAL", "0")
+        .with_env_variable("CARGO_BUILD_JOBS", "2")
         .with_mounted_directory("/src", src.without_file(TOOLCHAIN_PIN))
         .with_workdir("/src")
     )

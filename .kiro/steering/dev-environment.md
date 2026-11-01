@@ -77,11 +77,33 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
 
 ## CI: Dagger (local WSL + GitHub Actions, one pipeline)
 
-- CI is a Dagger module (Python SDK) run locally via the WSL dagger CLI and
-  later from GitHub Actions with the same entrypoints — never maintain two
-  scripts. PowerShell drives the dev loop; the Dagger pipeline owns
-  Linux-container work (build, clippy gate, tests, Docker image with the
-  `otel` feature, deploy-artifact validation, optional E2E_LLM job).
+- CI is the Dagger module `ci/` (Python SDK). Local entrypoint:
+  `powershell -NoProfile -File scripts\dagger-ci.ps1` (defaults to `-Call all`;
+  pass `-Call fmt|clippy|test|release|docker-build|...` for one gate). The
+  wrapper rsyncs the repo (minus target/, .git, secrets) into the WSL home
+  (~/mmhmem-ci) and runs dagger there: dagger's source filesync OFF the
+  DrvFS mount hits 9p metadata-cache conflicts ("size changed during sync")
+  and crawling target/ once killed the engine. Actions runs the same module
+  via dagger-for-github (`.github/workflows/ci.yml`, workdir ci,
+  `call all --src ..` — a fresh checkout has no target/). Never maintain two
+  scripts. The pipeline owns Linux-container work: fmt, blocking clippy
+  (default AND `--features otel` — plain clippy never compiles gated code),
+  the deterministic test suite (incl. the machine-enforced Req 13.3 LOC-cap
+  test), informational tokei report, release build, Docker build with the
+  `otel` feature, compose-config validation, and systemd/logrotate artifact
+  verification as root with the real `agent-memory` user. The optional
+  E2E_LLM=1 job runs on the runner (native compose + model secrets).
+- The dev-host WSL VM has ~6 GB RAM: cargo builds in the pipeline are
+  bounded (`CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`) because unbounded
+  rustc OOM-killed the dagger engine mid-run (observed twice). The engine
+  container is per-session (stops between calls) — a call right after
+  another's cleanup may hit "engine is shutting down"; just retry.
+- First `dagger call` after engine bootstrap is slow (image pulls, uv setup,
+  apt installs); cache volumes make later calls fast. `wsl.exe` mangles
+  nested quotes — keep the bash -c payload quote-free or write the script
+  to a file.
+- Module internals live in `ci/src/mmhmem_ci/main.py`; `ci/sdk/` is
+  generated (gitignored) — regenerate with `dagger develop` inside `ci/`.
 
 ## Environment-specific test notes
 
