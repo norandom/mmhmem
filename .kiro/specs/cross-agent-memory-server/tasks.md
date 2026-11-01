@@ -5,7 +5,7 @@ Scope guard: `breath.toml` in this directory is the feature map — only listed 
 Every implementation task carries the Req 13 complexity caps in its acceptance criteria (13.6): non-test diff ≤ 400 lines (13.4); cyclomatic complexity ≤ 10 and cognitive complexity ≤ 15 per function (13.1–13.2, enforced via `clippy.toml` + `-D warnings`); ≤ 500 LOC per `src/` file and ≤ 80 LOC per function (13.3). Test files are capped at 800 LOC.
 
 - [ ] 1. Foundation: build scaffolding, lint gate, and env-only configuration
-- [ ] 1.1 Create the Rust crate manifest and pinned toolchain
+- [x] 1.1 Create the Rust crate manifest and pinned toolchain
   - Pin all runtime dependencies (rmcp with Streamable HTTP server transport, rusqlite `bundled`, tokio, reqwest, serde/serde_json, sha2, subtle, regex, time, anyhow, tracing; dev-only tempfile) with an optional `otel` cargo feature held off by default; pin the stable toolchain; commit `Cargo.lock`; provide a minimal entrypoint
   - Observable: `cargo build --release` succeeds and the binary runs; the plain build contains no OTel code path
   - Complexity caps (Req 13): non-test diff ≤ 400 lines (13.4); CC ≤ 10 / cognitive ≤ 15 per function (13.1–13.2); ≤ 500 LOC per src file, ≤ 80 LOC per function (13.3)
@@ -203,3 +203,10 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Observable: CI config present and all locally runnable steps pass; the clippy gate demonstrably blocks a CC > 10 function
   - _Depends: 11.6, 12.3, 13.1_
   - _Requirements: 13.1, 13.2, 13.5, 13.6, 12.3, 11.2_
+
+## Implementation Notes
+
+- Host toolchain is `x86_64-pc-windows-msvc` (user confirmed MSVC preferred, 2026-11-01); `cc`-based C builds (rusqlite `bundled`) verified working. Do not switch to gnu/mingw.
+- `.gitignore` must stay UTF-8 — a UTF-16LE copy written via PowerShell once broke git's parsing of it (fixed 2026-11-01); keep `/target`, `/.env`, `*.env`.
+- rmcp 3.x's real cargo feature name is `transport-streamable-http-server` (design text abbreviates it as "streamable-http-server").
+- `Cargo.lock` is a generated lockfile and is excluded from the Req 13.4 non-test LOC cap; hand-written diffs are what count.

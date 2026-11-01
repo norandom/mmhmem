@@ -1,0 +1,43 @@
+[package]
+name = "mmhmem"
+version = "0.1.0"
+edition = "2021"
+description = "Self-hosted cross-agent memory and I/O optimization server for AI coding harnesses (remote MCP Streamable HTTP daemon)"
+publish = false
+
+# Runtime dependencies — exact-pinned per design.md "Technology Stack" and
+# research.md "Minimal dependency set" (research risk 2: pin exact versions;
+# Cargo.lock is committed on top).
+[dependencies]
+# Official MCP Rust SDK; the Streamable HTTP server transport feature is
+# `transport-streamable-http-server` in rmcp 3.x.
+rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server"] }
+# Embedded SQLite (WAL + FTS5) compiled into the binary; no system libsqlite3.
+rusqlite = { version = "=0.41.1", features = ["bundled"] }
+# Async runtime.
+tokio = { version = "=1.54.1", features = ["full"] }
+# The only HTTP egress: the worker-model endpoint (rustls, no default/native TLS).
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# Content hashes + audit record digests.
+sha2 = "=0.11.1"
+# Constant-time bearer-token comparison.
+subtle = "=2.6.1"
+# Redaction filter + security-critical path pattern.
+regex = "=1.13.1"
+# ISO-8601 UTC timestamps in audit records.
+time = { version = "=0.3.55", features = ["formatting"] }
+anyhow = "=1.0.104"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[features]
+# Optional OTel export (Req 11.2): compiled only into the Docker image, off by
+# default. Declared empty now so both `cargo build --release` and
+# `cargo build --release --features otel` build; the opentelemetry deps are
+# added with task 9.1.
+otel = []
