@@ -18,6 +18,12 @@
 #   -Agent LIST   comma-separated harnesses: claude, opencode, desktop,
 #                 antigravity, all (default: all detected). Interactive
 #                 mode asks for the list when this flag is absent.
+#   -WorkerModel NAME   set the shunt worker model (WORKER_MODEL) in the
+#                 registrations - e.g. an Ollama tag like qwen3:latest.
+#                 Interactive mode offers this when no flag is given.
+#   -WorkerUrl URL      worker endpoint (WORKER_API_URL; default is
+#                 local Ollama at http://127.0.0.1:11434/v1/chat/completions).
+#   -WorkerApiKey KEY   worker API key (WORKER_API_KEY, hosted endpoints).
 #   -Remove       uninstall: deregister the selected harnesses, remove the
 #                 playbook copies and the copied binary. Store and audit
 #                 files stay untouched.
@@ -39,6 +45,9 @@ param(
     [string]$ProjectDir,
     [string]$Binary,
     [string]$Agent,
+    [string]$WorkerModel,
+    [string]$WorkerUrl,
+    [string]$WorkerApiKey,
     [switch]$Remove,
     [switch]$DryRun
 )
@@ -99,6 +108,31 @@ Choose (g/p)
 }
 if ($ProjectDir -and -not (Test-Path -LiteralPath $ProjectDir -PathType Container)) {
     Die "project dir not found: $ProjectDir"
+}
+
+# --- worker model (optional; activates shunting) ------------------------------
+# WORKER_MODEL is the activation switch (env-only config): without it the
+# worker stays off and shunting/warmup is disabled; the URL defaults to
+# local Ollama, so an Ollama user only needs the model name here.
+if (-not $Remove -and -not $WorkerModel -and $Interactive) {
+    $WorkerModel = Read-Host 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off)'
+}
+# -e KEY=VALUE pairs for CLI-registered harnesses (claude).
+$WorkerEnvArgs = @()
+if ($WorkerModel) {
+    $WorkerEnvArgs += @('-e', "WORKER_MODEL=$WorkerModel")
+    if ($WorkerUrl) { $WorkerEnvArgs += @('-e', "WORKER_API_URL=$WorkerUrl") }
+    if ($WorkerApiKey) { $WorkerEnvArgs += @('-e', "WORKER_API_KEY=$WorkerApiKey") }
+}
+# Prints the worker-env JSON fragment (", "KEY": {...}") for config-file
+# registrations, or an empty string when no model is configured. Values
+# are used verbatim (no quote escaping - model names/tags/keys are plain).
+function Worker-EnvJson([string]$key) {
+    if (-not $WorkerModel) { return '' }
+    $inner = "`"WORKER_MODEL`": `"$WorkerModel`""
+    if ($WorkerUrl) { $inner += ", `"WORKER_API_URL`": `"$WorkerUrl`"" }
+    if ($WorkerApiKey) { $inner += ", `"WORKER_API_KEY`": `"$WorkerApiKey`"" }
+    return ", `"$key`": { $inner }"
 }
 
 # --- binary -------------------------------------------------------------------
@@ -252,18 +286,18 @@ if ((Want-Agent 'claude') -and $HasClaude) {
     } elseif ($Global) {
         if (-not $DryRun) { Remove-ClaudeServer @('mcp', 'remove', 'mmhmem', '-s', 'user') }
         if ($DryRun) {
-            Info "[dry-run] claude mcp add --transport stdio --scope user mmhmem -- $Bin stdio"
+            Info "[dry-run] claude mcp add --transport stdio --scope user mmhmem $($WorkerEnvArgs -join ' ') -- $Bin stdio"
         } else {
-            claude mcp add --transport stdio --scope user mmhmem -- $Bin stdio
+            claude mcp add --transport stdio --scope user mmhmem @WorkerEnvArgs -- $Bin stdio
         }
     } else {
         Push-Location -LiteralPath $ProjectDir
         try {
             if (-not $DryRun) { Remove-ClaudeServer @('mcp', 'remove', 'mmhmem') }
             if ($DryRun) {
-                Info "[dry-run] claude mcp add --transport stdio mmhmem -- $Bin stdio (in $ProjectDir)"
+                Info "[dry-run] claude mcp add --transport stdio mmhmem $($WorkerEnvArgs -join ' ') -- $Bin stdio (in $ProjectDir)"
             } else {
-                claude mcp add --transport stdio mmhmem -- $Bin stdio
+                claude mcp add --transport stdio mmhmem @WorkerEnvArgs -- $Bin stdio
             }
         } finally { Pop-Location }
     }
@@ -278,7 +312,7 @@ if ((Want-Agent 'opencode') -and $HasOpenCode) {
         Remove-JsonKey $cfg @('mcp', 'servers', 'mmhmem')
     } else {
         Merge-Json $cfg @('mcp', 'servers', 'mmhmem') `
-            "{`"type`": `"local`", `"command`": [`"$Bin`", `"stdio`"]}"
+            "{`"type`": `"local`", `"command`": [`"$Bin`", `"stdio`"]$(Worker-EnvJson 'environment')}"
     }
     if ($Global) { Set-Skill (Join-Path $HOME '.config\opencode\skills\unified-memory') }
     $Registered.Add('opencode') | Out-Null
@@ -292,7 +326,7 @@ if ((Want-Agent 'desktop') -and $HasDesktop) {
             Remove-JsonKey $deskCfg @('mcpServers', 'mmhmem')
         } else {
             Merge-Json $deskCfg @('mcpServers', 'mmhmem') `
-                "{`"command`": `"$Bin`", `"args`": [`"stdio`"]}"
+                "{`"command`": `"$Bin`", `"args`": [`"stdio`"]$(Worker-EnvJson 'env')}"
         }
         Set-Skill (Join-Path $DesktopCfgDir 'skills\unified-memory')
         $Registered.Add('claude-desktop') | Out-Null
@@ -307,7 +341,7 @@ if ((Want-Agent 'antigravity') -and $HasAntigravity) {
         Info "Antigravity: remove the mmhmem server in Antigravity Settings > MCP (added manually)"
     } else {
         Info "Antigravity: add a stdio MCP server in Settings with this JSON:"
-        Write-Host "  { `"mcpServers`": { `"mmhmem`": { `"command`": `"$Bin`", `"args`": [`"stdio`"] } } }"
+        Write-Host "  { `"mcpServers`": { `"mmhmem`": { `"command`": `"$Bin`", `"args`": [`"stdio`"]$(Worker-EnvJson 'env') } } }"
     }
     $Registered.Add('antigravity-manual') | Out-Null
 }
@@ -343,6 +377,11 @@ if ($Remove) {
     Info "mmhmem local mode installed ($Mode)"
     Info ("harnesses: " + ($Registered -join ' '))
     Info "binary: $Bin"
+    if ($WorkerModel) {
+        Info "worker model: $WorkerModel (shunting and warmup active)"
+    } else {
+        Info "worker model not configured - shunting and warmup stay off; re-run with -WorkerModel NAME (e.g. an Ollama tag) or set WORKER_MODEL in the harness registration"
+    }
     Info "store: per-user default (%APPDATA%\mmhmem); created on first use"
     Info "check your savings any time: $Bin stats"
 }
