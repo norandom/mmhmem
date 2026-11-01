@@ -1,0 +1,27 @@
+# E2E override for the mmhmem compose stack (task 13.1; Req 12.1).
+#
+# Applied on top of docker-compose.yml by the gated e2e suite
+# (tests/e2e_measurement.rs) with --project-directory pointing at the suite's
+# run dir, which holds a suite-written .env (fresh token, ephemeral port,
+# run-dir bind mounts, worker endpoint from E2E_WORKER_*).
+#
+# Differences vs the production compose file:
+#   - the workspace volume is read-WRITE (boilerplate_write must create files)
+#   - the worker endpoint is parameterized (E2E_WORKER_API_URL/MODEL/KEY)
+#   - host.docker.internal resolves so a host-side worker (e.g. Ollama) is
+#     reachable from the container
+#
+# Requires compose v2.24+ (the `!override` tag replaces the base volume list).
+
+services:
+  mmhmem:
+    environment:
+      WORKER_API_URL: ${E2E_WORKER_API_URL}
+      WORKER_MODEL: ${E2E_WORKER_MODEL}
+      WORKER_API_KEY: ${E2E_WORKER_API_KEY:-}
+    volumes: !override
+      - ${MMHMEM_DATA_DIR}:/var/lib/agent-memory
+      - ${MMHMEM_LOG_DIR}:/var/log/agent-memory
+      - ${MMHMEM_WORKSPACE_ROOT}:/srv/workspace:rw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

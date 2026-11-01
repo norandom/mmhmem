@@ -190,8 +190,8 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Depends: 10.4, 9.1_
   - _Requirements: 8.6, 8.7, 11.2, 13.3_
 
-- [ ] 13. Validation: end-to-end measurement suite with a real harness
-- [ ] 13.1 Build the E2E measurement suite (gated by `E2E_LLM=1`)
+- [x] 13. Validation: end-to-end measurement suite with a real harness
+- [x] 13.1 Build the E2E measurement suite (gated by `E2E_LLM=1`)
   - Fixture repo + fixed scripted OpenCode task set (read-heavy, boilerplate-heavy); compose stack up; baseline mode (mmhmem disconnected) vs mmhmem mode (MCP + SKILL.md connected); collect harness-reported per-session prompt/completion tokens; compute per-task and aggregate deltas; assert the configured input-token reduction threshold on read-heavy tasks; persist the measured numbers as `client_reported` into `token_stats` and the audit log; emit a human-readable report
   - Observable: with `E2E_LLM` unset, `cargo test` skips the suite; with `E2E_LLM=1` and the stack up, the suite prints measured baseline-vs-mmhmem deltas and passes the threshold assertion
   - _Depends: 10.4, 12.3_
