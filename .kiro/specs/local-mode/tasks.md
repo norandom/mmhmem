@@ -44,7 +44,7 @@ Use whichever pattern fits the work breakdown:
   - Leave the serve-profile loading path byte-identical in behavior so the existing configuration tests pass unmodified.
   - Observable: a spawned local-mode process needs no environment to start, and the existing serve validation tests still pass without modification.
   - _Requirements: 2.5, 3.2, 3.3, 3.4, 6.2, 7.3, 9.2_
-- [ ] 1.3 (P) Optional path confinement
+- [x] 1.3 (P) Optional path confinement
   - Give the confinement checker an explicit unconfined state: an empty configured root set allows all paths in local mode, while any non-empty set keeps today's deny-by-default enforcement including audited denials.
   - Prove serve mode cannot reach the unconfined state (serve validation requires at least one root), so the new branch is unreachable there.
   - Observable: unit tests show unconfined behavior with no roots, unchanged denial behavior with roots set, and the denial reason still reaches the audit trail.
