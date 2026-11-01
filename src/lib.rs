@@ -2,10 +2,12 @@
 //!
 //! Scaffolding (task 1.1) exposes the crate identity behind the
 //! `--version` / `--help` CLI surface; task 1.3 adds env-only configuration
-//! (`config`); task 2.1 adds durable storage (`storage`). Services and the
-//! MCP server land in later tasks per design.md "File Structure Plan".
+//! (`config`); task 2.1 adds durable storage (`storage`); task 3.1 adds the
+//! worker-model client (`services::worker`). The session bus, shunt engine,
+//! and the MCP server land in later tasks per design.md "File Structure Plan".
 
 pub mod config;
+pub mod services;
 pub mod storage;
 
 /// Crate name from Cargo.toml.

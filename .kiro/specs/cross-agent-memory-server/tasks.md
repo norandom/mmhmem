@@ -34,7 +34,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 3.3, 6.3, 6.4, 10.1, 13.3_
 
 - [ ] 3. Core: worker model client
-- [ ] 3.1 Build the typed OpenAI-compatible worker client
+- [x] 3.1 Build the typed OpenAI-compatible worker client
   - Configurable URL/model/API key, temperature 0, 30 s read / 45 s write timeouts, explicit errors (never stale-or-empty-as-fresh), WORKER_ERROR audit event plus worker model name and round-trip latency recorded, returns the worker `usage` prompt/completion token counts; lazy — never touched on cache-hit, direct-read, or session paths
   - Tests against a local stub endpoint: success returns summary + usage; dead endpoint returns a clear error
   - Observable: with no worker configured, all non-shunt paths work; with a stub, a delegated call returns content plus usage counts
