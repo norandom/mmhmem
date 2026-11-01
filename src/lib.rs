@@ -9,6 +9,7 @@
 pub mod config;
 pub mod services;
 pub mod storage;
+pub mod telemetry;
 
 /// Crate name from Cargo.toml.
 pub const NAME: &str = env!("CARGO_PKG_NAME");

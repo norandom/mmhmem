@@ -32,15 +32,21 @@ anyhow = "=1.0.104"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 
+# Optional OTel export (Req 11.2, task 9.1): compiled ONLY with
+# `--features otel` (the Docker image). The plain release binary contains no
+# OTLP code path (verified via `cargo tree -e normal` having zero opentelemetry
+# crates). http-proto + reqwest-rustls reuses the pinned rustls reqwest.
+opentelemetry = { version = "=0.33.1", optional = true }
+opentelemetry_sdk = { version = "=0.33.1", optional = true, features = ["experimental_async_runtime", "rt-tokio"] }
+opentelemetry-otlp = { version = "=0.33.1", optional = true, default-features = false, features = ["trace", "metrics", "logs", "http-proto", "reqwest-client", "reqwest-rustls"] }
+
 [dev-dependencies]
 tempfile = "=3.27.0"
 
 [features]
 # Optional OTel export (Req 11.2): compiled only into the Docker image, off by
-# default. Declared empty now so both `cargo build --release` and
-# `cargo build --release --features otel` build; the opentelemetry deps are
-# added with task 9.1.
-otel = []
+# default in the plain release binary.
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 
 # Req 13.1/13.2: make the complexity cap BLOCKING under the canonical gate
 # command `cargo clippy --all-targets -- -D warnings`. On the pinned toolchain

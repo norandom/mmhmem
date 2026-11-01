@@ -100,7 +100,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 11.3, 13.3_
 
 - [ ] 9. Core: optional OTel telemetry (cargo feature `otel`)
-- [ ] 9.1 (P) Implement the feature-gated OTLP exporter
+- [x] 9.1 (P) Implement the feature-gated OTLP exporter
   - Inert unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set; spans around each MCP tool call (tool, harness, project, outcome, latency); metrics (tool latency histogram, shunt cache hit rate, tokens-avoided counters, worker token counters); redacted audit log records exported; every payload passes the audit redaction filter; no other egress; the Docker image builds with `--features otel`, the plain release does not
   - Tests: with the endpoint unset, a local listener confirms zero OTLP traffic; with a local OTLP stub, one tool call produces a redacted span
   - Observable: the no-feature release binary makes no OTLP calls; the Docker build with the feature exports spans to the stub
