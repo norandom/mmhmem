@@ -93,6 +93,13 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
   `otel` feature, compose-config validation, and systemd/logrotate artifact
   verification as root with the real `agent-memory` user. The optional
   E2E_LLM=1 job runs on the runner (native compose + model secrets).
+  The `windows` and `macos` jobs in ci.yml are the one documented
+  exception to "one pipeline": local-mode release builds + clippy +
+  tests on native GH runners, because the canonical MSVC and Apple
+  toolchains cannot run in the Linux containers and `cfg(windows)` /
+  `cfg(macos)` code must not escape the blocking lint gate (see
+  `.kiro/specs/local-mode/design.md`). Runner minutes matter on private
+  repos — cargo caching keeps repeat runs fast.
 - The dev-host WSL VM has ~6 GB RAM: cargo builds in the pipeline are
   bounded (`CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`) because unbounded
   rustc OOM-killed the dagger engine mid-run (observed twice). The engine

@@ -126,7 +126,7 @@ Use whichever pattern fits the work breakdown:
   - Observable: the rotation suite passes with records intact and the audit contract unchanged.
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 6. (P) Cross-platform release pipeline jobs
+- [x] 6. (P) Cross-platform release pipeline jobs
   - Add native-runner jobs for Windows and macOS to the repository's existing CI workflow: each job runs the same blocking lint gate (deny-warnings clippy across all targets), the deterministic test suite, and a release build, then uploads the platform artifact with a documented name.
   - Keep every container-based gate and the Linux release path untouched in the existing pipeline module; coordinate with any in-flight edits to that module from parallel sessions before touching it, and make no behavioral change to its existing calls.
   - Note the deliberate scope: the container pipeline remains the single source for container work; the native jobs exist only because the canonical Windows and macOS toolchains cannot run in Linux containers, and OS-specific code must not escape the lint gate.

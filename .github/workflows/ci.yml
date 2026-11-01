@@ -20,6 +20,15 @@
 # (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY / MISTRAL_API_KEY).
 # It runs the E2E_LLM=1 suite over docker compose on the runner and uploads
 # the measured-savings report as an artifact.
+#
+# windows + macos (local-mode Req 10.1-10.5): native-runner jobs for the
+# platforms the Linux containers cannot build — the canonical MSVC and
+# Apple toolchains do not run in Docker, and cfg(windows)/cfg(macos) code
+# must not escape the blocking lint gate (Req 10.4). The gate commands are
+# identical to the container pipeline; this is the documented, deliberate
+# exception to "one pipeline, never two scripts" (design.md "Cross-platform
+# pipeline"; research.md "Cross-platform release builds"). All container
+# work stays single-sourced in the Dagger module.
 
 name: CI
 
@@ -83,3 +92,71 @@ jobs:
           name: e2e-measurement-report
           path: target/e2e/**/report.md
           if-no-files-found: ignore
+
+  windows:
+    name: Windows x64 - clippy, deterministic tests, release build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.98.1 (matches rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+      - name: Cache cargo registry and target (bundled-SQLite builds are slow on first run)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-windows-${{ hashFiles('Cargo.lock') }}
+      - name: Blocking clippy (same strictness as the Linux gate)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Deterministic test suite
+        run: cargo test
+      - name: Release build (x86_64-pc-windows-msvc)
+        run: cargo build --release --locked
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhmem-x86_64-pc-windows-msvc
+          path: target/release/mmhmem.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS aarch64 and x86_64 - clippy, deterministic tests, release builds
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.98.1 (matches rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+      - name: Add the x86_64-apple-darwin target
+        run: rustup target add x86_64-apple-darwin
+      - name: Cache cargo registry and target (bundled-SQLite builds are slow on first run)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-macos-${{ hashFiles('Cargo.lock') }}
+      - name: Blocking clippy (same strictness as the Linux gate)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Deterministic test suite
+        run: cargo test
+      - name: Release build (aarch64-apple-darwin, native)
+        run: cargo build --release --locked
+      - name: Release build (x86_64-apple-darwin, cross)
+        run: cargo build --release --locked --target x86_64-apple-darwin
+      - name: Upload release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhmem-macos
+          path: |
+            target/release/mmhmem
+            target/x86_64-apple-darwin/release/mmhmem
+          if-no-files-found: error
