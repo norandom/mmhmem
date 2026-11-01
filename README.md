@@ -60,6 +60,16 @@ harness spawns mmhmem per session:
 claude mcp add --transport stdio --scope user mmhmem -- mmhmem stdio
 ```
 
+Or let the installer do it — it registers every harness it finds (Claude
+Code, OpenCode, Claude Desktop, Antigravity), asks whether to install
+globally or per project and which harnesses, and undoes itself with
+`--remove` / `-Remove`:
+
+```sh
+sh deploy/install_local.sh                   # macOS / Linux / WSL
+powershell -File deploy\install_local.ps1    # Windows
+```
+
 That is the whole install for Claude Code; OpenCode, Antigravity, and
 Claude Desktop have equivalent one-liners in `deploy/examples/` (the
 `*-local` files). The per-user store is created on first use —
