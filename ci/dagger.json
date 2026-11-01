@@ -1,0 +1,7 @@
+{
+  "name": "mmhmem-ci",
+  "engineVersion": "v0.21.8",
+  "sdk": {
+    "source": "python"
+  }
+}

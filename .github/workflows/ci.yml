@@ -1,0 +1,85 @@
+# mmhmem CI (task 14.1; Req 13.1, 13.2, 13.5, 13.6, 11.2, 8.6, 8.7, 12.3).
+#
+# One Dagger module (ci/) runs everywhere: locally via the WSL dagger CLI
+# (`cd ci && dagger call all`) and here in GitHub Actions with the
+# same entrypoints — never two scripts (dev-environment steering).
+# The module loads the repo from its parent dir with excludes
+# (target/, .git, secrets) — no --src argument is needed.
+#
+# quality-gates (blocking): fmt, clippy -D warnings (default AND
+# --features otel — gated code escapes plain clippy), the deterministic
+# suite (incl. tests/loc_caps.rs, which machine-enforces the Req 13.3 size
+# caps), release build, Docker image built with the otel feature whose
+# payload runs, `docker compose config` on prod + e2e stacks, and pristine
+# systemd-analyze/logrotate validation; tokei LOC report informational.
+#
+# e2e-measurement (optional, model-gated; Req 12): enable by setting the
+# repository variable E2E_LLM_ENABLED=true plus the secrets
+# E2E_WORKER_API_URL and E2E_WORKER_MODEL (optional E2E_WORKER_API_KEY)
+# and whatever provider-credential secrets the OpenCode harness reads
+# (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY / MISTRAL_API_KEY).
+# It runs the E2E_LLM=1 suite over docker compose on the runner and uploads
+# the measured-savings report as an artifact.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gates:
+    name: Blocking quality gates (Dagger)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: fmt, clippy default+otel, tests, release, docker image, compose config, deploy artifacts, tokei
+        uses: dagger/dagger-for-github@v8
+        with:
+          version: "0.21.8"
+          workdir: ci
+          # A fresh checkout carries no target/.git — the --src contract.
+          args: call all --src ..
+
+  e2e-measurement:
+    name: E2E measured token savings (E2E_LLM=1, real OpenCode)
+    needs: quality-gates
+    if: vars.E2E_LLM_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      E2E_LLM: "1"
+      E2E_WORKER_API_URL: ${{ secrets.E2E_WORKER_API_URL }}
+      E2E_WORKER_MODEL: ${{ secrets.E2E_WORKER_MODEL }}
+      E2E_WORKER_API_KEY: ${{ secrets.E2E_WORKER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.98.1 (matches rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+      - name: Install OpenCode CLI
+        run: curl -fsSL https://opencode.ai/install | bash
+      - name: Run the E2E measurement suite (compose stack + scripted OpenCode sessions, baseline vs mmhmem)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        run: cargo test --test e2e_measurement
+      - name: Upload measured-savings report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-measurement-report
+          path: target/e2e/**/report.md
+          if-no-files-found: ignore
