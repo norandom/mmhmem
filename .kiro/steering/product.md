@@ -2,6 +2,8 @@
 
 mmhmem is a self-hosted, cross-agent memory and I/O optimization server for AI coding harnesses. It replaces hook-bound local plugins (e.g. claude-mem) with a single Linux daemon that heterogeneous agents (Claude Code, Google Antigravity, OpenCode, Claude Desktop) connect to via standard protocol-native interfaces — no client-side shell hooks, no MITM API proxies, no SaaS dependency.
 
+Deployment model (confirmed 2026-11-01): client-server with the server OPTIONAL. Clients run locally on Linux, Windows, and macOS and each harness spawns `mmhmem stdio` — the full token-efficiency layer (shunt + cache + all six tools) against a per-user shared store, with local stats via `mmhmem stats`. The Linux container server is an optional upgrade: cross-machine access, central audit/compliance, central ops (logrotate, OTel), multi-user bearer auth. One binary, two transports, two config profiles.
+
 ## Core Capabilities
 
 - Live cross-agent session memory: mid-task handoff between harnesses with structured working state plus an automatic breadcrumb trail of every tool action
