@@ -37,7 +37,7 @@ Use whichever pattern fits the work breakdown:
   - Provide the default local audit-file location derived from the data directory.
   - Observable: unit tests pass for each operating system branch covering present, absent, and blank variables, and the resolver output feeds the local profile defaults.
   - _Requirements: 3.1, 7.1_
-- [ ] 1.2 Local configuration profile
+- [x] 1.2 Local configuration profile
   - Add the profile dimension to the runtime configuration: a serve profile with exactly today's validation (token and roots required, identical error variants and defaults) and a local profile that starts with zero mandatory environment variables.
   - In the local profile: token optional and unused, confinement roots optional (empty means unconfined), data directory and audit file defaulting to the per-user locations from 1.1, and the existing override variables honored unchanged.
   - Add the new tuning variables (store lock-wait timeout, audit rotation size threshold, audit rotation retention count) parsed with documented defaults in both profiles, rejecting invalid values with clear errors.

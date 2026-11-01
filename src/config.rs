@@ -12,6 +12,8 @@ use std::path::PathBuf;
 
 /// Per-OS per-user data-dir resolution for the local profile (Req 3.1).
 pub mod local_dirs;
+/// Profile dimension and local-profile configuration loading (Req 3.2).
+pub mod profile;
 
 /// `AGENT_MEM_DATA_DIR` — durable state directory.
 pub const ENV_DATA_DIR: &str = "AGENT_MEM_DATA_DIR";
@@ -29,6 +31,13 @@ pub const ENV_PORT: &str = "AGENT_MEM_PORT";
 pub const ENV_MCP_PATH: &str = "AGENT_MEM_MCP_PATH";
 /// `SHUNT_MIN_LINES` — smart_read shunt threshold in lines (u32 > 0, Req 3.9).
 pub const ENV_SHUNT_MIN_LINES: &str = "SHUNT_MIN_LINES";
+/// `AGENT_MEM_BUSY_TIMEOUT_MS` — store busy-lock wait in milliseconds (Req 6.2).
+pub const ENV_BUSY_TIMEOUT_MS: &str = "AGENT_MEM_BUSY_TIMEOUT_MS";
+/// `AGENT_MEM_AUDIT_MAX_BYTES` — audit rotation threshold in bytes; 0 disables
+/// rotation (Req 7.3; serve default 0 keeps the host-logrotate contract).
+pub const ENV_AUDIT_MAX_BYTES: &str = "AGENT_MEM_AUDIT_MAX_BYTES";
+/// `AGENT_MEM_AUDIT_ROTATE_KEEP` — rotated audit files to retain (u32 ≥ 1).
+pub const ENV_AUDIT_ROTATE_KEEP: &str = "AGENT_MEM_AUDIT_ROTATE_KEEP";
 /// `WORKER_API_URL` — OpenAI-compatible chat completions endpoint (Req 6.1).
 pub const ENV_WORKER_API_URL: &str = "WORKER_API_URL";
 /// `WORKER_MODEL` — worker model name (optional).
@@ -61,6 +70,15 @@ pub const DEFAULT_PORT: u16 = 8443;
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
 /// Default shunt threshold in lines (Req 3.9).
 pub const DEFAULT_SHUNT_MIN_LINES: u32 = 150;
+/// Default store busy-lock wait (Req 6.2: 5 seconds).
+pub const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
+/// Serve profile: audit rotation disabled — host logrotate owns rotation
+/// (Req 9.5 unchanged deployment contract).
+pub const DEFAULT_AUDIT_MAX_BYTES: u64 = 0;
+/// Local profile default rotation threshold (Req 7.3: 10 MiB).
+pub const DEFAULT_AUDIT_MAX_BYTES_LOCAL: u64 = 10 * 1024 * 1024;
+/// Default rotated audit files retained (Req 7.3: keep 5).
+pub const DEFAULT_AUDIT_ROTATE_KEEP: u32 = 5;
 /// Default worker endpoint: local Ollama-compatible chat completions (Req 6.1).
 pub const DEFAULT_WORKER_API_URL: &str = "http://127.0.0.1:11434/v1/chat/completions";
 /// Default OTLP service name (Req 11.1).
@@ -100,6 +118,14 @@ pub struct Config {
     pub otel_headers: Option<String>,
     /// OTLP service name (`OTEL_SERVICE_NAME`).
     pub otel_service_name: String,
+    /// Store busy-lock wait in ms (`AGENT_MEM_BUSY_TIMEOUT_MS`, Req 6.2).
+    pub busy_timeout_ms: u64,
+    /// Audit rotation threshold in bytes; 0 disables rotation (Req 7.3).
+    pub audit_max_bytes: u64,
+    /// Rotated audit files retained (Req 7.3).
+    pub audit_rotate_keep: u32,
+    /// Operating profile: serve (daemon) vs local (spawned stdio child).
+    pub profile: profile::Profile,
 }
 
 /// Fail-fast configuration error (design.md "Error Handling").
@@ -116,6 +142,12 @@ pub enum ConfigError {
     /// The per-user location variable (`HOME`/`APPDATA`) is unset or blank,
     /// so the local profile cannot resolve its default data dir (Req 3.1).
     MissingUserDirEnv(&'static str),
+    /// `AGENT_MEM_BUSY_TIMEOUT_MS` is not a u64.
+    InvalidBusyTimeoutMs(String),
+    /// `AGENT_MEM_AUDIT_MAX_BYTES` is not a u64.
+    InvalidAuditMaxBytes(String),
+    /// `AGENT_MEM_AUDIT_ROTATE_KEEP` is not a u32 ≥ 1.
+    InvalidAuditRotateKeep(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -141,6 +173,15 @@ impl fmt::Display for ConfigError {
                 "required per-user environment variable {var} is not set or empty \
                  (the local profile resolves its default data dir from it)"
             ),
+            ConfigError::InvalidBusyTimeoutMs(raw) => {
+                write!(f, "{ENV_BUSY_TIMEOUT_MS}={raw:?} is not a valid busy timeout (u64 ms)")
+            }
+            ConfigError::InvalidAuditMaxBytes(raw) => {
+                write!(f, "{ENV_AUDIT_MAX_BYTES}={raw:?} is not a valid rotation threshold (u64 bytes)")
+            }
+            ConfigError::InvalidAuditRotateKeep(raw) => {
+                write!(f, "{ENV_AUDIT_ROTATE_KEEP}={raw:?} is not a valid retention count (u32 >= 1)")
+            }
         }
     }
 }
@@ -175,6 +216,10 @@ impl Config {
             otel_endpoint: present(get, ENV_OTEL_ENDPOINT),
             otel_headers: present(get, ENV_OTEL_HEADERS),
             otel_service_name: optional(get, ENV_OTEL_SERVICE_NAME, DEFAULT_OTEL_SERVICE_NAME),
+            busy_timeout_ms: profile::parse_busy_timeout_ms(get)?,
+            audit_max_bytes: profile::parse_audit_max_bytes(get, DEFAULT_AUDIT_MAX_BYTES)?,
+            audit_rotate_keep: profile::parse_audit_rotate_keep(get)?,
+            profile: profile::Profile::Serve,
         })
     }
 
@@ -211,6 +256,10 @@ impl fmt::Debug for Config {
                 &self.otel_headers.as_ref().map(|_| REDACTED),
             )
             .field("otel_service_name", &self.otel_service_name)
+            .field("busy_timeout_ms", &self.busy_timeout_ms)
+            .field("audit_max_bytes", &self.audit_max_bytes)
+            .field("audit_rotate_keep", &self.audit_rotate_keep)
+            .field("profile", &self.profile)
             .finish()
     }
 }
