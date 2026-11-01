@@ -1,5 +1,9 @@
 # mmhmem
 
+<p align="center">
+  <img src="assets/mmhmem.jpg" alt="mmhmem motto" width="560">
+</p>
+
 A self-hosted memory and I/O-optimization layer for AI coding agents. One
 binary gives Claude Code, Google Antigravity, OpenCode, and Claude Desktop a
 shared place to keep live session state, so you can switch tools mid-task
