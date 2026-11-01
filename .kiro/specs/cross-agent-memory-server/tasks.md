@@ -26,7 +26,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - Observable: a fresh data dir initializes all tables; the `SELECT fts5(?)` smoke query works; an inserted observation is FTS-searchable immediately
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file, ≤ 80 LOC per function (13.3)
   - _Requirements: 2.1, 2.2, 5.5, 9.1, 9.3, 10.3, 13.3_
-- [ ] 2.2 Implement the redacting, hash-verifying, append-only audit writer
+- [x] 2.2 Implement the redacting, hash-verifying, append-only audit writer
   - Redaction of key-assigned secrets (`api_key`, `secret`, `token`, `password`, `MYSQL_PWD`, `dbPassword`, `authorization`), `Authorization: Bearer` headers, Slack `xapp-`/`xoxe-` tokens, and `<private>...</private>` spans; single-line JSON records (ISO-8601 UTC `ts`, `epoch_ms`, `event_type`, `agent_harness`, `project`, redacted `details`, `record_sha256` over sorted keys); O_APPEND open-per-write; env-configurable path; all event types incl. TOKEN_STATS, TOKEN_STATS_CLIENT, WORKER_ERROR, and auth failures
   - Unit tests: every secret pattern class is absent from the raw log bytes; every line's digest verifies
   - Observable: a record containing a fake `api_key` lands on disk as `[REDACTED…]` with a verifiable `record_sha256`; the log can be rotated mid-run without restarting the daemon
