@@ -116,19 +116,25 @@ class MmhmemCi:
 
     @function
     async def release(self, src: dagger.Directory) -> dagger.File:
-        """Blocking: plain release build (no otel feature, Req 11.2)."""
-        ctr = rust_container(src).with_exec(["cargo", "build", "--release", "--locked"])
-        return ctr.file("/cargo-target/release/mmhmem")
+        """Blocking: plain release build (no otel feature, Req 11.2). The
+        binary is copied out of the cache-mounted target dir first: cache
+        mounts are not part of the container's exportable filesystem."""
+        ctr = (
+            rust_container(src)
+            .with_exec(["cargo", "build", "--release", "--locked"])
+            .with_exec(["cp", "/cargo-target/release/mmhmem", "/out-mmhmem"])
+        )
+        return ctr.file("/out-mmhmem")
 
     @function
     async def docker_build(self, src: dagger.Directory) -> str:
         """Blocking: build the image per Dockerfile (compiles with the otel
         feature, Req 11.2/8.6) and prove the runtime payload runs by
-        executing `mmhmem --version` inside the distroless image."""
+        executing `mmhmem --version` inside the distroless image
+        (use_entrypoint: the image has ENTRYPOINT mmhmem and no shell, so
+        the args must be passed to the entrypoint, not run as a command)."""
         image = src.docker_build()
-        version = await (
-            image.with_entrypoint(["/usr/local/bin/mmhmem", "--version"]).stdout()
-        )
+        version = await image.with_exec(["--version"], use_entrypoint=True).stdout()
         return f"docker image built; payload: {version.strip()}"
 
     @function
@@ -154,16 +160,25 @@ class MmhmemCi:
             .with_new_file("/tmp/val/.env", val_env)
         )
         prod = await ctr.with_exec(
-            ["docker", "compose", "--project-directory", "/tmp/val", "config", "-q"]
+            [
+                "docker",
+                "compose",
+                "-f",
+                "/repo/docker-compose.yml",
+                "--project-directory",
+                "/tmp/val",
+                "config",
+                "-q",
+            ]
         ).stdout()
         e2e = await ctr.with_exec(
             [
                 "docker",
                 "compose",
                 "-f",
-                "docker-compose.yml",
+                "/repo/docker-compose.yml",
                 "-f",
-                "tests/e2e/compose.e2e.yml",
+                "/repo/tests/e2e/compose.e2e.yml",
                 "--project-directory",
                 "/tmp/val",
                 "config",
