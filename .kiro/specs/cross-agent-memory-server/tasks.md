@@ -21,7 +21,7 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 3.9, 6.1, 7.5, 8.1, 11.1, 13.3_
 
 - [ ] 2. Foundation: durable storage (schema, WAL connection, audit writer)
-- [ ] 2.1 Implement the SQLite schema and concurrency-safe connection
+- [x] 2.1 Implement the SQLite schema and concurrency-safe connection
   - All tables: active_sessions, session_breadcrumbs + index, observations + FTS5 external-content table + AFTER INSERT trigger, shunt_file_cache, token_stats + index; WAL + synchronous NORMAL; idempotent startup migrations via `PRAGMA user_version`; single connection behind a mutex serviced via `spawn_blocking`; the lock is never held across an `.await`
   - Observable: a fresh data dir initializes all tables; the `SELECT fts5(?)` smoke query works; an inserted observation is FTS-searchable immediately
   - Complexity caps (Req 13): ≤ 400 non-test LOC (13.4); CC ≤ 10 / cognitive ≤ 15 (13.1–13.2); ≤ 500 LOC per file, ≤ 80 LOC per function (13.3)

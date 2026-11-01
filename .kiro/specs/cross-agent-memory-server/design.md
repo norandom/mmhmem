@@ -478,8 +478,7 @@ CREATE TABLE token_stats (
   avoided_output_tokens_est INTEGER NOT NULL DEFAULT 0,
   worker_prompt_tokens INTEGER,     -- from worker API `usage`, NULL for client_reported
   worker_completion_tokens INTEGER,
-  details TEXT,                     -- redacted JSON (paths, hashes, source label)
-  PRIMARY KEY (id)
+  details TEXT                      -- redacted JSON (paths, hashes, source label)
 );
 CREATE INDEX idx_token_stats_proj ON token_stats(project, agent_harness, ts_epoch_ms);
 ```
