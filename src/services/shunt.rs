@@ -52,6 +52,16 @@ struct ShuntAuditMeta<'a> {
     avoided_est: u64,
 }
 
+/// Cache-miss delegation inputs (bundled to stay under the clippy 7-arg limit).
+struct Miss<'a> {
+    path: PathBuf,
+    sha: String,
+    fp: String,
+    line_count: usize,
+    question: &'a str,
+    raw_chars: usize,
+}
+
 /// The deterministic read-shunting engine (design.md ShuntEngine).
 #[derive(Clone)]
 pub struct ShuntEngine {
@@ -207,27 +217,68 @@ impl ShuntEngine {
         let raw_chars = cache::raw_chars(&path).await?;
         if let Some(summary) = cache::cache_lookup(&self.db, &path, &sha, &fp).await? {
             let est = stats::estimate_cache_hit(raw_chars);
-            let meta = ShuntAuditMeta {
-                path: &path,
-                sha: &sha,
-                line_count,
-                worker_info: None,
-                avoided_est: est,
-            };
-            self.audit_shunt(ctx, AuditEventType::IoShuntCacheHit, &meta);
-            self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, &path, &sha, None);
-            self.crumb(
-                ctx,
-                "smart_read:cache_hit",
-                &path.display().to_string(),
-                &format!("cached summary for {line_count}-line file"),
-            )
-            .await;
-            return Ok(ReadOutcome::Cached {
-                summary,
-                avoided_input_tokens_est: est,
-            });
+            return self
+                .serve_cached(ctx, &path, &sha, line_count, est, summary)
+                .await;
         }
+        self.delegate(
+            ctx,
+            Miss {
+                path,
+                sha,
+                fp,
+                line_count,
+                question: &question,
+                raw_chars,
+            },
+        )
+        .await
+    }
+
+    /// Cache-hit path (Req 3.4): audited, counted, breadcrumbed, < 50 ms,
+    /// zero worker calls.
+    async fn serve_cached(
+        &self,
+        ctx: &CallCtx<'_>,
+        path: &std::path::Path,
+        sha: &str,
+        line_count: usize,
+        est: u64,
+        summary: String,
+    ) -> Result<ReadOutcome, ShuntError> {
+        let meta = ShuntAuditMeta {
+            path,
+            sha,
+            line_count,
+            worker_info: None,
+            avoided_est: est,
+        };
+        self.audit_shunt(ctx, AuditEventType::IoShuntCacheHit, &meta);
+        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, path, sha, None);
+        self.crumb(
+            ctx,
+            "smart_read:cache_hit",
+            &path.display().to_string(),
+            &format!("cached summary for {line_count}-line file"),
+        )
+        .await;
+        Ok(ReadOutcome::Cached {
+            summary,
+            avoided_input_tokens_est: est,
+        })
+    }
+
+    /// Cache-miss path (Req 3.5): delegate to the worker, store in the
+    /// content-addressed cache, audit + count + breadcrumb.
+    async fn delegate(&self, ctx: &CallCtx<'_>, miss: Miss<'_>) -> Result<ReadOutcome, ShuntError> {
+        let Miss {
+            path,
+            sha,
+            fp,
+            line_count,
+            question,
+            raw_chars,
+        } = miss;
         let worker = self
             .worker
             .as_ref()
@@ -235,7 +286,7 @@ impl ShuntEngine {
         let payload = cache::line_numbered_payload(&path).await?;
         let t0 = Instant::now();
         let (summary, usage) = worker
-            .summarize_file(&payload, &question)
+            .summarize_file(&payload, question)
             .await
             .map_err(|e| {
                 let _ = self.audit.write_event(

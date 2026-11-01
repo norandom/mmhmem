@@ -27,6 +27,11 @@ in WSL containers, and Dagger is the CI engine everywhere.
   suite. `scripts/lint.ps1` falls back to `cargo test` if absent.
 - Wrap long runs: `powershell -NoProfile -File scripts\with-timeout.ps1
   -Seconds 900 -Command cargo -ArgString "nextest run"`.
+- **Feature-enabled builds (`--features otel`) need `CARGO_INCREMENTAL=0`**
+  on this host: with incremental on, rustc 1.98.1 crashes with
+  STATUS_STACK_BUFFER_OVERRUN at test-binary codegen. Also cap jobs
+  (`-j 2`) for the no-run build. `cargo check --features otel --all-targets`
+  is unaffected and stays the fast local smoke for gated code.
 
 ## Quality gates (blocking, same locally and in CI)
 

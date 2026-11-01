@@ -21,7 +21,7 @@ use crate::services::paths::{AllowedRoots, PathError};
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt_types::CallCtx;
 use crate::services::stats;
-use crate::services::worker::WorkerClient;
+use crate::services::worker::{WorkerClient, WorkerUsage};
 use crate::storage::audit::{sha256_hex, AuditEventType, AuditWriter};
 use crate::storage::db::Db;
 
@@ -86,6 +86,23 @@ pub enum BoilerplateError {
     ReferenceOutsideRoots(PathBuf),
     /// IO error.
     Io(String),
+}
+
+/// Successful worker output plus everything `persist` needs to write, audit,
+/// and ack it (bundled to stay under the clippy 7-arg limit).
+struct Generated {
+    /// Confined target path.
+    target: PathBuf,
+    /// Confined reference path (audit details only at this point).
+    reference: PathBuf,
+    /// Raw (possibly fenced) worker output.
+    raw_code: String,
+    /// Worker-reported token usage (Req 10.2).
+    usage: WorkerUsage,
+    /// Worker round-trip latency in ms.
+    latency_ms: u64,
+    /// Reference file length in chars (Req 10.1 estimate input).
+    reference_chars: usize,
 }
 
 impl std::fmt::Display for BoilerplateError {
@@ -162,6 +179,39 @@ impl BoilerplateWriter {
         let reference_raw = tokio::fs::read_to_string(&reference)
             .await
             .map_err(|e| BoilerplateError::Io(e.to_string()))?;
+        let reference_chars = reference_raw.len();
+        let (raw_code, usage, latency_ms) = self
+            .generate(&ctx, &target, &reference, reference_raw, req.spec)
+            .await?;
+        self.persist(
+            &ctx,
+            Generated {
+                target,
+                reference,
+                raw_code,
+                usage,
+                latency_ms,
+                reference_chars,
+            },
+        )
+        .await
+    }
+
+    /// Worker model name for acks/audits (empty when no worker configured).
+    fn worker_model(&self) -> &str {
+        self.worker.as_ref().map(WorkerClient::model).unwrap_or("")
+    }
+
+    /// Delegates generation to the worker model; WORKER_ERROR is audited on
+    /// failure (Req 4.2, 6.3). Returns raw (possibly fenced) code + usage.
+    async fn generate(
+        &self,
+        ctx: &CallCtx<'_>,
+        target: &std::path::Path,
+        reference: &std::path::Path,
+        reference_raw: String,
+        spec: &str,
+    ) -> Result<(String, WorkerUsage, u64), BoilerplateError> {
         let worker = self
             .worker
             .as_ref()
@@ -172,19 +222,33 @@ impl BoilerplateWriter {
             reference_raw
         );
         let t0 = Instant::now();
-        let (raw_code, usage) = worker
-            .generate_code(&payload, req.spec)
-            .await
-            .map_err(|e| {
-                let _ = self.audit.write_event(
+        let (raw_code, usage) = worker.generate_code(&payload, spec).await.map_err(|e| {
+            let _ = self.audit.write_event(
                 AuditEventType::WorkerError,
                 ctx.harness,
                 ctx.project,
                 serde_json::json!({"target": target.display().to_string(), "error": e.to_string()}),
             );
-                BoilerplateError::Worker(e.to_string())
-            })?;
-        let latency_ms = t0.elapsed().as_millis() as u64;
+            BoilerplateError::Worker(e.to_string())
+        })?;
+        Ok((raw_code, usage, t0.elapsed().as_millis() as u64))
+    }
+
+    /// Strips fences, writes the file, then audits + records stats +
+    /// breadcrumb and returns the one-line ack (Req 4.2-4.4).
+    async fn persist(
+        &self,
+        ctx: &CallCtx<'_>,
+        gen: Generated,
+    ) -> Result<WriteAck, BoilerplateError> {
+        let Generated {
+            target,
+            reference,
+            raw_code,
+            usage,
+            latency_ms,
+            reference_chars,
+        } = gen;
         let code = strip_fences(&raw_code);
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
@@ -196,11 +260,11 @@ impl BoilerplateWriter {
             .map_err(|e| BoilerplateError::Io(e.to_string()))?;
         let sha = sha256_hex(code.as_bytes());
         let lines = code.lines().count();
-        let (est_in, est_out) = stats::estimate_code_write(reference_raw.len(), code.len());
+        let (est_in, est_out) = stats::estimate_code_write(reference_chars, code.len());
         let details = serde_json::json!({
             "target": crate::storage::audit::redact_secrets(&target.display().to_string()),
             "reference": crate::storage::audit::redact_secrets(&reference.display().to_string()),
-            "sha256": sha, "lines": lines, "worker_model": worker.model(),
+            "sha256": sha, "lines": lines, "worker_model": self.worker_model(),
             "latency_ms": latency_ms, "worker_prompt_tokens": usage.prompt_tokens,
             "worker_completion_tokens": usage.completion_tokens,
             "avoided_input_tokens_est": est_in, "avoided_output_tokens_est": est_out,
@@ -211,18 +275,19 @@ impl BoilerplateWriter {
             ctx.project,
             details,
         );
-        self.record_stat(&ctx, est_in, est_out, usage, &target, &sha);
+        self.record_stat(ctx, est_in, est_out, usage, &target, &sha);
+        let resource = target.display().to_string();
         self.crumb(
-            &ctx,
+            ctx,
             "boilerplate_write",
-            req.target,
+            &resource,
             &format!("wrote {lines} lines to {}", target.display()),
         )
         .await;
         Ok(WriteAck {
             sha256: sha,
             lines,
-            model: worker.model().to_string(),
+            model: self.worker_model().to_string(),
             latency_ms,
             avoided_input_tokens_est: est_in,
             avoided_output_tokens_est: est_out,

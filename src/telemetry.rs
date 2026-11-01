@@ -89,13 +89,13 @@ mod imp {
 
         /// Force-flush + shutdown all providers (graceful shutdown, task 10.4).
         pub fn shutdown(&self) {
-            if let Some(p) = self.tracer_provider {
+            if let Some(p) = &self.tracer_provider {
                 let _ = p.shutdown();
             }
-            if let Some(p) = self.meter_provider {
+            if let Some(p) = &self.meter_provider {
                 let _ = p.shutdown();
             }
-            if let Some(p) = self.logger_provider {
+            if let Some(p) = &self.logger_provider {
                 let _ = p.shutdown();
             }
         }
@@ -123,96 +123,20 @@ mod imp {
             .clone()
             .filter(|e| !e.trim().is_empty())
         else {
-            return Telemetry {
-                enabled: false,
-                tracer_provider: None,
-                meter_provider: None,
-                logger_provider: None,
-                counters: noop_counters(),
-            };
+            return disabled();
         };
         let headers = parse_headers(config.otel_headers.as_deref().unwrap_or(""));
         let resource = Resource::builder()
             .with_service_name(config.otel_service_name.clone())
             .build();
         let base = endpoint.trim_end_matches('/').to_string();
-
-        let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_endpoint(format!("{base}/v1/traces"))
-            .with_headers(headers.clone())
-            .build();
-        let tracer_provider = match span_exporter {
-            Ok(exp) => Some(
-                // Simple processor: exports inline on span end. At per-tool-call
-                // volume this is fine, and it avoids the thread-based batch
-                // processor (incompatible with the rt-tokio runtime on 0.33).
-                SdkTracerProvider::builder()
-                    .with_simple_exporter(exp)
-                    .with_resource(resource.clone())
-                    .build(),
-            ),
-            Err(e) => {
-                tracing::warn!("otel span exporter init failed: {e}");
-                None
-            }
-        };
-
-        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(format!("{base}/v1/metrics"))
-            .with_headers(headers.clone())
-            .build();
-        let meter_provider = match metric_exporter {
-            Ok(exp) => {
-                let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exp)
-                    .with_interval(Duration::from_secs(10))
-                    .build();
-                Some(
-                    SdkMeterProvider::builder()
-                        .with_reader(reader)
-                        .with_resource(resource.clone())
-                        .build(),
-                )
-            }
-            Err(e) => {
-                tracing::warn!("otel metric exporter init failed: {e}");
-                None
-            }
-        };
-
-        let log_exporter = opentelemetry_otlp::LogExporter::builder()
-            .with_http()
-            .with_endpoint(format!("{base}/v1/logs"))
-            .with_headers(headers)
-            .build();
-        let logger_provider = match log_exporter {
-            Ok(exp) => Some(
-                SdkLoggerProvider::builder()
-                    .with_batch_exporter(exp)
-                    .with_resource(resource)
-                    .build(),
-            ),
-            Err(e) => {
-                tracing::warn!("otel log exporter init failed: {e}");
-                None
-            }
-        };
-
+        let tracer_provider = tracer_provider(&base, &headers, &resource);
+        let meter_provider = meter_provider(&base, &headers, &resource);
+        let logger_provider = logger_provider(&base, &headers, &resource);
         let enabled = tracer_provider.is_some() && meter_provider.is_some();
-        let counters = if let Some(mp) = &meter_provider {
-            let meter = mp.meter("mmhmem");
-            Counters {
-                avoided_in: meter.u64_counter("mmhmem.tokens_avoided_input_est").build(),
-                avoided_out: meter
-                    .u64_counter("mmhmem.tokens_avoided_output_est")
-                    .build(),
-                worker_prompt: meter.u64_counter("mmhmem.worker_prompt_tokens").build(),
-                worker_completion: meter.u64_counter("mmhmem.worker_completion_tokens").build(),
-                cache: meter.u64_counter("mmhmem.shunt_cache_events").build(),
-            }
-        } else {
-            noop_counters()
+        let counters = match &meter_provider {
+            Some(mp) => live_counters(mp),
+            None => noop_counters(),
         };
         Telemetry {
             enabled,
@@ -220,6 +144,99 @@ mod imp {
             meter_provider,
             logger_provider,
             counters,
+        }
+    }
+
+    /// The disabled telemetry (Req 11.1): no providers, no-op counters.
+    fn disabled() -> Telemetry {
+        Telemetry {
+            enabled: false,
+            tracer_provider: None,
+            meter_provider: None,
+            logger_provider: None,
+            counters: noop_counters(),
+        }
+    }
+
+    /// Span pipeline. Simple processor: exports inline on span end. At
+    /// per-tool-call volume this is fine, and it avoids the thread-based batch
+    /// processor (incompatible with the rt-tokio runtime on 0.33).
+    fn tracer_provider(
+        base: &str,
+        headers: &HashMap<String, String>,
+        resource: &Resource,
+    ) -> Option<SdkTracerProvider> {
+        opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(format!("{base}/v1/traces"))
+            .with_headers(headers.clone())
+            .build()
+            .map(|exp| {
+                SdkTracerProvider::builder()
+                    .with_simple_exporter(exp)
+                    .with_resource(resource.clone())
+                    .build()
+            })
+            .map_err(|e| tracing::warn!("otel span exporter init failed: {e}"))
+            .ok()
+    }
+
+    /// Metrics pipeline. Periodic reader at 10 s intervals.
+    fn meter_provider(
+        base: &str,
+        headers: &HashMap<String, String>,
+        resource: &Resource,
+    ) -> Option<SdkMeterProvider> {
+        opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .with_endpoint(format!("{base}/v1/metrics"))
+            .with_headers(headers.clone())
+            .build()
+            .map(|exp| {
+                let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exp)
+                    .with_interval(Duration::from_secs(10))
+                    .build();
+                SdkMeterProvider::builder()
+                    .with_reader(reader)
+                    .with_resource(resource.clone())
+                    .build()
+            })
+            .map_err(|e| tracing::warn!("otel metric exporter init failed: {e}"))
+            .ok()
+    }
+
+    /// Log pipeline (batch exporter is safe here: not span-critical).
+    fn logger_provider(
+        base: &str,
+        headers: &HashMap<String, String>,
+        resource: &Resource,
+    ) -> Option<SdkLoggerProvider> {
+        opentelemetry_otlp::LogExporter::builder()
+            .with_http()
+            .with_endpoint(format!("{base}/v1/logs"))
+            .with_headers(headers.clone())
+            .build()
+            .map(|exp| {
+                SdkLoggerProvider::builder()
+                    .with_batch_exporter(exp)
+                    .with_resource(resource.clone())
+                    .build()
+            })
+            .map_err(|e| tracing::warn!("otel log exporter init failed: {e}"))
+            .ok()
+    }
+
+    /// Live counters bound to the meter provider's `mmhmem` meter.
+    fn live_counters(mp: &SdkMeterProvider) -> Counters {
+        let meter = mp.meter("mmhmem");
+        Counters {
+            avoided_in: meter.u64_counter("mmhmem.tokens_avoided_input_est").build(),
+            avoided_out: meter
+                .u64_counter("mmhmem.tokens_avoided_output_est")
+                .build(),
+            worker_prompt: meter.u64_counter("mmhmem.worker_prompt_tokens").build(),
+            worker_completion: meter.u64_counter("mmhmem.worker_completion_tokens").build(),
+            cache: meter.u64_counter("mmhmem.shunt_cache_events").build(),
         }
     }
 
