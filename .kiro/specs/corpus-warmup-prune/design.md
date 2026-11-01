@@ -56,12 +56,15 @@ src/
 ├── cli/
 │   ├── (mod.rs)           # modified: prune entry point (run_prune)
 │   └── prune.rs           # NEW: mmhmem prune — stale-cache report + deletion
+├── config/
+│   └── mmhmem_file.rs     # NEW: .mmhmem.json loader (global + project, JSON)
 ├── services/
 │   ├── prune.rs           # NEW: stale-scan + delete + audit summary
 │   └── warmup.rs          # NEW: batch orchestration + WarmupReport
 ├── mcp/
 │   └── (tools.rs)          # modified: shunt_warmup + shunt_prune handlers,
-│                           # router entries, tool descriptions
+│                           # router entries, tool descriptions,
+│                           # worker-unconfigured session notice (Req 8)
 ├── services/mod.rs         # modified: pub mod prune; pub mod warmup;
 └── (main.rs, lib.rs)       # modified: prune arm + help line
 ```
@@ -124,6 +127,15 @@ Scan every cache row: file missing → stale(missing); file present but current 
 | 5.3 | help/README/playbook list new surfaces | lib.rs, README.md, SKILL.md | docs |
 | 5.4 | local-mode tool-count tests updated | tests/local_stdio.rs | tests |
 | 6.1, 6.2, 6.3, 6.4, 6.5 | house caps | clippy.toml + loc_caps gate + task generation | CI gate |
+| 7.1 | env > project > global > defaults per setting | config/mmhmem_file.rs + Config::load_local | MmhmemFile |
+| 7.2 | no file / absent setting → unchanged defaults | config/mmhmem_file.rs | Option-based merge |
+| 7.3 | invalid JSON → fail fast naming the file | config/mmhmem_file.rs | ConfigError::InvalidMmhmemFile |
+| 7.4 | serve stays environment-only | from_env untouched (local-only loader) | Profile |
+| 7.5 | worker API key never logged | config.rs Debug redaction | Debug impl |
+| 7.6 | installers write .mmhmem.json, notices point to it | install_local.sh/.ps1 | JSON merge helpers |
+| 7.7 | docs + .gitignore ignore .mmhmem.json | README.md, .gitignore | docs |
+| 8.1 | worker-unconfigured session-start notice | tools.rs session handler (state.services worker presence) | response text |
+| 8.2 | notice absent when worker configured | tools.rs session handler | response text |
 
 ## Components and Interfaces
 

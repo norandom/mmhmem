@@ -4,9 +4,9 @@
 mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh install or a new project starts with an empty shunt cache and empty token statistics, so no savings register until the big files are organically read — and after a large refactor, the content-addressed shunt cache keeps stale rows (file deleted or content changed) that can never be served again. This feature adds two agent/operator surfaces: an on-demand corpus warmup (an explicit file list is pushed through the real shunt path, populating the cache and the statistics with real, honest events) and staleness-based cache pruning on both the CLI and a tool. Both surfaces exist identically in serve and local modes. The pre-existing deterministic suite passes unmodified; the statistics honesty discipline is absolute (no synthetic rows; computed estimates stay labeled as estimates).
 
 ## Boundary Context (Optional)
-- **In scope**: the `shunt_warmup` MCP tool (explicit paths list, batch cap, per-file skip/miss handling, honest stats, audited); the `prune` CLI and the `shunt_prune` MCP tool (stale-row removal only: missing file or changed content; dry-run/preview; grouped count report; audited); playbook and documentation updates; tests including updates to this repo's own recent tests that pinned the previous tool count.
-- **Out of scope**: TTL- or size-based cache eviction; synthetic or seeded statistics rows; schema changes; automatic prune triggers; eviction of token stats, observations, sessions, or breadcrumbs (prune touches only shunt-cache rows); cross-machine operation.
-- **Adjacent expectations**: this feature EXTENDS the validated `cross-agent-memory-server` spec (tool surface grows from six to eight, both transports, shared handlers) and the implemented `local-mode` feature (whose own new tests pinned the six-tool list and are updated here — the protected pre-existing suite does not pin the tool count, verified). The warmup tool honors the same path confinement and security-critical bypass rules as the existing read shunt.
+- **In scope**: the `shunt_warmup` MCP tool (explicit paths list, batch cap, per-file skip/miss handling, honest stats, audited); the `prune` CLI and the `shunt_prune` MCP tool (stale-row removal only: missing file or changed content; dry-run/preview; grouped count report; audited); the worker configuration file `.mmhmem.json` for the local profile (global `~/.mmhmem.json` plus per-project `./.mmhmem.json`, JSON format, worker settings only, precedence environment > project > global > defaults, installer writes it, serve stays environment-only); the worker-unconfigured session notice; playbook and documentation updates; tests including updates to this repo's own recent tests that pinned the previous tool count.
+- **Out of scope**: TTL- or size-based cache eviction; synthetic or seeded statistics rows; schema changes; automatic prune triggers; eviction of token stats, observations, sessions, or breadcrumbs (prune touches only shunt-cache rows); cross-machine operation; config-file support for serve mode; non-worker settings in `.mmhmem.json` (future extension).
+- **Adjacent expectations**: this feature EXTENDS the validated `cross-agent-memory-server` spec (tool surface grows from six to eight, both transports, shared handlers) and the implemented `local-mode` feature (whose own new tests pinned the six-tool list and are updated here — the protected pre-existing suite does not pin the tool count, verified). The warmup tool honors the same path confinement and security-critical bypass rules as the existing read shunt. The `.mmhmem.json` loader amends the local profile's environment-only configuration model (owner decision 2026-11-01, recorded in research.md); the serve profile's environment-only contract is untouched.
 
 ## Requirements
 
@@ -66,3 +66,21 @@ mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh 
 3. Test files are exempt from the per-function caps but capped at 800 lines per file.
 4. Every implementation task of this spec shall keep its non-test diff at or under 400 added lines.
 5. Task generation shall copy these caps into every implementation task's acceptance criteria.
+
+### Requirement 7: Worker configuration file (`.mmhmem.json`, local profile)
+
+#### Acceptance Criteria
+1. The local profile shall read the worker settings (model, API URL, API key) from a per-project `./.mmhmem.json` and a global `~/.mmhmem.json`, in JSON format, applying each setting with the precedence: process environment, then project file, then global file, then built-in defaults.
+2. When no config file exists or a setting is absent everywhere, the local profile shall behave exactly as before (defaults; the worker stays off when no model is configured).
+3. If a config file exists but is not valid JSON, the local profile shall fail fast at startup with a clear error naming the offending file.
+4. The serve profile shall remain environment-only; the configuration file shall not change any serve behavior.
+5. The worker API key from any source shall never appear in logs or diagnostics (redaction parity with the bearer token).
+6. The installers shall write the configured worker settings into the global or project `.mmhmem.json` instead of embedding worker variables into harness registrations, and their notices shall point to the file.
+7. The documentation shall state the file's location, precedence, and purpose, and recommend keeping API keys out of version control; the repository's `.gitignore` shall ignore `.mmhmem.json`.
+
+### Requirement 8: Worker-unconfigured notice
+**Objective:** As an agent working in a project with no worker model configured, I want the server to tell me at session start, so I know shunting and warmup are unavailable instead of discovering it on the first big read.
+
+#### Acceptance Criteria
+1. When no worker model is configured, the session-start tool's response shall include a one-line notice naming the missing setting and where to configure it, without changing any other response content.
+2. Where a worker model is configured, the notice shall not appear.
