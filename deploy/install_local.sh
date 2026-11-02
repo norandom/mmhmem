@@ -19,12 +19,14 @@
 #   --agent LIST   comma-separated harnesses: claude, opencode, desktop,
 #                  antigravity, all (default: all detected). Interactive
 #                  mode asks for the list when this flag is absent.
-#   --worker-model NAME   set the shunt worker model (WORKER_MODEL) in the
-#                  registrations — e.g. an Ollama tag like qwen3:latest.
-#                  Interactive mode offers this when no flag is given.
-#   --worker-url URL      worker endpoint (WORKER_API_URL; default is
-#                  local Ollama at http://127.0.0.1:11434/v1/chat/completions).
-#   --worker-api-key KEY  worker API key (WORKER_API_KEY, hosted endpoints).
+#   --worker-model NAME   set the shunt worker model — e.g. an Ollama tag
+#                  like qwen3:latest. Stored in .mmhmem.json (global or
+#                  project per scope); interactive mode offers this when no
+#                  flag is given.
+#   --worker-url URL      worker endpoint (default is local Ollama at
+#                  http://127.0.0.1:11434/v1/chat/completions).
+#   --worker-api-key KEY  worker API key for hosted endpoints; stored in
+#                  .mmhmem.json, never echoed.
 #   --remove       uninstall: deregister the selected harnesses, remove the
 #                  playbook copies and the copied binary. Store and audit
 #                  files stay untouched.
@@ -119,20 +121,26 @@ if [ -z "$PROJECT_DIR" ] && [ "$GLOBAL" -eq 0 ]; then
 fi
 [ -z "$PROJECT_DIR" ] || [ -d "$PROJECT_DIR" ] || die "project dir not found: $PROJECT_DIR"
 
-# --- worker model (optional; activates shunting) ---------------------------
-# WORKER_MODEL is the activation switch (env-only config): without it the
-# worker stays off and shunting/warmup is disabled; the URL defaults to
-# local Ollama, so an Ollama user only needs the model name here.
+# --- worker settings (.mmhmem.json; corpus-warmup-prune Req 7.6) ------------
+# worker_model is the activation switch: without it the worker stays off and
+# shunting/warmup is disabled; the URL defaults to local Ollama, so an Ollama
+# user only needs the model name here. Settings are stored in .mmhmem.json -
+# the global one for user scope, the project one for project scope - and the
+# binary reads them at startup; the harness registrations carry no worker env.
+# The file is JSON-merged (other keys preserved); the API key is never echoed.
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ] && [ -t 1 ]; then
   printf 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off): '
   read -r WORKER_MODEL || WORKER_MODEL=""
 fi
-# Env args for CLI-registered harnesses (claude: -e KEY=VAL pairs).
-WORKER_ENV_ARGS=()
-if [ -n "$WORKER_MODEL" ]; then
-  WORKER_ENV_ARGS+=("-e" "WORKER_MODEL=$WORKER_MODEL")
-  [ -n "$WORKER_URL" ] && WORKER_ENV_ARGS+=("-e" "WORKER_API_URL=$WORKER_URL")
-  [ -n "$WORKER_KEY" ] && WORKER_ENV_ARGS+=("-e" "WORKER_API_KEY=$WORKER_KEY")
+# Scope-selected worker-config file (project scope: the installer's project
+# dir, which the spawned child also uses as its working directory).
+WORKER_CONFIG_FILE=""
+if [ "$REMOVE" -eq 0 ]; then
+  if [ "$GLOBAL" -eq 1 ]; then
+    WORKER_CONFIG_FILE="$HOME/.mmhmem.json"
+  elif [ -n "$PROJECT_DIR" ]; then
+    WORKER_CONFIG_FILE="$PROJECT_DIR/.mmhmem.json"
+  fi
 fi
 
 # --- binary ----------------------------------------------------------------
@@ -178,16 +186,19 @@ skill() {
 }
 
 # Merges one JSON assignment into a config file, preserving everything
-# else in it. $1 = file, $2 = dotted path (a.b.c), $3 = JSON value.
+# else in it. $1 = file, $2 = dotted path (a.b.c), $3 = JSON value,
+# $4 = "secret" (optional) — a secret value is never echoed by the
+# manual-merge fallback (Req 7.5: keys never appear in installer output).
 json_merge() {
-  cfg="$1"; path="$2"; value="$3"
+  cfg="$1"; path="$2"; value="$3"; secret="${4:-}"
   if [ "$DRY_RUN" -eq 1 ]; then
     info "[dry-run] merge $path into $cfg"
+    MERGE_OK=1
     return 0
   fi
   mkdir -p "$(dirname "$cfg")"
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$cfg" "$path" "$value" <<'PYEOF' && return 0
+    python3 - "$cfg" "$path" "$value" <<'PYEOF' && { MERGE_OK=1; return 0; }
 import json, sys
 cfg, path, value = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 try:
@@ -205,7 +216,11 @@ with open(cfg, "w") as f:
     f.write("\n")
 PYEOF
   fi
+  if [ "$secret" = "secret" ]; then
+    value="<value withheld - secret; pass the flag again or edit the file by hand>"
+  fi
   info "could not merge $cfg automatically — merge this by hand (deploy/examples/): $path = $value"
+  MERGE_OK=0
   return 0
 }
 # Removes a JSON key from a config file. $1 = file, $2 = dotted path.
@@ -242,15 +257,24 @@ PYEOF
   return 0
 }
 
-# Prints the worker-env JSON fragment (", "KEY": {...}") for config-file
-# harness registrations, or nothing when no model is configured. Values are
-# used verbatim (no quote escaping — model names/tags/keys are plain).
-worker_env_json() { # $1 = JSON key name ("environment" or "env")
-  [ -n "$WORKER_MODEL" ] || return 0
-  printf ', "%s": { "WORKER_MODEL": "%s"' "$1" "$WORKER_MODEL"
-  [ -n "$WORKER_URL" ] && printf ', "WORKER_API_URL": "%s"' "$WORKER_URL"
-  [ -n "$WORKER_KEY" ] && printf ', "WORKER_API_KEY": "%s"' "$WORKER_KEY"
-  printf ' }'
+# JSON-quotes one scalar (plain model names/tags/URLs pass through) and
+# writes the provided worker settings into the config file (JSON-merged,
+# other keys preserved; only provided settings are touched).
+json_quote() {
+  q="${1//\\/\\\\}"
+  printf '"%s"' "${q//\"/\\\"}"
+}
+write_worker_config() {
+  [ -n "$WORKER_CONFIG_FILE" ] || return 0
+  if [ -n "$WORKER_MODEL" ]; then
+    json_merge "$WORKER_CONFIG_FILE" "worker_model" "$(json_quote "$WORKER_MODEL")"
+  fi
+  if [ -n "$WORKER_URL" ]; then
+    json_merge "$WORKER_CONFIG_FILE" "worker_api_url" "$(json_quote "$WORKER_URL")"
+  fi
+  if [ -n "$WORKER_KEY" ]; then
+    json_merge "$WORKER_CONFIG_FILE" "worker_api_key" "$(json_quote "$WORKER_KEY")" secret
+  fi
 }
 
 # --- harness detection + selection ------------------------------------------
@@ -336,6 +360,28 @@ note_missing desktop "$([ -n "$DESKTOP_CFG_DIR" ] && echo 1 || echo 0)" "Claude 
 note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
 
+# --- worker config file (before registrations; they stay worker-env-free) ---
+# Req 7.6: the installer writes .mmhmem.json instead of embedding worker env.
+WORKER_CONFIG_WRITTEN=0
+if [ "$REMOVE" -eq 0 ] && [ -n "$WORKER_CONFIG_FILE" ]; then
+  if [ -n "$WORKER_MODEL" ] || [ -n "$WORKER_URL" ] || [ -n "$WORKER_KEY" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      write_worker_config
+      info "[dry-run] worker settings would be stored in $WORKER_CONFIG_FILE (provided settings written; other keys preserved)"
+      WORKER_CONFIG_WRITTEN=1
+    else
+      MERGE_OK=1
+      write_worker_config
+      if [ "$MERGE_OK" -eq 1 ]; then
+        info "worker settings stored in $WORKER_CONFIG_FILE (provided settings written; other keys preserved)"
+        WORKER_CONFIG_WRITTEN=1
+      else
+        info "worker settings NOT stored in $WORKER_CONFIG_FILE - merge by hand as printed above (python3 is required for automatic merge)"
+      fi
+    fi
+  fi
+fi
+
 # --- Claude Code CLI ---------------------------------------------------------
 if want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then
   if [ "$REMOVE" -eq 1 ]; then
@@ -358,20 +404,18 @@ if want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then
     if [ "$GLOBAL" -eq 1 ]; then
       [ "$DRY_RUN" -eq 0 ] && claude mcp remove mmhmem -s user >/dev/null 2>&1 || true
       if [ "$DRY_RUN" -eq 1 ]; then
-        info "[dry-run] claude mcp add --transport stdio --scope user mmhmem ${WORKER_ENV_ARGS[*]+"${WORKER_ENV_ARGS[*]}"} -- $BIN stdio"
+        info "[dry-run] claude mcp add --transport stdio --scope user mmhmem -- $BIN stdio"
       else
-        # shellcheck disable=SC2068
-        claude mcp add --transport stdio --scope user mmhmem ${WORKER_ENV_ARGS[@]+"${WORKER_ENV_ARGS[@]}"} -- "$BIN" stdio
+        claude mcp add --transport stdio --scope user mmhmem -- "$BIN" stdio
       fi
     else
       (
         cd "$PROJECT_DIR"
         [ "$DRY_RUN" -eq 0 ] && claude mcp remove mmhmem >/dev/null 2>&1 || true
         if [ "$DRY_RUN" -eq 1 ]; then
-          info "[dry-run] claude mcp add --transport stdio mmhmem ${WORKER_ENV_ARGS[*]+"${WORKER_ENV_ARGS[*]}"} -- $BIN stdio (in $PROJECT_DIR)"
+          info "[dry-run] claude mcp add --transport stdio mmhmem -- $BIN stdio (in $PROJECT_DIR)"
         else
-          # shellcheck disable=SC2068
-          claude mcp add --transport stdio mmhmem ${WORKER_ENV_ARGS[@]+"${WORKER_ENV_ARGS[@]}"} -- "$BIN" stdio
+          claude mcp add --transport stdio mmhmem -- "$BIN" stdio
         fi
       )
     fi
@@ -388,7 +432,7 @@ if want_agent opencode && [ "$HAS_OPENCODE" -eq 1 ]; then
     json_remove "$CFG" "mcp.servers.mmhmem"
   else
     json_merge "$CFG" "mcp.servers.mmhmem" \
-      "{\"type\": \"local\", \"command\": [\"$BIN\", \"stdio\"]$(worker_env_json environment)}"
+      "{\"type\": \"local\", \"command\": [$(json_quote "$BIN"), \"stdio\"]}"
   fi
   if [ "$GLOBAL" -eq 1 ]; then
     skill "$HOME/.config/opencode/skills/unified-memory"
@@ -403,7 +447,7 @@ if want_agent desktop && [ -n "$DESKTOP_CFG_DIR" ]; then
       json_remove "$DESKTOP_CFG_DIR/claude_desktop_config.json" "mcpServers.mmhmem"
     else
       json_merge "$DESKTOP_CFG_DIR/claude_desktop_config.json" "mcpServers.mmhmem" \
-        "{\"command\": \"$BIN\", \"args\": [\"stdio\"]$(worker_env_json env)}"
+        "{\"command\": $(json_quote "$BIN"), \"args\": [\"stdio\"]}"
     fi
     case "$DESKTOP_CFG_DIR" in
       *Application*) skill "$HOME/Library/Claude/skills/unified-memory" ;;
@@ -421,7 +465,7 @@ if want_agent antigravity && [ "$HAS_ANTIGRAVITY" -eq 1 ]; then
     info "Antigravity: remove the mmhmem server in Antigravity Settings → MCP (added manually)"
   else
     info "Antigravity: add a stdio MCP server in Settings with this JSON:"
-    echo "  { \"mcpServers\": { \"mmhmem\": { \"command\": \"$BIN\", \"args\": [\"stdio\"]$(worker_env_json env) } } }"
+    echo "  { \"mcpServers\": { \"mmhmem\": { \"command\": $(json_quote "$BIN"), \"args\": [\"stdio\"] } } }"
   fi
   registered="antigravity-manual $registered"
 fi
@@ -456,7 +500,7 @@ if [ "$GLOBAL" -eq 1 ]; then
 fi
 
 # --- summary ----------------------------------------------------------------------
-[ -n "$registered" ] || die "nothing to do: no harness selected/detected"
+[ -n "$registered" ] || [ "$WORKER_CONFIG_WRITTEN" -eq 1 ] || die "nothing to do: no harness selected/detected"
 MODE="project: $PROJECT_DIR"
 [ "$GLOBAL" -eq 1 ] && MODE="global (all projects)"
 echo
@@ -464,14 +508,19 @@ if [ "$REMOVE" -eq 1 ]; then
   info "mmhmem local mode removed ($MODE)"
   info "harnesses: ${registered% }"
   info "per-user store left intact (it is your data): ~/.local/share/mmhmem or ~/Library/Application Support/mmhmem — delete it manually if you really want"
+  info ".mmhmem.json kept (it may hold your worker settings and API key)"
 else
   info "mmhmem local mode installed ($MODE)"
   info "harnesses: ${registered% }"
   info "binary: $BIN"
   if [ -n "$WORKER_MODEL" ]; then
-    info "worker model: $WORKER_MODEL (shunting and warmup active)"
+    if [ "$WORKER_CONFIG_WRITTEN" -eq 1 ]; then
+      info "worker model: $WORKER_MODEL (shunting and warmup active; stored in $WORKER_CONFIG_FILE)"
+    else
+      info "worker model: $WORKER_MODEL (store it in $WORKER_CONFIG_FILE by hand — the automatic merge failed as printed above)"
+    fi
   else
-    info "worker model not configured — shunting and warmup stay off; re-run with --worker-model NAME (e.g. an Ollama tag) or set WORKER_MODEL in the harness registration"
+    info "worker model not configured — shunting and warmup stay off; re-run with --worker-model NAME (e.g. an Ollama tag) or set worker_model in $WORKER_CONFIG_FILE"
   fi
   info "store: per-user default (~/.local/share/mmhmem or ~/Library/Application Support/mmhmem); created on first use"
   info "check your savings any time: $BIN stats"

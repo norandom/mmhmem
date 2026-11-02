@@ -18,12 +18,13 @@
 #   -Agent LIST   comma-separated harnesses: claude, opencode, desktop,
 #                 antigravity, all (default: all detected). Interactive
 #                 mode asks for the list when this flag is absent.
-#   -WorkerModel NAME   set the shunt worker model (WORKER_MODEL) in the
-#                 registrations - e.g. an Ollama tag like qwen3:latest.
-#                 Interactive mode offers this when no flag is given.
-#   -WorkerUrl URL      worker endpoint (WORKER_API_URL; default is
-#                 local Ollama at http://127.0.0.1:11434/v1/chat/completions).
-#   -WorkerApiKey KEY   worker API key (WORKER_API_KEY, hosted endpoints).
+#   -WorkerModel NAME   set the shunt worker model - e.g. an Ollama tag like
+#                 qwen3:latest. Stored in .mmhmem.json (global or project
+#                 per scope); interactive mode offers this when no flag given.
+#   -WorkerUrl URL      worker endpoint (default is local Ollama at
+#                 http://127.0.0.1:11434/v1/chat/completions).
+#   -WorkerApiKey KEY   worker API key for hosted endpoints; stored in
+#                 .mmhmem.json, never echoed.
 #   -Remove       uninstall: deregister the selected harnesses, remove the
 #                 playbook copies and the copied binary. Store and audit
 #                 files stay untouched.
@@ -110,29 +111,33 @@ if ($ProjectDir -and -not (Test-Path -LiteralPath $ProjectDir -PathType Containe
     Die "project dir not found: $ProjectDir"
 }
 
-# --- worker model (optional; activates shunting) ------------------------------
-# WORKER_MODEL is the activation switch (env-only config): without it the
-# worker stays off and shunting/warmup is disabled; the URL defaults to
-# local Ollama, so an Ollama user only needs the model name here.
+# --- worker settings (.mmhmem.json; corpus-warmup-prune Req 7.6) ----------------
+# worker_model is the activation switch: without it the worker stays off and
+# shunting/warmup is disabled; the URL defaults to local Ollama, so an Ollama
+# user only needs the model name here. Settings are stored in .mmhmem.json -
+# the global one for user scope, the project one for project scope - and the
+# binary reads them at startup; the harness registrations carry no worker env.
+# The file is JSON-merged (other keys preserved); the API key is never echoed.
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     $WorkerModel = Read-Host 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off)'
 }
-# -e KEY=VALUE pairs for CLI-registered harnesses (claude).
-$WorkerEnvArgs = @()
-if ($WorkerModel) {
-    $WorkerEnvArgs += @('-e', "WORKER_MODEL=$WorkerModel")
-    if ($WorkerUrl) { $WorkerEnvArgs += @('-e', "WORKER_API_URL=$WorkerUrl") }
-    if ($WorkerApiKey) { $WorkerEnvArgs += @('-e', "WORKER_API_KEY=$WorkerApiKey") }
+# Scope-selected worker-config file (project scope: the installer's project
+# dir, which the spawned child also uses as its working directory).
+$WorkerConfigFile = if ($Remove) { $null }
+    elseif ($Global) { Join-Path $HOME '.mmhmem.json' }
+    elseif ($ProjectDir) { Join-Path $ProjectDir '.mmhmem.json' }
+    else { $null }
+# JSON-quotes one scalar value (plain model names/tags/URLs pass through).
+# NB: .NET regex replacements do not process backslash escapes, so the
+# replacement strings here are literal '\\' (two chars) and '\"'.
+function Json-Quote([string]$v) {
+    return '"' + (($v -replace '\\', '\\') -replace '"', '\"') + '"'
 }
-# Prints the worker-env JSON fragment (", "KEY": {...}") for config-file
-# registrations, or an empty string when no model is configured. Values
-# are used verbatim (no quote escaping - model names/tags/keys are plain).
-function Worker-EnvJson([string]$key) {
-    if (-not $WorkerModel) { return '' }
-    $inner = "`"WORKER_MODEL`": `"$WorkerModel`""
-    if ($WorkerUrl) { $inner += ", `"WORKER_API_URL`": `"$WorkerUrl`"" }
-    if ($WorkerApiKey) { $inner += ", `"WORKER_API_KEY`": `"$WorkerApiKey`"" }
-    return ", `"$key`": { $inner }"
+# Writes only the provided settings into the config file (JSON-merged).
+function Write-WorkerConfig {
+    if ($WorkerModel) { Merge-Json $WorkerConfigFile @('worker_model') (Json-Quote $WorkerModel) }
+    if ($WorkerUrl) { Merge-Json $WorkerConfigFile @('worker_api_url') (Json-Quote $WorkerUrl) }
+    if ($WorkerApiKey) { Merge-Json $WorkerConfigFile @('worker_api_key') (Json-Quote $WorkerApiKey) }
 }
 
 # --- binary -------------------------------------------------------------------
@@ -196,7 +201,10 @@ function Merge-Json([string]$File, [string[]]$JsonPath, [string]$ValueJson) {
         $node = $node.$name
     }
     $node | Add-Member -MemberType NoteProperty -Name $JsonPath[-1] -Value $value -Force
-    $root | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $File -Encoding UTF8
+    # BOM-less UTF8: Windows PowerShell's Set-Content -Encoding UTF8 writes a
+    # BOM, which strict JSON parsers (including mmhmem's own loader) reject.
+    $json = $root | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($File, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 # Removes a JSON key from a config file. $File = path, $JsonPath = "a.b.c".
@@ -213,7 +221,8 @@ function Remove-JsonKey([string]$File, [string[]]$JsonPath) {
     }
     if ($node.PSObject.Properties[$JsonPath[-1]]) {
         $node.PSObject.Properties.Remove($JsonPath[-1])
-        $root | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $File -Encoding UTF8
+        $json = $root | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText($File, $json, (New-Object System.Text.UTF8Encoding($false)))
     }
 }
 
@@ -270,6 +279,16 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
 
+# --- worker config file (before registrations; they stay worker-env-free) -----
+# Req 7.6: the installers write .mmhmem.json instead of embedding worker env.
+# Only provided settings are written; other keys in the file are preserved.
+$WorkerConfigWritten = $false
+if (-not $Remove -and $WorkerConfigFile -and ($WorkerModel -or $WorkerUrl -or $WorkerApiKey)) {
+    Write-WorkerConfig
+    $WorkerConfigWritten = $true
+    Info "worker settings stored in $WorkerConfigFile (provided settings written; other keys preserved)"
+}
+
 # --- Claude Code CLI ---------------------------------------------------------------
 if ((Want-Agent 'claude') -and $HasClaude) {
     if ($Remove) {
@@ -286,18 +305,18 @@ if ((Want-Agent 'claude') -and $HasClaude) {
     } elseif ($Global) {
         if (-not $DryRun) { Remove-ClaudeServer @('mcp', 'remove', 'mmhmem', '-s', 'user') }
         if ($DryRun) {
-            Info "[dry-run] claude mcp add --transport stdio --scope user mmhmem $($WorkerEnvArgs -join ' ') -- $Bin stdio"
+            Info "[dry-run] claude mcp add --transport stdio --scope user mmhmem -- $Bin stdio"
         } else {
-            claude mcp add --transport stdio --scope user mmhmem @WorkerEnvArgs -- $Bin stdio
+            claude mcp add --transport stdio --scope user mmhmem -- $Bin stdio
         }
     } else {
         Push-Location -LiteralPath $ProjectDir
         try {
             if (-not $DryRun) { Remove-ClaudeServer @('mcp', 'remove', 'mmhmem') }
             if ($DryRun) {
-                Info "[dry-run] claude mcp add --transport stdio mmhmem $($WorkerEnvArgs -join ' ') -- $Bin stdio (in $ProjectDir)"
+                Info "[dry-run] claude mcp add --transport stdio mmhmem -- $Bin stdio (in $ProjectDir)"
             } else {
-                claude mcp add --transport stdio mmhmem @WorkerEnvArgs -- $Bin stdio
+                claude mcp add --transport stdio mmhmem -- $Bin stdio
             }
         } finally { Pop-Location }
     }
@@ -312,7 +331,7 @@ if ((Want-Agent 'opencode') -and $HasOpenCode) {
         Remove-JsonKey $cfg @('mcp', 'servers', 'mmhmem')
     } else {
         Merge-Json $cfg @('mcp', 'servers', 'mmhmem') `
-            "{`"type`": `"local`", `"command`": [`"$Bin`", `"stdio`"]$(Worker-EnvJson 'environment')}"
+            "{`"type`": `"local`", `"command`": [$(Json-Quote $Bin), `"stdio`"]}"
     }
     if ($Global) { Set-Skill (Join-Path $HOME '.config\opencode\skills\unified-memory') }
     $Registered.Add('opencode') | Out-Null
@@ -326,7 +345,7 @@ if ((Want-Agent 'desktop') -and $HasDesktop) {
             Remove-JsonKey $deskCfg @('mcpServers', 'mmhmem')
         } else {
             Merge-Json $deskCfg @('mcpServers', 'mmhmem') `
-                "{`"command`": `"$Bin`", `"args`": [`"stdio`"]$(Worker-EnvJson 'env')}"
+                "{`"command`": $(Json-Quote $Bin), `"args`": [`"stdio`"]}"
         }
         Set-Skill (Join-Path $DesktopCfgDir 'skills\unified-memory')
         $Registered.Add('claude-desktop') | Out-Null
@@ -341,7 +360,7 @@ if ((Want-Agent 'antigravity') -and $HasAntigravity) {
         Info "Antigravity: remove the mmhmem server in Antigravity Settings > MCP (added manually)"
     } else {
         Info "Antigravity: add a stdio MCP server in Settings with this JSON:"
-        Write-Host "  { `"mcpServers`": { `"mmhmem`": { `"command`": `"$Bin`", `"args`": [`"stdio`"]$(Worker-EnvJson 'env') } } }"
+        Write-Host "  { `"mcpServers`": { `"mmhmem`": { `"command`": $(Json-Quote $Bin), `"args`": [`"stdio`"] } } }"
     }
     $Registered.Add('antigravity-manual') | Out-Null
 }
@@ -366,21 +385,22 @@ if ($Global) {
 }
 
 # --- summary ---------------------------------------------------------------------------------
-if ($Registered.Count -eq 0) { Die 'nothing to do: no harness selected/detected' }
+if ($Registered.Count -eq 0 -and -not $WorkerConfigWritten) { Die 'nothing to do: no harness selected/detected' }
 Write-Host ''
 $Mode = if ($Global) { 'global (all projects)' } else { "project: $ProjectDir" }
 if ($Remove) {
     Info "mmhmem local mode removed ($Mode)"
     Info ("harnesses: " + ($Registered -join ' '))
     Info "per-user store left intact (it is your data): %APPDATA%\mmhmem - delete it manually if you really want"
+    Info ".mmhmem.json kept (it may hold your worker settings and API key)"
 } else {
     Info "mmhmem local mode installed ($Mode)"
     Info ("harnesses: " + ($Registered -join ' '))
     Info "binary: $Bin"
     if ($WorkerModel) {
-        Info "worker model: $WorkerModel (shunting and warmup active)"
+        Info "worker model: $WorkerModel (shunting and warmup active; stored in $WorkerConfigFile)"
     } else {
-        Info "worker model not configured - shunting and warmup stay off; re-run with -WorkerModel NAME (e.g. an Ollama tag) or set WORKER_MODEL in the harness registration"
+        Info "worker model not configured - shunting and warmup stay off; re-run with -WorkerModel NAME (e.g. an Ollama tag) or set worker_model in $WorkerConfigFile"
     }
     Info "store: per-user default (%APPDATA%\mmhmem); created on first use"
     Info "check your savings any time: $Bin stats"

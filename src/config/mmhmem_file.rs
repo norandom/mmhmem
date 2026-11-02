@@ -58,13 +58,17 @@ impl MmhmemFile {
     /// Reads one optional file; missing → defaults, unreadable or invalid
     /// JSON → fail fast naming the file (Req 7.3). An empty path means
     /// "no location" (unset home variable) and reads as absent (Req 7.2).
+    /// A UTF-8 BOM prefix is tolerated (hand-edited Windows files).
     fn read_one(path: &Path) -> Result<Self, ConfigError> {
         if path.as_os_str().is_empty() {
             return Ok(Self::default());
         }
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map_err(|_| ConfigError::InvalidMmhmemFile(path.to_path_buf())),
+            Ok(text) => {
+                let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+                serde_json::from_str(text)
+                    .map_err(|_| ConfigError::InvalidMmhmemFile(path.to_path_buf()))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(_) => Err(ConfigError::InvalidMmhmemFile(path.to_path_buf())),
         }
@@ -228,6 +232,21 @@ mod tests {
         );
         let file = MmhmemFile::load(&dir.path().join("missing-global"), &project)
             .expect("unknown fields are ignored");
+        assert_eq!(file.worker_model.as_deref(), Some("m"));
+    }
+
+    #[test]
+    fn load_tolerates_a_utf8_bom_prefix() {
+        // Hand-edited Windows files may carry a BOM; the content is still
+        // valid JSON, so Req 7.3's fail-fast must not trigger on it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let global = write_file(
+            dir.path(),
+            "global.json",
+            "\u{feff}{\"worker_model\":\"m\"}",
+        );
+        let file = MmhmemFile::load(&global, &dir.path().join("missing-project"))
+            .expect("BOM-prefixed JSON is valid");
         assert_eq!(file.worker_model.as_deref(), Some("m"));
     }
 
