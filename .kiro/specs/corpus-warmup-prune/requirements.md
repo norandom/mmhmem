@@ -4,9 +4,9 @@
 mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh install or a new project starts with an empty shunt cache and empty token statistics, so no savings register until the big files are organically read — and after a large refactor, the content-addressed shunt cache keeps stale rows (file deleted or content changed) that can never be served again. This feature adds two agent/operator surfaces: an on-demand corpus warmup (an explicit file list is pushed through the real shunt path, populating the cache and the statistics with real, honest events) and staleness-based cache pruning on both the CLI and a tool. Both surfaces exist identically in serve and local modes. The pre-existing deterministic suite passes unmodified; the statistics honesty discipline is absolute (no synthetic rows; computed estimates stay labeled as estimates).
 
 ## Boundary Context (Optional)
-- **In scope**: the `shunt_warmup` MCP tool (explicit paths list, batch cap, per-file skip/miss handling, honest stats, audited); the `prune` CLI and the `shunt_prune` MCP tool (stale-row removal only: missing file or changed content; dry-run/preview; grouped count report; audited); the worker configuration file `.mmhmem.json` for the local profile (global `~/.mmhmem.json` plus per-project `./.mmhmem.json`, JSON format, worker settings only, precedence environment > project > global > defaults, installer writes it, serve stays environment-only); the worker-unconfigured session notice; playbook and documentation updates; tests including updates to this repo's own recent tests that pinned the previous tool count.
+- **In scope**: the `shunt_warmup` MCP tool (explicit paths list, batch cap, per-file skip/miss handling, honest stats, audited); the `prune` CLI and the `shunt_prune` MCP tool (stale-row removal only: missing file or changed content; dry-run/preview; grouped count report; audited); the worker configuration file `.mmhmem.json` for the local profile (global `~/.mmhmem.json` plus per-project `./.mmhmem.json`, JSON format, worker settings only, precedence environment > project > global > defaults, installer writes it, serve stays environment-only); the worker-unconfigured session notice; the installer-shipped on-demand `/mmhmem-recap` session-recap command templates for Claude Code and OpenCode (playbook wording for harnesses without command support); the `mem_search_breadcrumbs` tool (literal-substring search over the session breadcrumb history, no schema change); playbook and documentation updates; tests including updates to this repo's own recent tests that pinned the previous tool count.
 - **Out of scope**: TTL- or size-based cache eviction; synthetic or seeded statistics rows; schema changes; automatic prune triggers; eviction of token stats, observations, sessions, or breadcrumbs (prune touches only shunt-cache rows); cross-machine operation; config-file support for serve mode; non-worker settings in `.mmhmem.json` (future extension).
-- **Adjacent expectations**: this feature EXTENDS the validated `cross-agent-memory-server` spec (tool surface grows from six to eight, both transports, shared handlers) and the implemented `local-mode` feature (whose own new tests pinned the six-tool list and are updated here — the protected pre-existing suite does not pin the tool count, verified). The warmup tool honors the same path confinement and security-critical bypass rules as the existing read shunt. The `.mmhmem.json` loader amends the local profile's environment-only configuration model (owner decision 2026-11-01, recorded in research.md); the serve profile's environment-only contract is untouched.
+- **Adjacent expectations**: this feature EXTENDS the validated `cross-agent-memory-server` spec (tool surface grows from six to nine, both transports, shared handlers) and the implemented `local-mode` feature (whose own new tests pinned the six-tool list and are updated here — the protected pre-existing suite does not pin the tool count, verified). The warmup tool honors the same path confinement and security-critical bypass rules as the existing read shunt. The `.mmhmem.json` loader amends the local profile's environment-only configuration model (owner decision 2026-11-01, recorded in research.md); the serve profile's environment-only contract is untouched.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh 
 #### Acceptance Criteria
 1. The pre-existing deterministic suite (the suite that existed before the local-mode feature) shall pass unmodified after every change of this spec.
 2. Both new tools shall behave identically in serve and local modes through the shared tool handlers.
-3. The help text, README tool list, and playbook shall list the new surfaces (eight MCP tools plus the `prune` command).
+3. The help text, README tool list, and playbook shall list the new surfaces (nine MCP tools plus the `prune` command).
 4. This repository's own local-mode tests that pinned the previous six-tool list shall be updated to include the new tools, and every updated or new test shall state which requirement of this spec it verifies.
 
 ### Requirement 6: Code complexity and size caps (house rule)
@@ -84,3 +84,24 @@ mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh 
 #### Acceptance Criteria
 1. When no worker model is configured, the session-start tool's response shall include a one-line notice naming the missing setting and where to configure it, without changing any other response content.
 2. Where a worker model is configured, the notice shall not appear.
+
+### Requirement 9: On-demand session recap command (`/mmhmem-recap`)
+**Objective:** As an agent user starting a fresh context (after a client context clear or restart), I want an on-demand, installer-shipped command that pulls the last session recap, so that working context is one keystroke away without any hook configuration.
+
+#### Acceptance Criteria
+1. The repository shall ship recap command templates under `deploy/commands/` whose content instructs the agent to call `session_resume_or_handoff` without `updated_working_state_md` and to present the returned working state, objective, and breadcrumbs as a recap of the last session.
+2. The installers shall copy the Claude Code template into the `.claude/commands/` directory (user-global or project scope, matching the installer's scope selection) when Claude Code is among the selected harnesses.
+3. The installers shall copy the OpenCode template into the `.opencode/command/` directory (user-global or project scope, matching the installer's scope selection) when OpenCode is among the selected harnesses.
+4. For harnesses without user-defined command support (Claude Desktop, Antigravity), the installers shall make no command changes, and the playbook shall carry the recap instruction instead.
+5. The installers' remove mode shall remove the installed command templates without ever deleting the store or `.mmhmem.json`, and dry-run mode shall list every command-file action before performing it.
+6. The playbook shall tell agents, in one line within its token cap, that after a context clear the recap command (or a direct `session_resume_or_handoff` call) restores the last session's working state.
+
+### Requirement 10: Breadcrumb history search (`mem_search_breadcrumbs`)
+**Objective:** As an agent resuming or auditing past work, I want to search the project's breadcrumb history by keyword, so that I can find what earlier sessions did beyond the fifteen most recent crumbs the resume view returns.
+
+#### Acceptance Criteria
+1. The mmhmem binary shall expose a `mem_search_breadcrumbs` tool that searches the calling project's breadcrumb rows for a literal substring across tool name, target resource, and action summary, in both serve and local modes.
+2. The tool shall return matches newest first, each showing harness, tool name, target resource, action summary, and timestamp, capped by a limit argument (default 20, maximum 100); a blank query shall list the project's breadcrumbs newest first under the same cap.
+3. The tool shall accept an optional harness filter that restricts matches to one calling harness.
+4. When no breadcrumb matches, the tool shall return a clear no-match message.
+5. The tool shall be read-only over stored history: it shall not modify or delete any existing row in any table (its own audit event and breadcrumb follow the existing per-call discipline).

@@ -13,7 +13,7 @@ Layered daemon: protocol layer (MCP tools) → service layer (session bus, shunt
 
 ### `src/mcp/` (protocol layer)
 **Location**: `/src/mcp/`  
-**Purpose**: MCP tool definitions and handlers (session handoff, smart_read, boilerplate_write, mem_search, mem_get_observations, mem_record_observation); thin — delegates to services  
+**Purpose**: MCP tool definitions and handlers; thin — delegates to services (the tool surface is documented in the README/specs, not enumerated here)  
 **Example**: `smart_read` handler validates auth context, calls shunt service, returns markdown
 
 ### `src/services/`
@@ -51,7 +51,7 @@ Layered daemon: protocol layer (MCP tools) → service layer (session bus, shunt
 
 - Tool handlers stay thin; all policy (thresholds, security bypass regex, redaction) lives in services/storage and is unit-testable without HTTP
 - Every state mutation goes through the audit writer — no direct writes outside it
-- Config is environment-only; no config files parsed at runtime
+- Config is environment-only for the serve profile; the local profile additionally reads worker settings from `.mmhmem.json` (global `~/.mmhmem.json` + per-project `./.mmhmem.json`, precedence env > project > global > defaults; owner decision 2026-11-01, corpus-warmup-prune Req 7). No other config files are parsed at runtime.
 
 ---
 _Document patterns, not file trees. New files following patterns shouldn't require updates_

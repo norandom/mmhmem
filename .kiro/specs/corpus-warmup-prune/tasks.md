@@ -10,14 +10,14 @@
 
 - [ ] 1. Foundation: warmup orchestration over the shunt path
 - [ ] 1.1 Warmup service with batch outcomes
-  - Implement the warmup orchestration over the existing per-file shunt stages: for each path in the batch, record one outcome — delegated (worker called, cache and statistics rows written by the reused engine path), cached (content and fingerprint hit, no worker call), skipped with reason (below threshold, security-critical), or missing (unreadable file counted, never fatal).
+  - Implement the warmup orchestration over the existing per-file shunt stages: for each path in the batch, record one outcome — delegated (worker called, cache and statistics rows written by the reused engine path), cached (content and fingerprint hit, no worker call), skipped with reason (below threshold, security-critical), missing (file not found or unreadable — counted, never fatal), denied (path outside the allowed roots — counted, never fatal), or failed (worker call failed for this file — counted, never fatal, so one flaky call cannot waste the batch's spent tokens).
   - Enforce the 25-path batch cap with a clear pre-flight error, and propagate the existing worker-unconfigured error when any file needs delegation and no worker is set.
   - Record one audit event summarizing the batch counts (the delegated path keeps its own per-file events).
   - Accept the warmup question as an explicit input (the tool and the playbook share the canonical summarization question so warmup rows match later reads).
-  - Observable: unit tests pass for the cap error, a seeded cache row counting as cached with zero worker calls, both skip reasons, a missing file not failing the batch, and the no-worker error.
+  - Observable: unit tests pass for the cap error, a seeded cache row counting as cached with zero worker calls, both skip reasons, a missing file not failing the batch, a denied path not failing the batch, a per-file worker failure not failing the batch, and the no-worker error.
   - _Requirements: 1.2, 1.3, 1.4, 1.6, 1.7, 1.8_
 - [ ] 1.2 Warmup report rendering
-  - Render the batch summary (delegated, cached, skipped by reason, missing, worker tokens) as the tool response text, with a hint listing per-file skip reasons capped at a sane length.
+  - Render the batch summary (delegated, cached, skipped by reason, missing, denied, failed, worker tokens) as the tool response text, with a hint listing per-file skip/failure reasons capped at a sane length.
   - Observable: unit tests show the report includes every counter and the per-file reason list.
   - _Requirements: 1.5_
 
@@ -39,9 +39,13 @@
   - Observable: the tools appear in `tools/list` in both modes with correct argument schemas; a handler error surfaces as the house's actionable JSON-RPC error.
   - _Requirements: 1.1, 1.5, 4.1, 4.2, 5.2_
 - [ ] 3.2 Tool-count assertions updated
-  - Update this repository's own local-mode tests that pinned the six-tool list to expect eight, keeping the pre-existing suite untouched.
+  - Update this repository's own local-mode tests that pinned the six-tool list to expect nine (eight from this spec's warmup/prune/notice work plus `mem_search_breadcrumbs`), keeping the pre-existing suite untouched.
   - Observable: the updated suite passes; `git diff` shows no modification to any test file that predates the local-mode feature.
   - _Requirements: 5.1, 5.4_
+- [ ] 3.3 Worker-unconfigured session-start notice
+  - In the shared `session_resume_or_handoff` handler: when no worker model is configured, append a one-line notice to the resume response naming the missing setting and where to configure it (`.mmhmem.json` `worker_model`); when a worker is configured, the notice is absent. No other response content changes.
+  - Observable: tests show the notice present without a worker and absent with one, with the rest of the response unchanged.
+  - _Requirements: 8.1, 8.2_
 
 - [ ] 4. CLI surface: `mmhmem prune`
 - [ ] 4.1 Prune subcommand
@@ -52,7 +56,7 @@
 - [ ] 5. Documentation and playbook
 - [ ] 5.1 (P) Playbook and README updates
   - Add one playbook line telling agents to offer warming the corpus with `shunt_warmup` on a new project's key files, and the canonical question alignment; verify the playbook stays under 200 tokens.
-  - Update the README: eight-tool list, warmup guidance in the quickstart area, and `mmhmem prune` in day-to-day operation with the dry-run example.
+  - Update the README: nine-tool list, warmup guidance in the quickstart area, and `mmhmem prune` in day-to-day operation with the dry-run example.
   - Observable: the playbook line is present under the token cap, and the README lists all new surfaces.
   - _Boundary: Docs and playbook_
   - _Requirements: 2.1, 5.3_
@@ -68,9 +72,49 @@
   - Observable: the tool integration test passes with before/after row counts.
   - _Requirements: 4.1, 4.2, 4.3_
 
-- [ ] 7. Final validation: parity and non-regression
+- [ ] 7. Final validation: parity and non-regression (executed after Majors 8-10)
 - [ ] 7.1 Full regression and unmodified-suite proof
   - Run the complete gate chain (format, deny-warnings clippy, full test suite) and prove the protected pre-existing suite is byte-identical (zero modifications; only this feature's new or updated files appear in the diff).
   - Confirm the tool count and behavior parity hold in both modes and the size-cap test passes on all new files.
   - Observable: a clean full gate run with the recorded diff proof.
   - _Requirements: 5.1, 5.2, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5_
+
+- [ ] 8. Worker configuration file: `.mmhmem.json` loader and installer write
+- [ ] 8.1 Loader with per-setting precedence (TDD)
+  - Implement `config/mmhmem_file.rs`: `MmhmemFile { worker_model, worker_api_url, worker_api_key }` (serde, every field optional) loaded from the global `~/.mmhmem.json` and the per-project `./.mmhmem.json`; merge per setting in `Config::load_local` with the precedence environment > project file > global file > built-in defaults (Option-based, so one setting can come from each level); a file that exists but is not valid JSON fails fast at startup naming the offending file (`ConfigError::InvalidMmhmemFile`); the serve profile's environment-only path stays untouched.
+  - Prove the worker API key never appears in logs or diagnostics: verify the Config redaction path actually redacts `worker_api_key`, not just the bearer token.
+  - Observable: unit tests cover the per-setting precedence matrix, absent-everywhere defaults, invalid-JSON fail-fast naming the file, redaction of the key, and unchanged serve behavior.
+  - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
+- [ ] 8.2 Installers write `.mmhmem.json` (replaces env embedding)
+  - Replace the interim worker env injection in both installers with writing the configured worker settings (model, API URL, API key) into the global or project `.mmhmem.json` per the scope selection (JSON-merged; the key is never echoed); point the unset notices at the file; keep `--dry-run` honest about the write; `--remove` uninstalls registrations, skills, and command templates but never deletes the store or `.mmhmem.json`.
+  - Observable: dry-run on host PowerShell and WSL bash shows the config write; a real run produces a valid `.mmhmem.json` the loader accepts; the key never appears in installer output.
+  - _Requirements: 7.6_
+- [ ] 8.3 Docs and ignore entry
+  - README section: `.mmhmem.json` location (global + project), precedence (environment > project > global > defaults), purpose (worker settings only), and the keep-keys-out-of-version-control recommendation; add `.mmhmem.json` to `.gitignore`.
+  - Observable: README documents all of it; `.gitignore` contains the entry.
+  - _Requirements: 7.7_
+
+- [ ] 9. On-demand session recap: `/mmhmem-recap` command templates
+- [ ] 9.1 Templates and installer wiring
+  - Add `deploy/commands/claude/mmhmem-recap.md` and `deploy/commands/opencode/mmhmem-recap.md`: static markdown, description-only frontmatter, body instructing the agent to call `session_resume_or_handoff` without `updated_working_state_md` (with the template's own harness string and the current project) and to present the returned working state, objective, and breadcrumbs as a concise recap of the last session.
+  - Wire both installers to copy the matching template into the harness's command directory when that harness is selected (Claude Code → `.claude/commands/`, OpenCode → `.opencode/command/`, user-global or project scope mirroring the existing skill-copy seam); `--remove` removes exactly the copied template; `--dry-run` lists the action; desktop and antigravity get no command changes.
+  - Observable: dry-run lists the command-file actions in both installers; a real run installs the template and `--remove` removes exactly it (verified on host PowerShell and WSL bash); the store and `.mmhmem.json` are untouched by removal.
+  - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
+- [ ] 9.2 Playbook and README recap lines
+  - One playbook line: after a context clear, the recap command (or a direct `session_resume_or_handoff` call) restores the last session's working state; verify the playbook stays under 200 tokens. README mentions `/mmhmem-recap` in day-to-day operation.
+  - Observable: playbook line present under the token cap; README mentions the recap command.
+  - _Requirements: 9.6_
+
+- [ ] 10. Breadcrumb history search: `mem_search_breadcrumbs`
+- [ ] 10.1 Breadcrumb search service
+  - Implement `services/breadcrumbs.rs`: project-scoped literal-substring search over `session_breadcrumbs` (tool name, target resource, action summary) with LIKE wildcards escaped, blank query = all crumbs newest first, optional harness filter, limit clamped to default 20 / max 100, ordered newest first; read-only over stored rows; one audit event per call plus its own breadcrumb (mem_search parity); no schema change, no FTS.
+  - Observable: unit tests against a seeded store cover substring matches across all three fields, wildcard escaping, the harness filter, the limit clamp, blank-query listing, no-match, project isolation, and a proof that no existing row changes.
+  - _Requirements: 10.2, 10.3, 10.4, 10.5_
+- [ ] 10.2 Tool handler and registration
+  - Add `BreadcrumbSearchParams` (project, agent_harness, query, optional harness filter, limit) and a thin shared handler rendering matches newest first with timestamp, harness, tool, resource, and summary, or a clear no-match message; register in the shared router with a description in the existing style; serve and local behave identically.
+  - Observable: `tools/list` shows the tool in both modes with the correct argument schema; handler tests cover the render and the no-match message.
+  - _Requirements: 10.1, 10.2, 10.4_
+- [ ] 10.3 Integration through a stdio child
+  - End to end through the real binary in local mode: generate real breadcrumbs (a checkpoint plus a smart_read call), then `mem_search_breadcrumbs` finds them by keyword and by harness filter, newest first, with no stored row modified.
+  - Observable: the integration suite passes against the real binary.
+  - _Requirements: 10.1, 10.2, 10.3_
