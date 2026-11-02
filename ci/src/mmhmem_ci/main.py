@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def static_inspection(self, src: dagger.Directory, validation_id: str) -> str:
+        """Exercise standalone ELF acceptance against static and incompatible files."""
+        from .static_release import inspection_check
+
+        return await inspection_check(src, validation_id)
+
+    @function
     async def static_build(self, src: dagger.Directory, validation_id: str) -> str:
         """Status-only candidate build; full runtime verification precedes export."""
         from .static_release import candidate_build_check

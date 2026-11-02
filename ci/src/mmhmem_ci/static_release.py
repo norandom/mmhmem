@@ -14,6 +14,16 @@ TARGET = "x86_64-unknown-linux-musl"
 RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alpine:3.22"}
 
 
+async def inspection_check(src: dagger.Directory, validation_id: str) -> str:
+    """Run ELF inspector component tests without exporting an application binary."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    output = await (musl_container(src).with_env_variable("VALIDATION_ID", validation_id)
+                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_inspect_static.py", "-v"])
+                    .stderr())
+    return json.dumps({"status": "passed", "validation_id": validation_id, "tests": output})
+
+
 def pristine_runtime(name: str) -> dagger.Container:
     """An untouched distribution image, without probe or compatibility packages."""
     return dag.container(platform=dagger.Platform("linux/amd64")).from_(RUNTIME_IMAGES[name])

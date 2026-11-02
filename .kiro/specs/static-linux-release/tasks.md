@@ -41,7 +41,7 @@ marketplace packages remain outside the change boundary.
   - _Depends: 1.1_
   - _Requirements: 1.1, 1.3, 1.4, 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 2.2 (P) Enforce static ELF acceptance
+- [x] 2.2 (P) Enforce static ELF acceptance
   - Validate architecture, ELF class, interpreter declarations, required shared libraries and GLIBC version requirements for an explicit file.
   - Accept legitimate static PIE metadata without mistaking every dynamic metadata section for dynamic linkage.
   - Exercise positive static and negative dynamic/incorrect-architecture fixtures; include malformed input and checksum mismatch.
@@ -180,6 +180,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 2.2: `inspect_static.py` accepts explicit binary/checksum/report inputs and validates static PIE without rejecting all dynamic metadata. Six positive/negative component tests passed independent canonical `static-inspection` (`tmp/static-inspection-review.log`). Final candidate inspection remains an integration gate.
 - Task 2.1: Locked musl lint, full deterministic tests and release build passed independent review (`tmp/static-build-review.log`), producing version 0.2.2, SHA-256 `41ebf9c37f19a7385d039a5d87030205c1e5aee04efe1afb65ba3e2481511556`. The first suite exposed an upstream random-path fixture bug, repaired separately under corpus-warmup-prune in `c9b11a2` before revalidation. Candidate remains internal pending linkage/runtime gates.
 - Task 1.2: Dagger caches whole function results; validation IDs must be explicit host-generated inputs, propagated through every startup/probe/certificate stage. Independent fresh `runtime-setup` passed after resolving this review finding. Shared synthetic bundle/case fixtures live in `ci/scripts/release_fixtures.py` and `release_support.py`.
 - Task 1.1: Debian musl-gcc injects a dynamic interpreter for static PIE; retain the musl-only `-Wl,--no-dynamic-linker` flag. Canonical `static-setup` and existing deterministic `test` passed independent review (logs under `tmp/static-setup-review*.log`).
