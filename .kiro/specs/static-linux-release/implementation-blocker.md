@@ -8,11 +8,11 @@ has passed independent review, GNU tests, default/OTel clippy, formatting and
 musl tests/release. Fresh downstream local-probe validation and review remain
 completed successfully for task 3.1. The original blocker is resolved.
 
-Implementation is incomplete. Tasks 1.1, 1.2 and 2.1–2.4 passed independent
-review and canonical validation and are committed. Task 3.1 has now passed
-fresh independent canonical local-probe verification on both userlands.
-Later tasks remain pending; the complete static-release feature is not yet
-accepted as complete.
+This is a historical blocker report. All in-scope implementation tasks have
+now passed their reviews and final automated verification. The upstream
+repair and task 3.1 are complete. Full release-transition acceptance still
+requires the operator publication/latest-checksum checkpoint; see
+`validation.md` for final status and evidence.
 
 ## Reproduced upstream defect
 
@@ -52,10 +52,10 @@ excludes production Rust changes and requires scope review for them.
 No release bundle has been exported or published. No production Rust,
 dependency, Docker image or other-platform release changes were made.
 
-## Required scope decision and repair plan
+## Approved repair plan (completed)
 
-Authorize a separate upstream `local-mode` storage repair before resuming
-static-release work:
+The user authorized this separate upstream `local-mode` storage repair,
+which was implemented and independently reviewed before resumption:
 
 1. Identify the failing initialization statement and handle contention within
    the configured timeout, preserving public APIs and storage semantics.

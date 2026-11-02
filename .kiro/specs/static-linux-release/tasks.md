@@ -162,7 +162,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Depends: 4.2, 5.2, 6.1_
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 7. Perform final integrated verification and readiness review
+- [x] 7. Perform final integrated verification and readiness review
   - Run the complete canonical quality gates, static-target suite, both runtime matrices, bundle validation, installer regressions and native publisher tests on the final candidate revision.
   - Reconcile checksum and provenance across the exported bundle and all reports; verify no out-of-boundary application, Docker or marketplace changes entered the patch.
   - Record supported/tested environment limits and map fresh evidence to every acceptance criterion.
@@ -187,6 +187,8 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Documentation follow-up: user requested a short per-platform README, one shared optional-server section, static musl as the default Linux release build, and detailed reference under `docs/`. Independent PS5.1 review passed 31 links/anchors and three examples (`tmp/streamlined-docs-review.log`). The concept document moved unchanged to `docs/concept.md`. No runtime inputs changed after final validation; final-source hosted CI 41502943129 also passed, and its clean publishable bundle validated read-only (`tmp/final-hosted-bundle-validation.log`).
+- Task 7: Fresh final canonical all/export and native installer/wrapper/publisher tests passed on source `a3fcaee1ceb98c7f9b4e9e6bd8097c779428d766`; independent readiness review approved. Bundle: `tmp/static-release-final/`; checksum `fa3bffb60baf890e224a71371e969b513e742dca647d56d84b217e09867c96fc`. Full evidence/29-criterion mapping is in `validation.md`. In-scope implementation is complete; full release-transition acceptance remains MANUAL_VERIFY_REQUIRED for publication/latest checksum and the conditional wording update. TLS criteria 2.6/2.7 are excluded by user direction.
 - Task 6.2: Independent documentation review approved after clarifying ELF/pristine-startup evidence versus instrumented functional tests. Current v0.2.2 dynamic asset/glibc caveat remains accurate; static wording is conditional on publication/latest checksum confirmation. Native example parsing and current release metadata checks passed (`tmp/support-docs-review.log`, `tmp/latest-linux-asset-inspection.json`). Linux 5.10/SSE2 is a policy floor, distinct from recorded tested kernels. TLS administration and TLS-specific tests remain out of scope.
 - Task 6.1: Independent review accepted actual verified-candidate first install/update on Debian/Alpine, public-MCP memory recovery, worker/harness preservation, dry-run/failure/platform checks and compiler independence (`tmp/static-installer-final.log`). Native Windows installer/wrapper regressions passed. Production installers are unchanged. A test-only attempt to truncate an executed inode caused ETXTBSY; fixture construction now uses atomic replacement, matching installer behavior. Canonical `all` includes `static-installer`.
 - Task 5.2: Independent PS5.1 delivery tests passed (`tmp/publisher-delivery-review.log`), including exact three-file download equality, identical/partial/lost-ack retries, draft/tag races, local mutations and corrupt downloads. Default publisher delivers; `-ValidateOnly` is read-only. No real release upload/publication was invoked. Separately, real hosted run 41495286781 produced a clean publishable bundle validated read-only (`tmp/hosted-bundle-validation.log`).

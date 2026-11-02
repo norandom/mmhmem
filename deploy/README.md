@@ -2,7 +2,7 @@
 
 mmhmem is one self-hosted binary with env-only configuration. The local
 layer needs no deployment at all — the harness spawns `mmhmem stdio` per
-session against a per-user store (see the README "Quickstart: local mode").
+session against a per-user store (see the [installation guide](../docs/installation.md)).
 This page covers the SERVER deployment shapes: systemd on a Linux host
 (default) or Docker Compose (repo root `Dockerfile` + `docker-compose.yml`,
 task 12.3). The server is the optional upgrade for cross-machine access,
@@ -164,7 +164,8 @@ complete release manually only after draft verification has succeeded.
 The latest downloadable Linux asset was still the dynamic v0.2.2 build when
 checked on 2026-11-02: SHA-256
 `309a88e752cac0adf0e2c4d17c0bb5991dc091b67e10011342918c7af902ab7d`,
-with interpreter `/lib64/ld-linux-x86-64.so.2`. Keep the README's glibc caveat
+with interpreter `/lib64/ld-linux-x86-64.so.2`. Keep the glibc caveats in the README
+and `docs/installation.md`
 until the complete static release has been published and the latest endpoint
 serves the verified bytes.
 
@@ -180,9 +181,15 @@ $actual = (Get-FileHash -LiteralPath $latest -Algorithm SHA256).Hash.ToLowerInva
 if ($actual -cne $expected) { throw 'Latest Linux asset differs from the verified candidate' }
 ```
 
-Only after that comparison succeeds, replace the README's current glibc-only
-paragraph and transition notice with this prepared text, and update the
-steering release-status note to identify the published release:
+Only after that comparison succeeds, remove the legacy v0.2.2 caveats from
+the README and `docs/installation.md`, and update the steering release-status
+note to identify the published release. Keep the README's Linux description
+short:
+
+> The Linux x86_64 download is statically linked with musl for broad
+> distribution compatibility.
+
+Keep the detailed support statement in `docs/installation.md`:
 
 > The Linux x86_64 release is statically linked with musl and requires no
 > dynamic loader or shared libraries. The same executable is verified on
