@@ -103,7 +103,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Depends: 2.3, 3.1, 3.2_
   - _Requirements: 2.1, 2.6, 2.7, 3.4_
 
-- [ ] 4. Integrate verification with the canonical release pipeline
+- [x] 4. Integrate verification with the canonical release pipeline
 - [x] 4.1 Gate bundle creation on same-artifact verification
   - Integrate the builder, ELF inspector, pristine/scratch startup checks and every application probe into the canonical Dagger gate.
   - Run both runtime images against the same candidate bytes and verify checksums before and after their probes.
@@ -114,7 +114,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Depends: 2.1, 2.2, 2.4, 3.1, 3.2_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 3.3, 3.4, 3.5_
 
-- [ ] 4.2 Export verified Linux artifacts locally and from hosted CI
+- [x] 4.2 Export verified Linux artifacts locally and from hosted CI
   - Route existing release consumption and the full gate through the verified candidate while preserving the File-returning compatibility contract.
   - Capture native-host source revision, cleanliness and validation identity before source sync; mark dirty local results non-publishable.
   - Pass verified checkout/run identity from hosted CI, export and upload the uniquely named Linux bundle without rebuilding or modifying its executable.
@@ -187,6 +187,7 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Task 4.2: Native guarded export and full canonical `all` plus same-ID follow-up export passed (`tmp/static-release-all-4.2.log`, bundle `tmp/static-release-all-4.2/`); independent native wrapper review passed. Hosted artifact convention is `linux-static-<revision>-<run_id>-<run_attempt>`, validation ID `ci-<run_id>-<run_attempt>`. Local wrapper captures provenance before fixed positional CI transport and only exports into fresh non-reparse repo tmp directories. File-returning release/deploy consumers now use verified bytes.
 - Task 4.1: `verified_bundle(src, revision, validation_id, source_clean=False)` awaits final schema verification before returning a Directory; public `static_release` delegates to it. Canonical `static-gate` passed actual candidate linkage, scratch/pristine startup, both non-TLS runtime matrices and six assembly tests including real-candidate failure injection (`tmp/static-gate-green.log`); independent review approved. Local dirty results are explicitly non-publishable.
 - User scope amendment: TLS-specific task 3.3 was withdrawn; partial work is preserved in ignored `tmp/retired-tls-task/`. Required bundle cases exclude TLS; the same missing/failed-case negative assertions now exercise server cases. Canonical bundle-check passed after this scope change (`tmp/bundle-check-scoped-final.log`). Existing standalone HTTPS fixture remains optional; production TLS behavior is untouched.
 - Task 3.2: Independent `server-probe` passed health/authentication/Streamable HTTP initialization and graceful SIGTERM shutdown on both userlands (`tmp/server-probe-review-deadline.log`). SSE includes an empty data/id/retry preamble; skip empty events. Socket inactivity timeouts are insufficient: the probe uses a Linux main-thread absolute HTTP deadline, verified with slow headers/body and cleanup regressions.

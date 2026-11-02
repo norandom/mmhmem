@@ -1,57 +1,90 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Run the mmhmem Dagger CI pipeline from the Windows dev host (task 14.1).
-
-.DESCRIPTION
-    The Dagger module (ci/) must run on the WSL build VM's native filesystem:
-    dagger's source filesync off the DrvFS mount (/mnt/d) hits 9p metadata
-    cache conflicts ("size changed during sync") and crawling target/ once
-    killed the engine. This script rsyncs the repo (minus build/VCS artifacts)
-    into the Debian WSL home and runs dagger there — same module, same
-    entrypoints as GitHub Actions (.github/workflows/ci.yml); only the
-    transport differs (dev-environment steering).
-
+    Run the canonical container CI pipeline from the native Windows host.
 .EXAMPLE
-    powershell -NoProfile -File scripts\dagger-ci.ps1              # full pipeline
-    powershell -NoProfile -File scripts\dagger-ci.ps1 -Call fmt   # one function
+    powershell -NoProfile -File scripts/dagger-ci.ps1 -Call static-release -ExportPath tmp/verified-linux
+.DESCRIPTION
+    Capture provenance before the sanctioned source sync. Linux checks execute
+    only in Dagger containers; WSL transports the module and exports results to
+    repository scratch. TLS configuration and TLS-specific checks are excluded.
 #>
-param(
-    # Dagger function to call (default: all — fmt, clippy default+otel, tests,
-    # docker build, compose config, deploy artifacts, tokei report).
-    [string]$Call = "all",
-    # Extra dagger call arguments (e.g. --src for an explicit directory).
-    [string[]]$ExtraArgs = @()
-)
+param([string]$Call = 'all', [string[]]$ExtraArgs = @(), [string]$ExportPath = '')
 
-$ErrorActionPreference = 'Stop'
-$repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-# Generate freshness on the native host: Dagger caches function results, so
-# randomness inside a function cannot invalidate a previous validation run.
-if ($Call -in @('runtime-setup', 'static-build', 'static-inspection', 'worker-fixture', 'bundle-check', 'local-probe', 'server-probe', 'static-gate-tests', 'static-gate', 'static-release')) {
-    if (($ExtraArgs -join ' ') -match '--validation-id(?:=|\s|$)') {
-        throw "$Call validation IDs are generated fresh by this wrapper"
+$script:CiRepository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
+function Get-CiExportPath([string]$RequestedPath) {
+    if (-not $RequestedPath) { return '' }
+    $full = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($RequestedPath)) { $RequestedPath } else { Join-Path $script:CiRepository $RequestedPath }))
+    $scratch = [System.IO.Path]::GetFullPath((Join-Path $script:CiRepository 'tmp'))
+    if (-not $full.StartsWith($scratch + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Exports must be a new directory beneath repository tmp/'
     }
-    $validationId = $Call + '-' + [Guid]::NewGuid().ToString('N')
-    $ExtraArgs = @($ExtraArgs) + @('--validation-id', $validationId)
+    $cursor = $full
+    while ($cursor.Length -gt $script:CiRepository.Length) {
+        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { throw 'Export paths must not traverse a reparse point' }
+        $cursor = Split-Path -Parent $cursor
+    }
+    if (Test-Path -LiteralPath $full) { throw 'Export destination already exists; choose a fresh directory' }
+    return $full
 }
-$wslRepo = (& wsl -d Debian -e wslpath -a -u $repo).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $wslRepo.StartsWith('/')) { throw "Cannot resolve repository path for CI sync" }
-if ($wslRepo -match "[^a-zA-Z0-9_./:-]") { throw "Repository path contains characters unsupported by CI sync" }
 
-# 1. Sync sources into the WSL build VM (delete-stray so removed files vanish).
-wsl -d Debian -e bash -c "rsync -a --delete --exclude target --exclude tmp --exclude .openidea --exclude .git --exclude data --exclude log --exclude workspace --exclude .env --exclude .kiro --exclude .opencode $wslRepo/ ~/mmhmem-ci/"
-if ($LASTEXITCODE -ne 0) { throw "rsync into the WSL build VM failed" }
+function Invoke-MmhmemCi {
+    param([string]$Call = 'all', [string[]]$ExtraArgs = @(), [string]$ExportPath = '')
+    $ErrorActionPreference = 'Stop'
+    if ($Call -notmatch '^[a-z][a-z0-9-]*$') { throw 'Invalid Dagger function name' }
+    foreach ($argument in $ExtraArgs) {
+        if ($argument -notmatch '^--[a-z][a-z0-9-]*(=[A-Za-z0-9_./:\\-]+)?$' -or
+            $argument -match '^--(revision|validation-id|source-clean|src|output|module|help)(=|$)') {
+            throw 'ExtraArgs accepts safe function options only; source, provenance and export are wrapper-owned'
+        }
+    }
+    if ($ExportPath -and $Call -notin @('all', 'static-release')) { throw 'ExportPath requires all or static-release' }
+    $destination = Get-CiExportPath $ExportPath
+    $provenanceCalls = @('all', 'release', 'deploy-artifacts', 'static-gate', 'static-release')
+    $freshCalls = @('runtime-setup', 'static-build', 'static-inspection', 'bundle-check', 'local-probe', 'server-probe', 'static-gate-tests') + $provenanceCalls
+    $parameters = @($ExtraArgs)
+    if ($Call -in $provenanceCalls) {
+        $revision = ((& git -C $script:CiRepository rev-parse --verify HEAD) -join '').Trim()
+        if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') { throw 'Cannot capture full repository revision' }
+        $state = & git -C $script:CiRepository status --porcelain --untracked-files=normal
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot capture source cleanliness' }
+        $clean = -not (($state -join "`n").Trim())
+        $parameters += @(("--revision=$revision"), ('--source-clean=' + $clean.ToString().ToLowerInvariant()))
+    }
+    if ($Call -in $freshCalls) {
+        $validationId = $Call + '-' + [Guid]::NewGuid().ToString('N')
+        $parameters += '--validation-id=' + $validationId
+    }
+    if ($Call -in $provenanceCalls) { Write-Host "CI provenance: revision=$revision source_clean=$clean validation_id=$validationId" }
+    $linuxSource = ((& wsl -d Debian -e wslpath -a -u $script:CiRepository) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $linuxSource.StartsWith('/')) { throw 'Cannot resolve source path for CI transport' }
+    $linuxDestination = '-'
+    if ($destination) {
+        $linuxDestination = ((& wsl -d Debian -e wslpath -a -u $destination) -join '').Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $linuxDestination.StartsWith('/')) { throw 'Cannot resolve export path for CI transport' }
+    }
+    # Each value remains a positional argument to the checked-in CI transport.
+    # No source path, extra option or destination is interpolated into bash -c.
+    $arguments = @('-d', 'Debian', '-e', 'bash', '--', "$linuxSource/scripts/dagger-ci.sh", $linuxSource, $Call, $linuxDestination) + $parameters
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = 1
+        & wsl @arguments | Out-Host
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousPreference }
+    if ($code -eq 0 -and $destination) {
+        $manifest = Get-Content -Raw -LiteralPath (Join-Path $destination 'verification.json') | ConvertFrom-Json
+        $actual = (Get-FileHash -LiteralPath (Join-Path $destination 'mmhmem-linux-x86_64') -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($manifest.revision -ne $revision -or $manifest.validation_id -ne $validationId -or
+            $manifest.source_clean -ne $clean -or $manifest.publishable -ne $clean -or $manifest.artifact.sha256 -ne $actual) {
+            throw 'Exported bundle identity/checksum does not match native provenance'
+        }
+        Write-Host "Verified bundle exported: $destination (sha256=$actual, publishable=$($manifest.publishable))"
+    }
+    return [int]$code
+}
 
-# 2. Run the dagger module from the synced copy (--src .. = the synced repo
-#    root; it has no target/.git — the excludes above guarantee that).
-#    dagger streams its progress trace on stderr: under Stop preference PS 5.1
-#    would abort on the first stderr line, so relax for the native call and
-#    judge success purely by the exit code.
-$argList = @('-d', 'Debian', '-e', 'bash', '-c',
-    "cd ~/mmhmem-ci/ci && ~/.local/bin/dagger call $Call --src .. $($ExtraArgs -join ' ')")
-$ErrorActionPreference = 'Continue'
-& wsl @argList
-$code = $LASTEXITCODE
-$ErrorActionPreference = 'Stop'
-exit $code
+if ($MyInvocation.InvocationName -ne '.') { exit (Invoke-MmhmemCi @PSBoundParameters) }

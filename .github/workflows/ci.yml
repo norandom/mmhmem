@@ -51,6 +51,14 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Capture clean checkout provenance
+        id: provenance
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "validation_id=ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: fmt, clippy default+otel, tests, release, docker image, compose config, deploy artifacts, tokei
         uses: dagger/dagger-for-github@v8.4.1
         with:
@@ -59,7 +67,20 @@ jobs:
           # v8.4.1 of the action prefixes `dagger call` itself — the args
           # carry only the function invocation. A fresh checkout carries
           # no target/.git — the --src contract.
-          args: all --src ..
+          args: all --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true
+      - name: Export the same verified Linux bundle
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "0.21.11"
+          workdir: ci
+          args: static-release --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true export --path=../tmp/linux-static
+      - name: Upload verified Linux bundle
+        uses: actions/upload-artifact@v4
+        with:
+          # Publisher identity: linux-static-<commit>-<run_id>-<run_attempt>.
+          name: linux-static-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/linux-static/
+          if-no-files-found: error
 
   e2e-measurement:
     name: E2E measured token savings (E2E_LLM=1, real OpenCode)

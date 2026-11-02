@@ -214,16 +214,11 @@ class MmhmemCi:
         )
 
     @function
-    async def release(self, src: dagger.Directory) -> dagger.File:
-        """Blocking: plain release build (no otel feature, Req 11.2). The
-        binary is copied out of the cache-mounted target dir first: cache
-        mounts are not part of the container's exportable filesystem."""
-        ctr = (
-            rust_container(src)
-            .with_exec(["cargo", "build", "--release", "--locked"])
-            .with_exec(["cp", "/cargo-target/release/mmhmem", "/out-mmhmem"])
-        )
-        return ctr.file("/out-mmhmem")
+    async def release(self, src: dagger.Directory, revision: str, validation_id: str,
+                      source_clean: bool = False) -> dagger.File:
+        """File-compatible entrypoint selecting only the verified Linux bytes."""
+        bundle = await self.static_release(src, revision, validation_id, source_clean)
+        return bundle.file("mmhmem-linux-x86_64")
 
     @function
     async def docker_build(self, src: dagger.Directory) -> str:
@@ -287,7 +282,8 @@ class MmhmemCi:
         return f"compose config (prod): {prod or 'ok'}\ncompose config (e2e): {e2e or 'ok'}"
 
     @function
-    async def deploy_artifacts(self, src: dagger.Directory) -> str:
+    async def deploy_artifacts(self, src: dagger.Directory, revision: str, validation_id: str,
+                               source_clean: bool = False) -> str:
         """Blocking: pristine Linux validation of the deploy artifacts
         (Req 8.1/8.2) — systemd-analyze verify against the REAL release
         binary and logrotate --debug as root with the REAL agent-memory
@@ -314,7 +310,7 @@ class MmhmemCi:
             )
             .with_file(
                 "/usr/local/bin/mmhmem",
-                await self.release(src),
+                await self.release(src, revision, validation_id, source_clean),
                 permissions=0o755,
             )
             .with_exec(["install", "-d", "-m", "0750", "/var/log/agent-memory"])
@@ -334,18 +330,22 @@ class MmhmemCi:
         return f"systemd-analyze verify: {verify or 'ok'}\nlogrotate --debug: ok\n{rotate[-400:]}"
 
     @function
-    async def all(self, src: dagger.Directory) -> str:
+    async def all(self, src: dagger.Directory, revision: str, validation_id: str,
+                  source_clean: bool = False) -> str:
         """The full blocking pipeline (without the model-gated e2e suite,
         which runs as a separate workflow job with credentials)."""
+        bundle = await self.static_release(src, revision, validation_id, source_clean)
+        manifest = await bundle.file("verification.json").contents()
         results: dict[str, str] = {
+            "static_release (musl + same-artifact runtime gate)": manifest,
             "distribution (Debian + Alpine)": await self.distribution(src),
             "fmt": await self.fmt(src),
             "clippy (default + otel)": await self.clippy(src),
             "test": await self.test(src),
             "docker_build (otel)": await self.docker_build(src),
             "compose_config (prod + e2e)": await self.compose_config(src),
-            "deploy_artifacts (systemd + logrotate)": await self.deploy_artifacts(src),
+            "deploy_artifacts (systemd + logrotate)": await self.deploy_artifacts(src, revision, validation_id, source_clean),
         }
         loc = await self.loc_report(src)
         summary = "\n".join(f"== {name}: ok" for name in results)
-        return f"{summary}\n== tokei (informational):\n{loc}"
+        return f"{summary}\n== verified Linux bundle:\n{manifest}\n== tokei (informational):\n{loc}"
