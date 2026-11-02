@@ -58,6 +58,16 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
   `NixOS`, `NixOS-AI`) — do not use them for this project.
 - **Never run the mmhmem service directly inside WSL.** WSL is a build/CI VM:
   containers, Dagger, and Linux-side validation only.
+- **WSL is a build env for CI — never for execution, storing data, or use as
+  a scratchpad.** Do not stage, store, or hand-sync any files into WSL
+  yourself (no `/tmp` scratch trees, no git-archive staging). The ONLY
+  sanctioned source staging is the `~/mmhmem-ci` rsync performed by
+  `scripts\dagger-ci.ps1`, which is the ONE local dagger entrypoint — do not
+  invent `--src` recipes against DrvFS mounts or WSL paths (filesync off
+  DrvFS hits 9p metadata conflicts; crawling `target/` once killed the
+  engine). All build outputs export back to the Windows repo (D:). Never
+  execute mmhmem binaries inside WSL; Linux-side artifact validation runs
+  inside Dagger containers only.
 - Non-login shells lack `~/.local/bin`: call tools by full path,
   `wsl -d Debian -e bash -c '~/.local/bin/dagger version'`.
 - `sudo` needs a password — no passwordless root; write checks as unprivileged
@@ -74,6 +84,14 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
   both are environmental, not unit defects) and `logrotate --debug` (the
   `su agent-memory` directive needs the install-time user; substitute `root`
   for a pure syntax check).
+
+## Temp files & scratch: project dir only
+
+- All operations — including temporary and scratch files (scripts, repros,
+  JSON payloads, logs) — stay inside the project directory. Use `tmp/` at
+  the repo root (git-ignored). Never stage anything in AppData or system
+  temp folders (`%LOCALAPPDATA%\Temp`, `%APPDATA%`, ...) or other user
+  folders; if project files are found there, clean them up.
 
 ## CI: Dagger (local WSL + GitHub Actions, one pipeline)
 
