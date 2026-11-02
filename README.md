@@ -49,7 +49,7 @@ your agents and their model providers.
 
 | Component | Required | Notes |
 |---|---|---|
-| mmhmem binary | yes | build with Rust (pinned in `rust-toolchain.toml`, `cargo build --release`) or grab a CI release artifact for Linux, Windows, or macOS; SQLite (WAL + FTS5) is compiled in, there are no runtime dependencies |
+| mmhmem binary | yes | download the prebuilt asset from the latest release (Linux x86_64, macOS Apple Silicon and Intel, Windows x64) or build with Rust (pinned in `rust-toolchain.toml`, `cargo build --release`); SQLite (WAL + FTS5) is compiled in, there are no runtime dependencies |
 | Worker model endpoint | optional | any OpenAI-compatible chat-completions endpoint (Ollama, vLLM, or an API key). Without it, shunting is off; session memory, project memory, and targeted reads all still work |
 | Linux host or Docker | only for serve mode | the local layer needs nothing but the binary; the server adds systemd on a Linux host, or any Docker host for the compose route |
 | Reverse proxy | optional, recommended for serve-mode TLS | the daemon serves plain HTTP; terminate TLS in front of it |
@@ -57,19 +57,68 @@ your agents and their model providers.
 
 ## Quickstart: local mode (no server)
 
-**Install from a release binary** (no Rust toolchain needed): download
-`mmhmem.exe` (Windows) or `mmhmem` (Linux) from
-[the latest release](https://github.com/norandom/mmhmem/releases), clone this
-repo for the installer and playbook, and point the installer at the binary:
+**Install from the latest release** — no Rust toolchain, no `git clone`.
+Releases are cut irregularly; the latest one is always the tested variant to
+install. Every platform ships as a release asset with a stable name, so the
+`releases/latest/download/…` URLs below always fetch the newest tested build:
+
+| Platform | Asset |
+|---|---|
+| Linux (x86_64) | `mmhmem-linux-x86_64` |
+| macOS (Apple Silicon) | `mmhmem-macos-aarch64` |
+| macOS (Intel) | `mmhmem-macos-x86_64` |
+| Windows (x64) | `mmhmem.exe` |
+
+The installer needs only itself and four companion files (the playbook and the
+recap command templates) — fetched raw, still no checkout:
+
+**Linux / macOS / WSL**
 
 ```sh
-git clone https://github.com/norandom/mmhmem.git
-cd mmhmem
-# Windows
-powershell -File deploy\install_local.ps1 -Binary C:\path\to\mmhmem.exe
-# macOS / Linux / WSL
-sh deploy/install_local.sh --binary /path/to/mmhmem
+# 1) binary for your platform
+curl -fsSL -o mmhmem \
+  https://github.com/norandom/mmhmem/releases/latest/download/mmhmem-linux-x86_64
+# macOS Apple Silicon: .../mmhmem-macos-aarch64, Intel: .../mmhmem-macos-x86_64
+chmod +x mmhmem
+
+# 2) installer + companion files (raw fetch, no checkout)
+d=$(mktemp -d)
+b=https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy
+mkdir -p "$d/deploy/skills/unified-memory" "$d/deploy/commands/claude" \
+         "$d/deploy/commands/opencode" "$d/deploy/commands/codex"
+curl -fsSL -o "$d/deploy/install_local.sh"                  "$b/install_local.sh"
+curl -fsSL -o "$d/deploy/skills/unified-memory/SKILL.md"    "$b/skills/unified-memory/SKILL.md"
+curl -fsSL -o "$d/deploy/commands/claude/mmhmem-recap.md"   "$b/commands/claude/mmhmem-recap.md"
+curl -fsSL -o "$d/deploy/commands/opencode/mmhmem-recap.md" "$b/commands/opencode/mmhmem-recap.md"
+curl -fsSL -o "$d/deploy/commands/codex/mmhmem-recap.md"     "$b/commands/codex/mmhmem-recap.md"
+
+# 3) install for the harnesses you use (here: Claude Code, user-wide)
+sh "$d/deploy/install_local.sh" --binary "$PWD/mmhmem" --global --agent claude
 ```
+
+**Windows**
+
+```powershell
+# 1) binary
+irm https://github.com/norandom/mmhmem/releases/latest/download/mmhmem.exe -OutFile mmhmem.exe
+
+# 2) installer + companion files (raw fetch, no checkout)
+$d = "$env:TEMP\mmhmem-install"
+$b = 'https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy'
+New-Item -ItemType Directory -Force -Path "$d\deploy\skills\unified-memory",
+    "$d\deploy\commands\claude", "$d\deploy\commands\opencode", "$d\deploy\commands\codex" | Out-Null
+irm "$b/install_local.ps1" -OutFile "$d\deploy\install_local.ps1"
+irm "$b/skills/unified-memory/SKILL.md" -OutFile "$d\deploy\skills\unified-memory\SKILL.md"
+irm "$b/commands/claude/mmhmem-recap.md" -OutFile "$d\deploy\commands\claude\mmhmem-recap.md"
+irm "$b/commands/opencode/mmhmem-recap.md" -OutFile "$d\deploy\commands\opencode\mmhmem-recap.md"
+irm "$b/commands/codex/mmhmem-recap.md" -OutFile "$d\deploy\commands\codex\mmhmem-recap.md"
+
+# 3) install for the harnesses you use (here: Claude Code, user-wide)
+powershell -File "$d\deploy\install_local.ps1" -Binary "$PWD\mmhmem.exe" -Global -Agent claude
+```
+
+`HEAD` in the raw URLs is the repo's default branch under whatever name, so
+the fetches track it automatically.
 
 Or build it yourself (`cargo build --release`) and let the installer find the
 binary in `target/release`. The installer registers every harness it finds
@@ -225,7 +274,9 @@ index before fetching details, checkpoint before switching tools):
 
 ```sh
 mkdir -p ~/.claude/skills/unified-memory
-cp deploy/skills/unified-memory/SKILL.md ~/.claude/skills/unified-memory/
+curl -fsSL -o ~/.claude/skills/unified-memory/SKILL.md \
+  https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy/skills/unified-memory/SKILL.md
+# (or, from a checkout: cp deploy/skills/unified-memory/SKILL.md ~/.claude/skills/unified-memory/)
 ```
 
 The playbook is under 200 tokens and works in every supported harness; see
