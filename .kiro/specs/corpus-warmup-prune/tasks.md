@@ -74,7 +74,7 @@
 
 - [ ] 7. Final validation: parity and non-regression (executed after Majors 8-10)
 - [ ] 7.1 Full regression and unmodified-suite proof
-  - Run the complete gate chain (format, deny-warnings clippy, full test suite) and prove the protected pre-existing suite is byte-identical (zero modifications; only this feature's new or updated files appear in the diff).
+  - Run the complete gate chain (format, deny-warnings clippy, full test suite) and prove the protected pre-existing suite is byte-identical except the declared spec-driven updates (tests/audit_redaction.rs: event-type count 15→16 for the WARMUP event, Req 1.8; tests/shunt.rs: Shunted destructure gains the usage field, Req 1.5; tests/local_stdio.rs: tool count, Req 5.4).
   - Confirm the tool count and behavior parity hold in both modes and the size-cap test passes on all new files.
   - Observable: a clean full gate run with the recorded diff proof.
   - _Requirements: 5.1, 5.2, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5_

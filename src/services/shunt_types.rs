@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+use super::worker::WorkerUsage;
+
 /// Why a read bypassed the worker model (Req 3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BypassReason {
@@ -114,6 +116,9 @@ pub enum ReadOutcome {
         summary: String,
         latency_ms: u64,
         avoided_input_tokens_est: u64,
+        /// Worker token usage for this call (carried so batch warmup can
+        /// report honest worker token totals, corpus-warmup-prune Req 1.5).
+        usage: WorkerUsage,
     },
 }
 

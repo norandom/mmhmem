@@ -95,6 +95,8 @@ deploy/
 - `src/services/mod.rs` — `pub mod breadcrumbs; pub mod prune; pub mod warmup;`.
 - `src/mcp/params.rs` — three new parameter structs (warmup, prune, breadcrumb search).
 - `tests/local_stdio.rs` — six-tool count assertions updated to nine (Req 5.4; this repo's own test, not a pre-existing one).
+- `tests/audit_redaction.rs` — event-type count 15→16 after the new `WARMUP` batch event (Req 1.8; this repo's own test, a declared spec-driven update).
+- `tests/shunt.rs` — the `ReadOutcome::Shunted` match gains `..` for the new `usage` field (Req 1.5; declared spec-driven update).
 - `tests/multiprocess.rs` — no tool-count pin (verified, research.md F5); untouched.
 - `deploy/install_local.sh` + `deploy/install_local.ps1` — worker config moves from env embedding to `.mmhmem.json` writing with file-pointing notices (Req 7.6); recap command copy/remove/dry-run (Req 9).
 - `deploy/skills/unified-memory/SKILL.md` — one warmup line + one recap line, still < 200 tokens.
@@ -225,8 +227,10 @@ pub struct WarmupReport {
 pub const MAX_WARMUP_PATHS: usize = 25;
 
 /// Runs each path through the shunt stages; never fatal on a bad path.
+/// The shared audit writer records one WARMUP batch summary (Req 1.8).
 pub async fn run_warmup(
     engine: &ShuntEngine,
+    audit: &AuditWriter,
     paths: Vec<String>,
     question: &str,
     ctx: /* call context */,

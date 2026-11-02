@@ -345,6 +345,7 @@ async fn cache_miss_delegates_then_hit_serves_cached_with_zero_worker_calls() {
             summary,
             latency_ms,
             avoided_input_tokens_est,
+            ..
         } => {
             assert!(summary.contains("- foo [L1-L9]"));
             assert!(*latency_ms < 5_000);

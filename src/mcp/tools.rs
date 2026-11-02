@@ -122,7 +122,7 @@ impl McpServer {
                 Ok(ReadOutcome::Cached { summary, avoided_input_tokens_est }) => ok_text(format!(
                     "### Cached Shunt Summary\n{summary}\n\n*For edits, call smart_read with offset and limit.* (est. avoided frontier input tokens: {avoided_input_tokens_est})"
                 )),
-                Ok(ReadOutcome::Shunted { summary, latency_ms, avoided_input_tokens_est }) => ok_text(format!(
+                Ok(ReadOutcome::Shunted { summary, latency_ms, avoided_input_tokens_est, .. }) => ok_text(format!(
                     "### Shunted Summary (worker, {latency_ms} ms)\n{summary}\n\n*For edits, call smart_read with offset and limit.* (est. avoided frontier input tokens: {avoided_input_tokens_est})"
                 )),
                 Err(e) => Err(err(e)),

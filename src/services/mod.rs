@@ -13,4 +13,5 @@ pub mod shunt;
 pub mod shunt_cache;
 pub mod shunt_types;
 pub mod stats;
+pub mod warmup;
 pub mod worker;
