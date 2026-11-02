@@ -29,6 +29,7 @@ mmhmem is a self-hosted, cross-agent memory and I/O optimization layer for AI co
 4. If malformed input arrives on standard input, the mmhmem binary shall not terminate; subsequent valid MCP requests shall still be answered.
 5. The mmhmem binary shall start in local mode with no mandatory environment variables and no configuration file, and shall become ready to serve without network access and without waiting on any external service.
 6. When the per-user store does not yet exist on first start, the mmhmem binary shall create it automatically with the same schema as serve mode, so the first tool call succeeds without a setup step.
+7. The stdio initialize handshake shall advertise the `tools` capability in the initialize response, so a capability-negotiating harness that spawns `mmhmem stdio` discovers the tool surface at handshake time without fallback probing.
 
 ### Requirement 3: Local config profile — per-OS user paths, no token
 **Objective:** As a local user, I want local mode to store everything under my user account with sensible per-OS defaults and no credentials, so that a spawned child inside my trust boundary needs no operator.

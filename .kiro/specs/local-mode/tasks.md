@@ -162,3 +162,14 @@ Use whichever pattern fits the work breakdown:
   - Confirm every serve deployment artifact (container image definition, compose file, service unit, logrotate configuration) is unchanged.
   - Observable: the guard checks pass and the deployment artifacts show zero diff.
   - _Requirements: 9.5, 12.2, 12.3, 12.4_
+
+- [x] 9. Amendment (2026-11-02): initialize handshake advertises the tools capability
+- [x] 9.1 Assert `capabilities.tools` in the stdio handshake helper (`tests/local_stdio.rs`)
+  - Every test that performs the handshake machine-checks the advertisement; the fix itself lands with the serve-mode amendment (cross-agent-memory-server task 15.1 — one shared `get_info` covers both modes)
+  - Observable: the handshake test fails if `capabilities.tools` is absent from the initialize result
+  - _Requirements: 2.7_
+- [x] 9.2 Isolate the "worker unconfigured" stdio tests from the machine's global config
+  - `StdioMcp`'s helper env-REMOVEd the worker vars, so spawned children fell back to the machine's global `~/.mmhmem.json` (armed on dev hosts during dogfooding) and the unconfigured-worker notice disappeared; set them blank instead — blank wins over the file lookup and is treated as missing
+  - Observable: `resume_notes_missing_worker_when_unconfigured` passes on a host with an armed global worker config
+  - _Requirements: 8.1_
+  - Verified: full gate green 219/219 (nextest 610140ac, 2026-11-02)

@@ -340,6 +340,9 @@ pub fn run_stdio() -> std::process::ExitCode;
 - Validation: `tests/local_stdio.rs` (real child process, hand-rolled JSON-RPC lines — no new dev-deps, matching the house stub style).
 - Risks: rmcp's behavior on undecodable lines is unpinned — the test asserts survive-then-serve; fallback is a filtering reader wrapper in this module (no other component affected).
 
+**Amendment (2026-11-02): the initialize handshake advertises the tools capability (Req 2.7)**
+- The initialize result comes from the shared `get_info` in `src/mcp/tools.rs`; the manual override sets `capabilities.tools` explicitly (rmcp's `#[tool_handler]` advertisement is superseded by the override — the fix is owned by the cross-agent-memory-server amendment, task 15.1, one shared handler for both modes). Without it, capability-negotiating harnesses enumerate zero tools from a spawned child — observed with OpenCode against v0.2.0. Machine-enforced in `tests/local_stdio.rs`'s handshake helper.
+
 ### Storage layer
 
 #### Multi-process Db (`src/storage/db.rs`, modified)

@@ -19,6 +19,7 @@ mmhmem is a self-hosted, cross-agent memory and I/O optimization server for AI c
 3. When a client presents a valid Bearer token, the mmhmem server shall accept MCP connections from Claude Code CLI, Google Antigravity (IDE and CLI), OpenCode, and Claude Desktop.
 4. The mmhmem server shall expose the tools `session_resume_or_handoff`, `smart_read`, `boilerplate_write`, `mem_search`, `mem_get_observations`, and `mem_record_observation`.
 5. The mmhmem server shall never require client-side shell lifecycle hooks or an LLM API reverse proxy to function.
+6. The mmhmem server shall advertise the `tools` capability in the MCP initialize response, matching the tools actually served, so that capability-negotiating clients (e.g., OpenCode) discover the tool surface at handshake time.
 
 ### Requirement 2: Cross-agent live session bus
 **Objective:** As an engineer switching mid-task between harnesses, I want the new agent to inherit the full in-flight working state of the previous agent, so that I never re-explain active context.

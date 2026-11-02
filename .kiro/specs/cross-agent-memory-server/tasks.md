@@ -204,6 +204,19 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Depends: 11.6, 12.3, 13.1_
   - _Requirements: 13.1, 13.2, 13.5, 13.6, 12.3, 11.2_
 
+- [x] 15. Amendment (2026-11-02): advertise the tools capability in the initialize response
+- [x] 15.1 Set `capabilities.tools` in the manual `get_info` override (`src/mcp/tools.rs`)
+  - `#[tool_handler]`'s generated advertisement is superseded by the manual override; set `ToolsCapability::default()` (no `listChanged` claim — the server never emits list-changed notifications); the shared handler covers both modes
+  - Observable: a raw initialize exchange shows `capabilities.tools` present alongside `serverInfo`
+  - _Depends: 10.2_
+  - _Requirements: 1.6_
+- [x] 15.2 Machine-enforce the advertisement in both modes
+  - Extend the `tests/local_stdio.rs` handshake helper to assert `capabilities.tools` in the initialize result; extend the serve-mode initialize assertion in `tests/mcp_tools.rs`
+  - Observable: both tests fail if the advertisement is dropped; the full deterministic suite stays green
+  - _Depends: 15.1_
+  - _Requirements: 1.6_
+  - Verified: full gate green 219/219 (nextest 610140ac, 2026-11-02) — both handshake asserts pass against the real binary
+
 ## Implementation Notes
 
 - Host toolchain is `x86_64-pc-windows-msvc` (user confirmed MSVC preferred, 2026-11-01); `cc`-based C builds (rusqlite `bundled`) verified working. Do not switch to gnu/mingw.

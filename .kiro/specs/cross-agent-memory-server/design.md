@@ -313,6 +313,10 @@ Flow-level decisions: every tool invocation appends a breadcrumb automatically (
 - Preconditions: config valid, token set, storage initialized.
 - Postconditions: graceful shutdown on SIGTERM.
 
+#### Initialize response: tools capability advertisement (amendment 2026-11-02)
+- The initialize result MUST advertise `capabilities.tools` (Req 1.6). rmcp's `#[tool_handler]` injects that advertisement only into its generated `get_info`; the manual `get_info` override in `src/mcp/tools.rs` supersedes it, so the override sets `capabilities.tools` explicitly (`ToolsCapability::default()` — no `listChanged` claim; the server never emits list-changed notifications). Defect shipped in v0.2.0: empty capabilities, so capability-negotiating clients enumerated zero tools. The shared handler covers serve and local modes (parity by construction).
+- Requirements: 1.6
+
 #### ToolHandlers
 - Intent: parse tool arguments, invoke services, format markdown responses, append breadcrumbs and audit events around every call.
 - Requirements: 1.4, 2.4

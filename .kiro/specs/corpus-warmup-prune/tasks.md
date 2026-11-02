@@ -118,3 +118,10 @@
   - End to end through the real binary in local mode: generate real breadcrumbs (a checkpoint plus a smart_read call), then `mem_search_breadcrumbs` finds them by keyword and by harness filter, newest first, with no stored row modified.
   - Observable: the integration suite passes against the real binary.
   - _Requirements: 10.1, 10.2, 10.3_
+
+- [x] 11. Amendment (2026-11-02): isolate worker-unconfigured stdio tests from the machine's global config
+- [x] 11.1 Blank-set the worker vars in every test spawn helper
+  - Same leak as `tests/local_stdio.rs` (local-mode task 9.2): env-REMOVEd WORKER_* fell back to the armed global `~/.mmhmem.json` on dev hosts, so `warmup_worker_unconfigured_error_matches_smart_read` saw a configured worker — one smart_read call even reached the real Mistral worker (746 ms). Fixed in `tests/warmup_prune.rs` (the failing case) and swept uniformly through `tests/stats_cli.rs`, `tests/audit_rotation.rs`, `tests/prune_cli.rs`, and `tests/multiprocess.rs` (same pattern, no failing assertion today). Blank wins over the file lookup and is treated as missing.
+  - Observable: the full deterministic suite passes on a host with an armed global worker config, and no test reaches the network
+  - _Requirements: 3.7, 8.1_
+  - Verified: full gate green 219/219 (nextest 610140ac, 2026-11-02)
