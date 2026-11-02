@@ -8,6 +8,7 @@
 pub mod boilerplate;
 pub mod memory;
 pub mod paths;
+pub mod prune;
 pub mod session_bus;
 pub mod shunt;
 pub mod shunt_cache;
