@@ -134,6 +134,11 @@ $WorkerConfigFile = if ($Remove) { $null }
     elseif ($Global) { Join-Path $HOME '.mmhmem.json' }
     elseif ($ProjectDir) { Join-Path $ProjectDir '.mmhmem.json' }
     else { $null }
+if (-not $Remove) {
+    . (Join-Path $PSScriptRoot 'check_worker.ps1')
+    $ExistingWorker = Get-MmhmemWorkerSettings $WorkerConfigFile $WorkerModel $WorkerUrl $WorkerApiKey
+    Show-MmhmemWorkerSettings $ExistingWorker $WorkerConfigFile
+}
 # JSON-quotes one scalar value (plain model names/tags/URLs pass through).
 # NB: .NET regex replacements do not process backslash escapes, so the
 # replacement strings here are literal '\\' (two chars) and '\"'.
@@ -371,18 +376,6 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
-if (-not $Remove) {
-    . (Join-Path $PSScriptRoot 'check_worker.ps1')
-    $ExistingWorker = Get-MmhmemWorkerSettings $WorkerConfigFile $WorkerModel $WorkerUrl $WorkerApiKey
-    if ($Interactive -and $ExistingWorker.Model) {
-        $displayUrl = $null
-        if ([Uri]::TryCreate($ExistingWorker.Url, [UriKind]::Absolute, [ref]$displayUrl)) {
-            Write-Host ("`n  Current base URL: " + ($displayUrl.GetLeftPart([UriPartial]::Path) -replace '/chat/completions/?$', '' -replace '//[^/@]+@', '//'))
-        }
-        Write-Host "  Current model ID: $($ExistingWorker.Model)"
-        Write-Host ('  API key: ' + $(if ($ExistingWorker.Key) { '***' } else { '(not set)' }))
-    }
-}
 # --- optional worker setup -------------------------------------------------
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
@@ -390,17 +383,25 @@ if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "  Keep existing settings by answering N.`n  This does not download or start a model."
     $configureWorker = Read-Host '  Configure a worker model now? [y/N]'
     if ($configureWorker -match '^(?i)y(es)?$') {
-        $WorkerModel = (Read-Host '  Model ID (empty = keep existing, or skip if none)').Trim()
+        $modelPrompt = if ($ExistingWorker.Model) { "  Model ID [$($ExistingWorker.Model)]" } else { '  Model ID (empty = skip)' }
+        $WorkerModel = (Read-Host $modelPrompt).Trim()
         if (-not $WorkerModel -and $ExistingWorker) { $WorkerModel = $ExistingWorker.Model }
         if ($WorkerModel) {
-            Write-Host "  Example: https://api.openai.com/v1`n  Empty = keep existing URL, or use local Ollama."
-            $enteredUrl = (Read-Host '  OpenAI-compatible base URL').Trim().TrimEnd('/')
+            $defaultBase = $ExistingWorker.Url -replace '/chat/completions/?$', ''
+            if (-not $defaultBase) { $defaultBase = 'http://127.0.0.1:11434/v1' }
+            $safeDefault = $null
+            if ([Uri]::TryCreate([string]$ExistingWorker.Url, [UriKind]::Absolute, [ref]$safeDefault)) {
+                $defaultBase = $safeDefault.GetLeftPart([UriPartial]::Path) -replace '/chat/completions/?$', '' -replace '//[^/@]+@', '//'
+            }
+            Write-Host '  Press Enter to keep each bracketed value.'
+            $enteredUrl = (Read-Host "  OpenAI-compatible base URL [$defaultBase]").Trim().TrimEnd('/')
             if ($enteredUrl) {
                 $WorkerUrl = if ($enteredUrl.EndsWith('/chat/completions')) { $enteredUrl } else { "$enteredUrl/chat/completions" }
             }
             if (-not $WorkerApiKey) {
                 Write-Host '  Empty = keep existing key; local Ollama needs no key.'
-                $secureKey = Read-Host '  API key (hidden)' -AsSecureString
+                $keyLabel = if ($ExistingWorker.Key) { '***' } else { 'not set' }
+                $secureKey = Read-Host "  API key [$keyLabel] (hidden)" -AsSecureString
                 $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
                 try { $WorkerApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer) }
                 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer) }

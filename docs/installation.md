@@ -75,8 +75,10 @@ also works. Empty URL/key answers preserve existing values; without existing
 settings the endpoint defaults to local Ollama and the key is optional.
 The installer does not download or start a model.
 
-Existing base URL and model ID are shown before configuration; API keys are
-displayed only as `***`. Non-dry-run installations test configured workers
+Existing base URL and model ID are shown before agent selection, including
+unattended runs; API keys are displayed only as `***`. Worker prompts show
+saved values in brackets. Press Enter to keep the model, URL, or hidden key.
+Non-dry-run installations test configured workers
 with a short chat-completions request before changing the binary, settings,
 or PATH. Authentication failures, invalid endpoints/models, quota failures,
 unreachable servers, and malformed responses stop the installation with a

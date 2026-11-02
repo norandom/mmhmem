@@ -14,6 +14,17 @@ function Get-MmhmemWorkerSettings([string]$ConfigFile, [string]$Model, [string]$
     @{ Model = $Model; Url = $Url; Key = $Key }
 }
 
+function Show-MmhmemWorkerSettings($Settings, [string]$ConfigFile) {
+    Write-Host "`n  Worker settings: $ConfigFile"
+    if (-not $Settings.Model) { Write-Host '  No worker model configured.'; return }
+    $displayUrl = $null
+    if ([Uri]::TryCreate($Settings.Url, [UriKind]::Absolute, [ref]$displayUrl)) {
+        Write-Host ('  Current base URL: ' + ($displayUrl.GetLeftPart([UriPartial]::Path) -replace '/chat/completions/?$', '' -replace '//[^/@]+@', '//'))
+    }
+    Write-Host "  Current model ID: $($Settings.Model)"
+    Write-Host ('  API key: ' + $(if ($Settings.Key) { '***' } else { '(not set)' }))
+}
+
 function Test-MmhmemWorker($Settings) {
     if (-not $Settings.Model) { return }
     $uri = $null

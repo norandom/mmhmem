@@ -40,6 +40,21 @@ $answers.Enqueue('n')
 . $workerSetup
 if ($WorkerModel -or $WorkerUrl -ne 'https://existing.example/v1/chat/completions' -or $WorkerApiKey -ne 'existing-key') { throw 'Skipping worker setup changed settings' }
 Write-Host 'PASS: optional worker setup, base URL normalization, hidden API key, skip preserves settings'
+$ExistingWorker = @{ Model = 'saved-model'; Url = 'https://saved.example/v1/chat/completions'; Key = 'saved-key' }
+$WorkerModel = ''; $WorkerUrl = ''; $WorkerApiKey = ''
+function Read-Host([string]$Prompt, [switch]$AsSecureString) {
+    if ($AsSecureString) {
+        if ($Prompt -notmatch '\[\*\*\*\]') { throw 'Saved key default not masked' }
+        return New-Object Security.SecureString
+    }
+    if ($Prompt -match 'Configure') { return 'y' }
+    if ($Prompt -match 'Model ID' -and $Prompt -notmatch '\[saved-model\]') { throw 'Model default not shown' }
+    if ($Prompt -match 'base URL' -and $Prompt -notmatch '\[https://saved.example/v1\]') { throw 'URL default not shown' }
+    return ''
+}
+. $workerSetup
+if ($WorkerModel -ne 'saved-model' -or $WorkerUrl -or $WorkerApiKey) { throw 'Enter did not preserve saved defaults' }
+Write-Host 'PASS: Enter preserves saved model, URL, and hidden API key'
 $originalLocal = $env:LOCALAPPDATA
 $originalRoaming = $env:APPDATA
 $scratch = Join-Path $root ('tmp/menu-tests-' + [Guid]::NewGuid().ToString('N'))

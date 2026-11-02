@@ -156,6 +156,17 @@ fi
 # --- binary ----------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+worker_check() {
+  MMHMEM_CHECK_MODEL="$WORKER_MODEL" MMHMEM_CHECK_API_URL="$WORKER_URL" MMHMEM_CHECK_API_KEY="$WORKER_KEY" \
+    python3 "$SCRIPT_DIR/check_worker.py" "$1" "$WORKER_CONFIG_FILE"
+}
+if [ "$REMOVE" -eq 0 ] && command -v python3 >/dev/null 2>&1; then
+  worker_check show || die 'cannot read worker settings'
+  existing_model="$(worker_check model)" || die 'cannot read worker settings'
+  existing_base="$(worker_check base)" || die 'cannot read worker settings'
+  existing_key_label="$(worker_check key-label)" || die 'cannot read worker settings'
+fi
+
 if [ "$REMOVE" -eq 0 ]; then
   if [ -n "$BIN_OVERRIDE" ]; then
     BIN="$BIN_OVERRIDE"
@@ -446,14 +457,6 @@ note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
 # --- optional worker setup -------------------------------------------------
-worker_check() {
-  MMHMEM_CHECK_MODEL="$WORKER_MODEL" MMHMEM_CHECK_API_URL="$WORKER_URL" MMHMEM_CHECK_API_KEY="$WORKER_KEY" \
-    python3 "$SCRIPT_DIR/check_worker.py" "$1" "$WORKER_CONFIG_FILE"
-}
-if [ "$REMOVE" -eq 0 ] && [ -t 0 ] && command -v python3 >/dev/null 2>&1; then
-  worker_check show || die 'cannot read worker settings'
-  existing_model="$(worker_check model)" || die 'cannot read worker settings'
-fi
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   printf '\n  Optional: summary cache\n  ----------------------------------------\n'
   printf '  A worker model prepares reusable file summaries.\n  Memory works without it.\n'
@@ -462,12 +465,12 @@ if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   read -r configure_worker || die 'no answer given'
   case "$configure_worker" in
     y|Y|yes|YES)
-      printf '  Model ID (empty = keep existing, or skip if none): '
+      printf '  Model ID [%s] (Enter to keep): ' "${existing_model:-not set}"
       read -r WORKER_MODEL || die 'no answer given'
       [ -n "$WORKER_MODEL" ] || WORKER_MODEL="${existing_model:-}"
       if [ -n "$WORKER_MODEL" ]; then
-        printf '  Example: https://api.openai.com/v1\n  Empty = keep existing URL, or use local Ollama.\n'
-        printf '  OpenAI-compatible base URL: '
+        printf '  Press Enter to keep each bracketed value.\n'
+        printf '  OpenAI-compatible base URL [%s]: ' "${existing_base:-http://127.0.0.1:11434/v1}"
         read -r entered_url || die 'no answer given'
         if [ -n "$entered_url" ]; then
           entered_url="${entered_url%/}"
@@ -478,7 +481,7 @@ if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
         fi
         if [ -z "$WORKER_KEY" ]; then
           printf '  Empty = keep existing key; local Ollama needs no key.\n'
-          printf '  API key (hidden): '
+          printf '  API key [%s] (hidden): ' "${existing_key_label:-not set}"
           read -r -s WORKER_KEY || die 'no answer given'
           printf '\n'
         fi

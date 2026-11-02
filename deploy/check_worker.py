@@ -78,6 +78,7 @@ if __name__ == '__main__':
     try:
         config = settings(sys.argv[2])
         if sys.argv[1] == 'show':
+            print('\n  Worker settings: ' + sys.argv[2])
             if config['worker_model']:
                 url = urllib.parse.urlsplit(config['worker_api_url'])
                 # Do not display URL userinfo/query parameters that may contain credentials.
@@ -87,8 +88,18 @@ if __name__ == '__main__':
                 print('  Current base URL: ' + base.removesuffix('/chat/completions'))
                 print('  Current model ID: ' + config['worker_model'])
                 print('  API key: ' + ('***' if config['worker_api_key'] else '(not set)'))
+            else:
+                print('  No worker model configured.')
         elif sys.argv[1] == 'model':
             print(config['worker_model'])
+        elif sys.argv[1] == 'base':
+            url = urllib.parse.urlsplit(config['worker_api_url'])
+            host = url.hostname or ''
+            if url.port:
+                host += ':' + str(url.port)
+            print(urllib.parse.urlunsplit((url.scheme, host, url.path, '', '')).removesuffix('/chat/completions'))
+        elif sys.argv[1] == 'key-label':
+            print('***' if config['worker_api_key'] else 'not set')
         else:
             check(config)
     except (ValueError, TypeError):

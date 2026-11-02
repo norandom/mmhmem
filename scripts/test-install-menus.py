@@ -80,6 +80,16 @@ output = terminal_case('1\n3\nn\nn\n')
 assert 'Current base URL: https://saved.example/v1' in output, output
 assert 'Current model ID: saved-model' in output and 'API key: ***' in output, output
 assert 'private-fixture-token' not in output, output
+assert output.index('Current model ID') < output.index('Select agents'), output
+output = terminal_case('1\n3\ny\n\n\n\nn\n')
+assert 'Model ID [saved-model]' in output and 'base URL [https://saved.example/v1]' in output, output
+assert 'API key [***]' in output and 'worker model: saved-model' in output, output
+assert 'private-fixture-token' not in output, output
+result = subprocess.run(['bash', str(root / 'deploy/install_local.sh'), '--global', '--agent', 'codex',
+                         '--binary', str(home / 'missing'), '--dry-run'],
+                        input='', text=True, capture_output=True, env=env)
+assert result.returncode == 0 and 'Current model ID: saved-model' in result.stdout, result
+assert 'private-fixture-token' not in result.stdout + result.stderr
 assert json.loads(saved.read_text())['worker_api_key'] == 'private-fixture-token'
 saved.unlink()
 result = subprocess.run(['bash', str(root / 'deploy/install_local.sh'), '--global', '--dry-run'],
