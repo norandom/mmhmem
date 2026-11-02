@@ -50,7 +50,7 @@ marketplace packages remain outside the change boundary.
   - _Depends: 1.1, 1.2_
   - _Requirements: 1.1, 1.2, 1.3, 3.4, 3.5_
 
-- [ ] 2.3 (P) Provide the deterministic HTTPS worker fixture
+- [x] 2.3 (P) Provide the deterministic HTTPS worker fixture
   - Serve the existing worker response format through a hostname covered by a disposable certificate SAN.
   - Expose request receipts and unique response content for successful worker requests; retain TLS diagnostics for rejected connections.
   - Generate fresh trusted and untrusted CA fixtures per validation ID without embedding private keys in exported evidence.
@@ -180,6 +180,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 2.3: Reusable `worker_service()` uses Dagger `as_service(args=...)`, explicitly starts/stops across probes, and exposes public roots plus HTTPS `/receipts`. Independent `worker-fixture` passed hostname/trust/rejection/receipt checks (`tmp/worker-fixture-review.log`). Health checks can produce initial TLS EOF diagnostics; compare later diagnostics against their baseline.
 - Task 2.2: `inspect_static.py` accepts explicit binary/checksum/report inputs and validates static PIE without rejecting all dynamic metadata. Six positive/negative component tests passed independent canonical `static-inspection` (`tmp/static-inspection-review.log`). Final candidate inspection remains an integration gate.
 - Task 2.1: Locked musl lint, full deterministic tests and release build passed independent review (`tmp/static-build-review.log`), producing version 0.2.2, SHA-256 `41ebf9c37f19a7385d039a5d87030205c1e5aee04efe1afb65ba3e2481511556`. The first suite exposed an upstream random-path fixture bug, repaired separately under corpus-warmup-prune in `c9b11a2` before revalidation. Candidate remains internal pending linkage/runtime gates.
 - Task 1.2: Dagger caches whole function results; validation IDs must be explicit host-generated inputs, propagated through every startup/probe/certificate stage. Independent fresh `runtime-setup` passed after resolving this review finding. Shared synthetic bundle/case fixtures live in `ci/scripts/release_fixtures.py` and `release_support.py`.

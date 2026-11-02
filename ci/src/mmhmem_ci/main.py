@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def worker_fixture(self, src: dagger.Directory, validation_id: str) -> str:
+        """Check deterministic worker HTTPS behavior through service DNS."""
+        from .static_release import worker_fixture_check
+
+        return await worker_fixture_check(src, validation_id)
+
+    @function
     async def static_inspection(self, src: dagger.Directory, validation_id: str) -> str:
         """Exercise standalone ELF acceptance against static and incompatible files."""
         from .static_release import inspection_check

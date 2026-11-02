@@ -14,6 +14,42 @@ TARGET = "x86_64-unknown-linux-musl"
 RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alpine:3.22"}
 
 
+async def worker_fixture_check(src: dagger.Directory, validation_id: str) -> str:
+    """Prove DNS, trust success/rejection and matching worker request receipts."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    base = instrumented_runtime("debian-bookworm", src, validation_id)
+    output = await (base
+                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_worker_fixture.py", "-v"])
+                    .stderr())
+    service, trusted_ca, untrusted_ca = worker_service(src, validation_id)
+    await service.start()
+    try:
+        client = base.with_service_binding("worker-fixture", service)
+        trusted = with_trusted_root(client, trusted_ca)
+        untrusted = with_trusted_root(client, untrusted_ca)
+        command = ["python3", "ci/scripts/test_worker_fixture.py", "--endpoint", "https://worker-fixture:8443", "--validation-id", validation_id, "--mode"]
+        accepted = json.loads(await trusted.with_exec([*command, "trusted"]).stdout())
+        rejected = json.loads(await untrusted.with_exec([*command, "untrusted"]).stdout())
+        receipts = json.loads(await trusted.with_exec([*command, "receipts"]).stdout())
+        if len(receipts["tls_errors"]) <= accepted["tls_error_count"]:
+            raise ValueError("untrusted client produced no fresh server TLS diagnostic")
+    finally:
+        await service.stop()
+    return json.dumps({"status": "passed", "validation_id": validation_id, "tests": output,
+                       "trusted": accepted, "untrusted": rejected, "receipts": receipts}, indent=2)
+
+
+def worker_service(src: dagger.Directory, validation_id: str) -> tuple[dagger.Service, dagger.File, dagger.File]:
+    """Return reusable HTTPS service and public roots; private keys stay internal."""
+    base = instrumented_runtime("debian-bookworm", src, validation_id)
+    certs = base.with_exec(["python3", "-c", "import sys; sys.path.insert(0,'ci/scripts'); from release_support import create_certificates; create_certificates('/probe/worker-ca','worker-fixture',__import__('os').environ['VALIDATION_ID'])"])
+    service = certs.with_exposed_port(8443).as_service(args=[
+        "python3", "ci/scripts/worker_fixture.py", "--certificate", "/probe/worker-ca/server.crt",
+        "--key", "/probe/worker-ca/server.key", "--validation-id", validation_id])
+    return service, certs.file("/probe/worker-ca/trusted-ca.crt"), certs.file("/probe/worker-ca/untrusted-ca.crt")
+
+
 async def inspection_check(src: dagger.Directory, validation_id: str) -> str:
     """Run ELF inspector component tests without exporting an application binary."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
