@@ -1,6 +1,6 @@
 [package]
 name = "mmhmem"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Self-hosted cross-agent memory and I/O optimization server for AI coding harnesses (remote MCP Streamable HTTP daemon)"
 publish = false
