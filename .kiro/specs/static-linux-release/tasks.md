@@ -31,7 +31,7 @@ marketplace packages remain outside the change boundary.
   - _Requirements: 1.3, 2.1, 2.6, 2.7, 3.5, 3.7_
 
 - [ ] 2. Implement candidate production and independent verification components
-- [ ] 2.1 Produce the static application candidate and target regression results
+- [x] 2.1 Produce the static application candidate and target regression results
   - Build the existing locked dependency graph using the musl C compiler and target-specific Rust linker; preserve the existing crypto provider.
   - Run musl-target default-feature lint and the deterministic regression suite, then produce the release candidate outside the build cache.
   - Record active target dependencies and confirm optional telemetry is not enabled.
@@ -180,5 +180,6 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 2.1: Locked musl lint, full deterministic tests and release build passed independent review (`tmp/static-build-review.log`), producing version 0.2.2, SHA-256 `41ebf9c37f19a7385d039a5d87030205c1e5aee04efe1afb65ba3e2481511556`. The first suite exposed an upstream random-path fixture bug, repaired separately under corpus-warmup-prune in `c9b11a2` before revalidation. Candidate remains internal pending linkage/runtime gates.
 - Task 1.2: Dagger caches whole function results; validation IDs must be explicit host-generated inputs, propagated through every startup/probe/certificate stage. Independent fresh `runtime-setup` passed after resolving this review finding. Shared synthetic bundle/case fixtures live in `ci/scripts/release_fixtures.py` and `release_support.py`.
 - Task 1.1: Debian musl-gcc injects a dynamic interpreter for static PIE; retain the musl-only `-Wl,--no-dynamic-linker` flag. Canonical `static-setup` and existing deterministic `test` passed independent review (logs under `tmp/static-setup-review*.log`).

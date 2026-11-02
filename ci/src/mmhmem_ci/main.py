@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def static_build(self, src: dagger.Directory, validation_id: str) -> str:
+        """Status-only candidate build; full runtime verification precedes export."""
+        from .static_release import candidate_build_check
+
+        return await candidate_build_check(src, validation_id)
+
+    @function
     async def runtime_setup(self, src: dagger.Directory, validation_id: str) -> str:
         """Status-only check; callers must supply a fresh safe validation ID."""
         from .static_release import runtime_setup_check

@@ -28,11 +28,11 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # Generate freshness on the native host: Dagger caches function results, so
 # randomness inside a function cannot invalidate a previous validation run.
-if ($Call -eq 'runtime-setup') {
+if ($Call -in @('runtime-setup', 'static-build')) {
     if (($ExtraArgs -join ' ') -match '--validation-id(?:=|\s|$)') {
-        throw 'runtime-setup validation IDs are generated fresh by this wrapper'
+        throw "$Call validation IDs are generated fresh by this wrapper"
     }
-    $validationId = 'runtime-setup-' + [Guid]::NewGuid().ToString('N')
+    $validationId = $Call + '-' + [Guid]::NewGuid().ToString('N')
     $ExtraArgs = @($ExtraArgs) + @('--validation-id', $validationId)
 }
 $wslRepo = (& wsl -d Debian -e wslpath -a -u $repo).Trim()

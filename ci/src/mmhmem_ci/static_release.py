@@ -106,3 +106,23 @@ async def setup_check(src: dagger.Directory) -> str:
     report = json.loads(output)
     report["build_image"] = image_ref
     return json.dumps(report, indent=2)
+
+
+async def candidate_build_check(src: dagger.Directory, validation_id: str) -> str:
+    """Produce an internal candidate, returning only its build status to callers."""
+    _, _, report = await build_candidate(src, validation_id)
+    return json.dumps(report, indent=2)
+
+
+async def build_candidate(src: dagger.Directory, validation_id: str) -> tuple[dagger.File, dagger.Directory, dict]:
+    """Internal candidate and regression evidence; not a verified release export."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    ctr = musl_container(src).with_env_variable("VALIDATION_ID", validation_id)
+    tested = ctr.with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_build_candidate.py", "-v"])
+    candidate = tested.with_exec(["python3", "ci/scripts/build_candidate.py"])
+    report = json.loads(await candidate.stdout())
+    report["build_image"] = await dag.container(platform=dagger.Platform("linux/amd64")).from_(BUILD_IMAGE).image_ref()
+    # Include resolved image identity in the persisted regression report too.
+    candidate = candidate.with_new_file("/candidate/reports/target-suite.json", json.dumps(report, indent=2) + "\n")
+    return candidate.file("/candidate/mmhmem-linux-x86_64"), candidate.directory("/candidate/reports"), report
