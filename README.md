@@ -57,16 +57,26 @@ your agents and their model providers.
 
 ## Quickstart: local mode (no server)
 
-Install the binary on your machine and point each harness at it — the
-harness spawns mmhmem per session:
+**Install from a release binary** (no Rust toolchain needed): download
+`mmhmem.exe` (Windows) or `mmhmem` (Linux) from
+[the latest release](https://github.com/norandom/mmhmem/releases), clone this
+repo for the installer and playbook, and point the installer at the binary:
 
 ```sh
-claude mcp add --transport stdio --scope user mmhmem -- mmhmem stdio
+git clone https://github.com/norandom/mmhmem.git
+cd mmhmem
+# Windows
+powershell -File deploy\install_local.ps1 -Binary C:\path\to\mmhmem.exe
+# macOS / Linux / WSL
+sh deploy/install_local.sh --binary /path/to/mmhmem
 ```
 
-Or let the installer do it — it registers every harness it finds (Claude
-Code, OpenCode, Claude Desktop, Antigravity), asks whether to install
-globally or per project and which harnesses, and undoes itself with
+Or build it yourself (`cargo build --release`) and let the installer find the
+binary in `target/release`. The installer registers every harness it finds
+(Claude Code, OpenCode, Claude Desktop, Antigravity), asks whether to install
+globally or per project and which harnesses, ships the `/mmhmem-recap` command
+for Claude Code and OpenCode, writes worker settings into `.mmhmem.json`
+(`-WorkerModel` / `--worker-model` and friends), and undoes itself with
 `--remove` / `-Remove`:
 
 ```sh
