@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def local_probe(self, src: dagger.Directory, validation_id: str) -> str:
+        """Exercise the explicit static candidate's local public interfaces."""
+        from .static_release import local_probe_check
+
+        return await local_probe_check(src, validation_id)
+
+    @function
     async def bundle_check(self, src: dagger.Directory, validation_id: str) -> str:
         """Exercise bundle schema and evidence consistency rejection checks."""
         from .static_release import bundle_check_tests

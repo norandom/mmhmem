@@ -2,10 +2,17 @@
 
 ## Status
 
+The user approved the separate upstream storage repair and subsequent
+resumption of static-release implementation on 2026-11-02. The upstream repair
+has passed independent review, GNU tests, default/OTel clippy, formatting and
+musl tests/release. Fresh downstream local-probe validation and review remain
+completed successfully for task 3.1. The original blocker is resolved.
+
 Implementation is incomplete. Tasks 1.1, 1.2 and 2.1–2.4 passed independent
-review and canonical validation and are committed. Task 3.1 remains blocked;
-its partial implementation is preserved in the working tree and is not
-accepted as complete. Later tasks have not started.
+review and canonical validation and are committed. Task 3.1 has now passed
+fresh independent canonical local-probe verification on both userlands.
+Later tasks remain pending; the complete static-release feature is not yet
+accepted as complete.
 
 ## Reproduced upstream defect
 

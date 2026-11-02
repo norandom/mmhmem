@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # Generate freshness on the native host: Dagger caches function results, so
 # randomness inside a function cannot invalidate a previous validation run.
-if ($Call -in @('runtime-setup', 'static-build', 'static-inspection', 'worker-fixture', 'bundle-check')) {
+if ($Call -in @('runtime-setup', 'static-build', 'static-inspection', 'worker-fixture', 'bundle-check', 'local-probe')) {
     if (($ExtraArgs -join ' ') -match '--validation-id(?:=|\s|$)') {
         throw "$Call validation IDs are generated fresh by this wrapper"
     }

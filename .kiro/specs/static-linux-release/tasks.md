@@ -69,8 +69,8 @@ marketplace packages remain outside the change boundary.
   - _Requirements: 3.4, 3.5, 4.1_
 
 - [ ] 3. Exercise the release file through public application interfaces
-- [ ] 3.1 Verify local MCP behavior and persistent state
-  - _Blocked: Upstream local-mode task 2.1 production SQLite initialization fails under concurrent fresh-open with SQLITE_BUSY despite the configured timeout; scope approval is required before production Rust changes (see implementation-blocker.md)._
+- [x] 3.1 Verify local MCP behavior and persistent state
+  - Upstream local-mode task 2.1 repair approved, implemented and independently reviewed; fresh downstream local-probe verification is required before completion.
   - Accept an explicit candidate path and expected checksum; do not select Cargo's implicit test executable.
   - Check version and MCP initialization/tool discovery, write an observation and checkpoint through public tools, then restart against the same isolated store.
   - Assert memory search/detail retrieval and both existing statistics output formats after the recorded session.
@@ -181,6 +181,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 3.1 resumed after approved upstream repair `8db5f54`: fresh independent `local-probe` passed component tests, musl build/ELF checks and explicit-candidate local cases on Debian/Alpine (`tmp/local-probe-review.log`). Current candidate SHA-256 is `fa3bffb60baf890e224a71371e969b513e742dca647d56d84b217e09867c96fc`. Statistics assert populated recorded-session rows and existing typed zero-valued aggregates, not invented nonzero savings. Final bundle inspection must use the release basename.
 - Task 3.1: Earlier explicit-candidate local probes passed Debian and Alpine; final verification exposed a genuine upstream concurrent-first-open storage failure. Independent debug reproduced child exit 1 (`database is locked: Error code 5`) within 0.5 seconds with a 5000 ms timeout. Debug returned `STOP_FOR_HUMAN`; no production workaround, test filtering or acceptance retry was applied. Partial probe changes remain uncommitted pending upstream repair and fresh review. Evidence: `tmp/local-probe-final.log`, `tmp/diagnose-fresh-open.log`; scope report: `implementation-blocker.md`.
 - Task 2.4: `check_bundle.py --bundle DIR --expected-revision SHA [--require-publishable]` validates artifact and referenced report consistency. Runtime reports require passed status, validation ID and matching name/image/kernel/architecture/cpu/artifact_sha256/cases. Independent `bundle-check` passed ten checker and five support tests (`tmp/bundle-check-review.log`).
 - Task 2.3: Reusable `worker_service()` uses Dagger `as_service(args=...)`, explicitly starts/stops across probes, and exposes public roots plus HTTPS `/receipts`. Independent `worker-fixture` passed hostname/trust/rejection/receipt checks (`tmp/worker-fixture-review.log`). Health checks can produce initial TLS EOF diagnostics; compare later diagnostics against their baseline.
