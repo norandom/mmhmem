@@ -52,9 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: fmt, clippy default+otel, tests, release, docker image, compose config, deploy artifacts, tokei
-        uses: dagger/dagger-for-github@v8
+        uses: dagger/dagger-for-github@v8.4.1
         with:
-          version: "0.21.8"
+          version: "0.21.11"
           workdir: ci
           # A fresh checkout carries no target/.git — the --src contract.
           args: call all --src ..
