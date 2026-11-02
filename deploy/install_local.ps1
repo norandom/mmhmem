@@ -40,6 +40,10 @@
 #     Desktop configs are JSON-merged in place, preserving existing keys.
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
+#   - Claude Code and OpenCode additionally get the /mmhmem-recap command
+#     template copied into their command directory (scope-matched);
+#     -Remove removes it. Desktop and Antigravity have no user-defined
+#     commands and get none.
 
 param(
     [switch]$Global,
@@ -178,6 +182,26 @@ function Remove-Skill([string]$dir) {
 }
 function Set-Skill([string]$dir) {
     if ($Remove) { Remove-Skill $dir } else { Install-Skill $dir }
+}
+
+# /mmhmem-recap command templates (corpus-warmup-prune Req 9): copied per
+# scope into the harness's own command directory; desktop/antigravity have
+# no user-defined commands and get none.
+$CommandSrcClaude = Join-Path $RepoRoot 'deploy\commands\claude\mmhmem-recap.md'
+$CommandSrcOpenCode = Join-Path $RepoRoot 'deploy\commands\opencode\mmhmem-recap.md'
+function Install-Command([string]$src, [string]$dst) {
+    if ($DryRun) { Info "[dry-run] copy $(Split-Path -Leaf $src) -> $dst"; return }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
+    Copy-Item -LiteralPath $src -Destination $dst -Force
+    Info "command installed: $dst"
+}
+function Remove-Command([string]$dst) {
+    if ($DryRun) { Info "[dry-run] rm $dst"; return }
+    if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
+    Info "command removed: $dst"
+}
+function Set-Command([string]$src, [string]$dst) {
+    if ($Remove) { Remove-Command $dst } else { Install-Command $src $dst }
 }
 
 # Merges one JSON assignment into a config file, preserving everything
@@ -321,6 +345,8 @@ if ((Want-Agent 'claude') -and $HasClaude) {
         } finally { Pop-Location }
     }
     Set-Skill (Join-Path $HOME '.claude\skills\unified-memory')
+    $claudeCmdDir = if ($Global) { Join-Path $HOME '.claude\commands' } else { Join-Path $ProjectDir '.claude\commands' }
+    Set-Command $CommandSrcClaude (Join-Path $claudeCmdDir 'mmhmem-recap.md')
     $Registered.Add('claude-code') | Out-Null
 }
 
@@ -334,6 +360,8 @@ if ((Want-Agent 'opencode') -and $HasOpenCode) {
             "{`"type`": `"local`", `"command`": [$(Json-Quote $Bin), `"stdio`"]}"
     }
     if ($Global) { Set-Skill (Join-Path $HOME '.config\opencode\skills\unified-memory') }
+    $openCodeCmdDir = if ($Global) { Join-Path $HOME '.config\opencode\command' } else { Join-Path $ProjectDir '.opencode\command' }
+    Set-Command $CommandSrcOpenCode (Join-Path $openCodeCmdDir 'mmhmem-recap.md')
     $Registered.Add('opencode') | Out-Null
 }
 

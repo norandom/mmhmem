@@ -43,6 +43,10 @@
 #     merge; without it the script prints the manual steps instead).
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
+#   - Claude Code and OpenCode additionally get the /mmhmem-recap command
+#     template copied into their command directory (scope-matched);
+#     --remove removes it. Desktop and Antigravity have no user-defined
+#     commands and get none.
 
 set -euo pipefail
 
@@ -183,6 +187,32 @@ remove_skill() {
 }
 skill() {
   if [ "$REMOVE" -eq 1 ]; then remove_skill "$1"; else install_skill "$1"; fi
+}
+
+# /mmhmem-recap command templates (corpus-warmup-prune Req 9): copied per
+# scope into the harness's own command directory; desktop/antigravity have
+# no user-defined commands and get none.
+COMMAND_SRC_CLAUDE="$REPO_ROOT/deploy/commands/claude/mmhmem-recap.md"
+COMMAND_SRC_OPENCODE="$REPO_ROOT/deploy/commands/opencode/mmhmem-recap.md"
+install_command() { # $1 = src, $2 = dst
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "[dry-run] copy $(basename "$1") -> $2"
+    return
+  fi
+  mkdir -p "$(dirname "$2")"
+  cp "$1" "$2"
+  info "command installed: $2"
+}
+remove_command() { # $1 = dst
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "[dry-run] rm $1"
+    return
+  fi
+  rm -f "$1"
+  info "command removed: $1"
+}
+command_tmpl() { # $1 = src, $2 = dst
+  if [ "$REMOVE" -eq 1 ]; then remove_command "$2"; else install_command "$1" "$2"; fi
 }
 
 # Merges one JSON assignment into a config file, preserving everything
@@ -399,6 +429,11 @@ if want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then
       fi
     fi
     skill "$HOME/.claude/skills/unified-memory"
+    if [ "$GLOBAL" -eq 1 ]; then
+      command_tmpl "$COMMAND_SRC_CLAUDE" "$HOME/.claude/commands/mmhmem-recap.md"
+    else
+      command_tmpl "$COMMAND_SRC_CLAUDE" "$PROJECT_DIR/.claude/commands/mmhmem-recap.md"
+    fi
     registered="claude-code $registered"
   else
     if [ "$GLOBAL" -eq 1 ]; then
@@ -436,6 +471,9 @@ if want_agent opencode && [ "$HAS_OPENCODE" -eq 1 ]; then
   fi
   if [ "$GLOBAL" -eq 1 ]; then
     skill "$HOME/.config/opencode/skills/unified-memory"
+    command_tmpl "$COMMAND_SRC_OPENCODE" "$HOME/.config/opencode/command/mmhmem-recap.md"
+  else
+    command_tmpl "$COMMAND_SRC_OPENCODE" "$PROJECT_DIR/.opencode/command/mmhmem-recap.md"
   fi
   registered="opencode $registered"
 fi
