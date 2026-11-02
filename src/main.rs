@@ -34,6 +34,10 @@ fn main() -> ExitCode {
         Some("stats") => {
             mmhmem::cli::run_stats(std::env::args().nth(2).as_deref() == Some("--json"))
         }
+        // Stale-cache pruning over the local store (corpus-warmup-prune Req 3).
+        Some("prune") => {
+            mmhmem::cli::run_prune(std::env::args().nth(2).as_deref() == Some("--dry-run"))
+        }
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }
