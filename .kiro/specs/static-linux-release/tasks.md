@@ -1,6 +1,6 @@
 # Implementation Plan: Static Linux Release
 
-Requirements and design are approved. Tasks remain pending human approval.
+Requirements, design and tasks are approved. Task approval was granted by the user on 2026-11-02.
 Each executable task targets a 1–3 hour work unit; compilation and hosted CI
 waiting time may extend elapsed time. All tests below are required.
 
@@ -13,7 +13,7 @@ marketplace packages remain outside the change boundary.
 ## Tasks
 
 - [ ] 1. Establish build and probe prerequisites
-- [ ] 1.1 Establish the isolated musl toolchain
+- [x] 1.1 Establish the isolated musl toolchain
   - Select the exact approved compiler, install the musl Rust target and native C compiler, and isolate target flags and build caches from GNU/OTel builds.
   - Retain bounded build jobs and disabled incremental compilation; record compiler, linker and image identity.
   - Make the setup exercisable through the canonical CI entrypoint as a status-only check, without exporting an unverified release binary.
@@ -177,3 +177,7 @@ marketplace packages remain outside the change boundary.
   the prepared portability wording before closing Requirements 4.1 and 5.1 as accepted.
 - Task-plan review: passed (29 acceptance criteria mapped; dependencies and boundaries checked).
 - Independent task-graph sanity review: PASS; no blocking task-local fixes.
+
+## Implementation Notes
+
+- Task 1.1: Debian musl-gcc injects a dynamic interpreter for static PIE; retain the musl-only `-Wl,--no-dynamic-linker` flag. Canonical `static-setup` and existing deterministic `test` passed independent review (logs under `tmp/static-setup-review*.log`).

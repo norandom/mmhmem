@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def static_setup(self, src: dagger.Directory) -> str:
+        """Status-only musl toolchain check; never exports a release candidate."""
+        from .static_release import setup_check
+
+        return await setup_check(src)
+
+    @function
     async def distribution(self, src: dagger.Directory) -> str:
         """Installer and marketplace checks on GNU and BusyBox Linux userlands."""
         results = []
