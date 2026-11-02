@@ -21,7 +21,11 @@ in WSL containers, and Dagger is the CI engine everywhere.
 - **Never `cargo clean`** — compile times are long; build once, then iterate.
 - Kill stale daemons before building (`Get-Process mmhmem | Stop-Process
   -Force`); `scripts/lint.ps1` does this automatically. A leaked daemon holds
-  `target\debug\mmhmem.exe` and blocks all builds.
+  `target\debug\mmhmem.exe` and blocks all builds. **Side effect:** this also
+  kills the opencode-connected mmhmem MCP child — opencode then shows the
+  server as "error" and does not auto-respawn it; run
+  `opencode service restart` after the gate to reconnect (expect
+  `tools=9` in the log).
 - Test runner: **cargo-nextest** (`cargo nextest run`, config in
   `.config/nextest.toml`); much faster than `cargo test` for this I/O-heavy
   suite. `scripts/lint.ps1` falls back to `cargo test` if absent.
