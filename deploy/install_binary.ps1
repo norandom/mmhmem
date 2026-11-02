@@ -26,12 +26,14 @@ function Install-MmhmemBinary {
     } finally {
         if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
     }
-    # Running agents retain the old image. Retry its cleanup on subsequent installs.
-    Get-ChildItem -LiteralPath $directory -File | Where-Object {
+    # Keep the immediate previous version; retry older locked images next time.
+    $oldVersions = @(Get-ChildItem -LiteralPath $directory -File | Where-Object {
         $_.Name -match ('^' + [regex]::Escape((Split-Path -Leaf $Destination)) + '\.[0-9a-f]{32}\.old$')
-    } | ForEach-Object {
+    } | Sort-Object LastWriteTimeUtc -Descending)
+    $keep = if ($renamed) { $backup } elseif ($oldVersions.Count) { $oldVersions[0].FullName } else { '' }
+    $oldVersions | Where-Object { $_.FullName -ne $keep } | ForEach-Object {
         try { Remove-Item -LiteralPath $_.FullName -Force }
-        catch { Write-Verbose "Old executable still in use: $($_.Exception.Message)" }
+        catch { Write-Host '[mmhmem] An older version is still running; cleanup will retry on the next update.' }
     }
     if ($renamed) { Write-Host '[mmhmem] Updated binary. Running agents continue using their current version until restarted.' }
 }

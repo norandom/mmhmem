@@ -139,6 +139,7 @@ mkdir -p "$tree/skills/unified-memory" "$tree/commands/claude" \
          "$tree/commands/opencode" "$tree/commands/codex"
 fetch "$RAW/deploy/install_local.sh" "$tree/install_local.sh"
 if [ "$REMOVE" -eq 0 ]; then
+  fetch "$RAW/deploy/check_worker.py" "$tree/check_worker.py"
   fetch "$RAW/deploy/skills/unified-memory/SKILL.md"    "$tree/skills/unified-memory/SKILL.md"
   fetch "$RAW/deploy/commands/claude/mmhmem-recap.md"   "$tree/commands/claude/mmhmem-recap.md"
   fetch "$RAW/deploy/commands/opencode/mmhmem-recap.md" "$tree/commands/opencode/mmhmem-recap.md"

@@ -371,21 +371,36 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
+if (-not $Remove) {
+    . (Join-Path $PSScriptRoot 'check_worker.ps1')
+    $ExistingWorker = Get-MmhmemWorkerSettings $WorkerConfigFile $WorkerModel $WorkerUrl $WorkerApiKey
+    if ($Interactive -and $ExistingWorker.Model) {
+        $displayUrl = $null
+        if ([Uri]::TryCreate($ExistingWorker.Url, [UriKind]::Absolute, [ref]$displayUrl)) {
+            Write-Host ("`n  Current base URL: " + ($displayUrl.GetLeftPart([UriPartial]::Path) -replace '/chat/completions/?$', '' -replace '//[^/@]+@', '//'))
+        }
+        Write-Host "  Current model ID: $($ExistingWorker.Model)"
+        Write-Host ('  API key: ' + $(if ($ExistingWorker.Key) { '***' } else { '(not set)' }))
+    }
+}
 # --- optional worker setup -------------------------------------------------
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
-    Write-Host '  A worker model prepares reusable file summaries. Memory works without it.'
-    Write-Host '  Skip to preserve existing settings. This does not download or start a model.'
+    Write-Host "  A worker model prepares reusable file summaries.`n  Memory works without it."
+    Write-Host "  Keep existing settings by answering N.`n  This does not download or start a model."
     $configureWorker = Read-Host '  Configure a worker model now? [y/N]'
     if ($configureWorker -match '^(?i)y(es)?$') {
-        $WorkerModel = (Read-Host '  Model ID (empty = skip)').Trim()
+        $WorkerModel = (Read-Host '  Model ID (empty = keep existing, or skip if none)').Trim()
+        if (-not $WorkerModel -and $ExistingWorker) { $WorkerModel = $ExistingWorker.Model }
         if ($WorkerModel) {
-            $enteredUrl = (Read-Host '  OpenAI-compatible base URL (e.g. https://api.openai.com/v1; empty = keep existing / local Ollama)').Trim().TrimEnd('/')
+            Write-Host "  Example: https://api.openai.com/v1`n  Empty = keep existing URL, or use local Ollama."
+            $enteredUrl = (Read-Host '  OpenAI-compatible base URL').Trim().TrimEnd('/')
             if ($enteredUrl) {
                 $WorkerUrl = if ($enteredUrl.EndsWith('/chat/completions')) { $enteredUrl } else { "$enteredUrl/chat/completions" }
             }
             if (-not $WorkerApiKey) {
-                $secureKey = Read-Host '  API key (hidden; empty = keep existing / none for local Ollama)' -AsSecureString
+                Write-Host '  Empty = keep existing key; local Ollama needs no key.'
+                $secureKey = Read-Host '  API key (hidden)' -AsSecureString
                 $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
                 try { $WorkerApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer) }
                 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer) }
@@ -394,6 +409,10 @@ if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     }
 }
 # --- end optional worker setup ---------------------------------------------
+if (-not $Remove) {
+    if ($DryRun) { Info '[dry-run] worker connection check skipped (no API request)' }
+    else { Test-MmhmemWorker (Get-MmhmemWorkerSettings $WorkerConfigFile $WorkerModel $WorkerUrl $WorkerApiKey) }
+}
 if ($InstallSource -and -not $Remove -and -not $DryRun) {
     # Commit the staged bootstrap download only after the user selects agents.
     . (Join-Path $PSScriptRoot 'install_binary.ps1')
@@ -532,6 +551,17 @@ if ($Global) {
 }
 
 # --- summary ---------------------------------------------------------------------------------
+if ($Global -and -not $Remove) {
+    if ($DryRun) { Info "[dry-run] add $UserBinDir to user PATH" }
+    else {
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $entries = @($userPath -split ';' | Where-Object { $_ })
+        if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $UserBinDir.TrimEnd('\') }).Count -eq 0) {
+            [Environment]::SetEnvironmentVariable('Path', (($entries + $UserBinDir) -join ';'), 'User')
+        }
+        Info 'mmhmem is on your user PATH. New terminals will pick it up.'
+    }
+}
 if ($Registered.Count -eq 0 -and -not $WorkerConfigWritten) { Die 'nothing to do: no harness selected/detected' }
 Write-Host ''
 $Mode = if ($Global) { 'global (all projects)' } else { "project: $ProjectDir" }
@@ -557,9 +587,9 @@ if (-not $Remove -and $Interactive) {
     Write-Host "`n  Optional: explore and prebuild your project cache"
     $warmup = Read-Host '  Show the prompt to run in your agent? [y/N]'
     if ($warmup -match '^(?i)y(es)?$') {
-        Write-Host '  Open the project in your agent and restart its mmhmem connection to load new settings.'
-        Write-Host '  A reachable worker model is required; remote providers may charge for summaries.'
-        Write-Host '  Paste this prompt (no files have been scanned or sent by this installer):'
-        Write-Host '  Explore this repository, identify key source files, and use mmhmem shunt_warmup to prebuild their summary cache in batches of up to 25 files. Report what was cached or skipped.'
+        Write-Host "  Open the project in your agent.`n  Restart its mmhmem connection to load new settings."
+        Write-Host "  A reachable worker model is required.`n  Remote providers may charge for summaries."
+        Write-Host "`n  Paste this prompt into your agent:`n"
+        Write-Host "  Explore this repository and identify its key source files.`n  Use mmhmem shunt_warmup to prebuild their summary cache`n  in batches of up to 25 files.`n  Report what was cached or skipped."
     }
 }

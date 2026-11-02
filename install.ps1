@@ -41,7 +41,7 @@ $stage = Join-Path $tempBase ('mmhmem-install-' + [Guid]::NewGuid().ToString('N'
 try {
     $files = @('install_local.ps1')
     if (-not $Remove) {
-        $files += 'install_binary.ps1', 'skills/unified-memory/SKILL.md', 'commands/claude/mmhmem-recap.md',
+        $files += 'install_binary.ps1', 'check_worker.ps1', 'skills/unified-memory/SKILL.md', 'commands/claude/mmhmem-recap.md',
             'commands/opencode/mmhmem-recap.md', 'commands/codex/mmhmem-recap.md'
     }
     foreach ($file in $files) {
@@ -70,6 +70,10 @@ try {
     $shell = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
     & (Join-Path $PSHOME $shell) @engineArgs
     if ($LASTEXITCODE -ne 0) { throw "Installer failed (exit $LASTEXITCODE)." }
+    if (-not $Remove -and -not $DryRun -and (Test-Path -LiteralPath $binary)) {
+        $binDirectory = Split-Path -Parent $binary
+        if (($env:PATH -split ';') -notcontains $binDirectory) { $env:PATH += ';' + $binDirectory }
+    }
 } finally {
     if ((Split-Path -Parent ([IO.Path]::GetFullPath($stage))).TrimEnd('\', '/') -ne $tempBase) {
         throw 'Unsafe installer cleanup path.'

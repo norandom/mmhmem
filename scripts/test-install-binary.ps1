@@ -32,7 +32,8 @@ try {
     Stop-Process -Id $running.Id -Force
     $running.WaitForExit()
     Install-MmhmemBinary $source $target
-    if (@(Get-ChildItem $testRoot -Filter '*.old').Count) { throw 'Stopped image backup was not cleaned up' }
+    $backups = @(Get-ChildItem $testRoot -Filter '*.old')
+    if ($backups.Count -ne 1 -or [IO.File]::ReadAllText($backups[0].FullName) -ne 'next version') { throw 'Expected exactly one previous version after cleanup' }
     # Invalid input and exclusive locks must preserve the installed bytes.
     [IO.File]::WriteAllText($source, '')
     $failed = $false

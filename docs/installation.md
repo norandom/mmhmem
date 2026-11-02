@@ -9,8 +9,10 @@ provide new settings.
 Windows updates can run while agents remain open. The installer renames the
 old executable and puts the new version at the registered path. Existing
 processes keep their current version until restarted; new processes use the
-updated version. Old executables still in use are retained and cleaned up by
-a later install after those processes exit.
+updated version. One previous binary is retained. Older Windows executables
+still locked by running agents remain temporarily and are cleaned up on a
+later update after those processes exit. Unix installers replace a single
+`.old` backup on each update.
 
 | Platform | Release asset | Binary location | Memory location |
 |---|---|---|---|
@@ -21,8 +23,10 @@ a later install after those processes exit.
 
 The Unix bootstrap needs Bash, curl or wget and standard Unix utilities.
 Python 3 enables automatic JSON configuration merges; jq is not required.
-Add the binary directory to your shell's PATH to run `mmhmem` yourself;
-agent registrations use its absolute path. Linux ARM64 has no release asset.
+Global installs add the binary directory to your user PATH. Windows one-line
+installs also update the calling PowerShell session. On Unix, open a new
+terminal to pick up the shell-profile change. Agent registrations continue
+to use the absolute path. Linux ARM64 has no release asset.
 On Windows use the native installer; WSL is only a CI build environment.
 
 ## Linux compatibility
@@ -70,6 +74,16 @@ and an API key entered without echo. The base URL is converted to the
 also works. Empty URL/key answers preserve existing values; without existing
 settings the endpoint defaults to local Ollama and the key is optional.
 The installer does not download or start a model.
+
+Existing base URL and model ID are shown before configuration; API keys are
+displayed only as `***`. Non-dry-run installations test configured workers
+with a short chat-completions request before changing the binary, settings,
+or PATH. Authentication failures, invalid endpoints/models, quota failures,
+unreachable servers, and malformed responses stop the installation with a
+readable error. No project content is sent by this test; provider charges
+may apply. Unix worker validation requires Python 3. Dry runs make no worker
+API requests. Credentials expiring later are a runtime worker error; setup
+validation cannot predict future expiration.
 
 At the end, you can request a prompt to explore the project and prepare its
 summary cache using `shunt_warmup`, up to 25 files per batch. Run this in your

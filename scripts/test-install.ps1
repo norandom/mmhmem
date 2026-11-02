@@ -60,6 +60,7 @@ try {
     Write-Host 'PASS: PowerShell syntax, checkout-free dry run, Codex skill/recap, removal without companions, staging cleanup'
     & (Join-Path $PSScriptRoot 'test-install-binary.ps1')
     & (Join-Path $PSScriptRoot 'test-install-menus.ps1')
+    & (Join-Path $PSScriptRoot 'test-worker-check.ps1')
 } finally {
     $env:TEMP = $originalTemp
     $env:TMP = $originalTmp

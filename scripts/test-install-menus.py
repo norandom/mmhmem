@@ -1,5 +1,6 @@
 """Exercise piped Bash bootstrap menus through a real pseudo-terminal (CI only)."""
 import errno
+import json
 import os
 from pathlib import Path
 import pty
@@ -71,6 +72,16 @@ assert not (home / '.local/bin/mmhmem').exists(), 'Cancel installed a binary'
 output = terminal_case('1\n3\ny\ntest-model\nhttps://worker.example/v1/\n\ny\n')
 assert 'worker model: test-model' in output and 'worker_api_url' in output, output
 assert 'shunt_warmup' in output and '25 files' in output, output
+saved = home / '.mmhmem.json'
+saved.write_text(json.dumps({'worker_model': 'saved-model',
+                            'worker_api_url': 'https://saved.example/v1/chat/completions',
+                            'worker_api_key': 'private-fixture-token'}))
+output = terminal_case('1\n3\nn\nn\n')
+assert 'Current base URL: https://saved.example/v1' in output, output
+assert 'Current model ID: saved-model' in output and 'API key: ***' in output, output
+assert 'private-fixture-token' not in output, output
+assert json.loads(saved.read_text())['worker_api_key'] == 'private-fixture-token'
+saved.unlink()
 result = subprocess.run(['bash', str(root / 'deploy/install_local.sh'), '--global', '--dry-run'],
                         input='', text=True, capture_output=True, env=env)
 assert result.returncode != 0 and 'pass --agent' in result.stderr, result

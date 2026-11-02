@@ -446,18 +446,28 @@ note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
 # --- optional worker setup -------------------------------------------------
+worker_check() {
+  MMHMEM_CHECK_MODEL="$WORKER_MODEL" MMHMEM_CHECK_API_URL="$WORKER_URL" MMHMEM_CHECK_API_KEY="$WORKER_KEY" \
+    python3 "$SCRIPT_DIR/check_worker.py" "$1" "$WORKER_CONFIG_FILE"
+}
+if [ "$REMOVE" -eq 0 ] && [ -t 0 ] && command -v python3 >/dev/null 2>&1; then
+  worker_check show || die 'cannot read worker settings'
+  existing_model="$(worker_check model)" || die 'cannot read worker settings'
+fi
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   printf '\n  Optional: summary cache\n  ----------------------------------------\n'
-  printf '  A worker model prepares reusable file summaries. Memory works without it.\n'
-  printf '  Skip to preserve existing settings. This does not download or start a model.\n'
+  printf '  A worker model prepares reusable file summaries.\n  Memory works without it.\n'
+  printf '  Keep existing settings by answering N.\n  This does not download or start a model.\n'
   printf '  Configure a worker model now? [y/N]: '
   read -r configure_worker || die 'no answer given'
   case "$configure_worker" in
     y|Y|yes|YES)
-      printf '  Model ID (empty = skip): '
+      printf '  Model ID (empty = keep existing, or skip if none): '
       read -r WORKER_MODEL || die 'no answer given'
+      [ -n "$WORKER_MODEL" ] || WORKER_MODEL="${existing_model:-}"
       if [ -n "$WORKER_MODEL" ]; then
-        printf '  OpenAI-compatible base URL (e.g. https://api.openai.com/v1; empty = keep existing / local Ollama): '
+        printf '  Example: https://api.openai.com/v1\n  Empty = keep existing URL, or use local Ollama.\n'
+        printf '  OpenAI-compatible base URL: '
         read -r entered_url || die 'no answer given'
         if [ -n "$entered_url" ]; then
           entered_url="${entered_url%/}"
@@ -467,7 +477,8 @@ if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
           esac
         fi
         if [ -z "$WORKER_KEY" ]; then
-          printf '  API key (hidden; empty = keep existing / none for local Ollama): '
+          printf '  Empty = keep existing key; local Ollama needs no key.\n'
+          printf '  API key (hidden): '
           read -r -s WORKER_KEY || die 'no answer given'
           printf '\n'
         fi
@@ -476,12 +487,22 @@ if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   esac
 fi
 # --- end optional worker setup ---------------------------------------------
+if [ "$REMOVE" -eq 0 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info '[dry-run] worker connection check skipped (no API request)'
+  elif command -v python3 >/dev/null 2>&1; then
+    worker_check check || die 'worker validation failed; installation unchanged'
+  elif [ -n "$WORKER_MODEL$WORKER_URL$WORKER_KEY${WORKER_API_KEY:-}" ] || [ -f "$WORKER_CONFIG_FILE" ]; then
+    die 'Python 3 is required to validate worker settings; install it and retry'
+  fi
+fi
 if [ -n "$INSTALL_SOURCE" ] && [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   mkdir -p "$(dirname "$BIN")"
   staged_bin="$(mktemp "$(dirname "$BIN")/.mmhmem.XXXXXX")"
   trap 'rm -f "$staged_bin"' EXIT
   cp "$INSTALL_SOURCE" "$staged_bin"
   chmod +x "$staged_bin"
+  if [ -f "$BIN" ]; then cp -p "$BIN" "$BIN.old"; fi
   mv -f "$staged_bin" "$BIN"
 fi
 
@@ -647,14 +668,35 @@ if [ "$GLOBAL" -eq 1 ]; then
       info "[dry-run] cp $BIN -> $USER_BIN/mmhmem"
     else
       mkdir -p "$USER_BIN"
-      cp "$BIN" "$USER_BIN/mmhmem"
+      staged_bin="$(mktemp "$USER_BIN/.mmhmem.XXXXXX")"
+      trap 'rm -f "$staged_bin"' EXIT
+      cp "$BIN" "$staged_bin"
+      chmod +x "$staged_bin"
+      if [ -f "$USER_BIN/mmhmem" ]; then cp -p "$USER_BIN/mmhmem" "$USER_BIN/mmhmem.old"; fi
+      mv -f "$staged_bin" "$USER_BIN/mmhmem"
     fi
   fi
   BIN="$USER_BIN/mmhmem"
   if [ "$REMOVE" -eq 0 ]; then
     case ":$PATH:" in
       *":$USER_BIN:"*) ;;
-      *) info "note: $USER_BIN is not on your PATH (harness configs use the absolute path, so this only matters for running mmhmem yourself)" ;;
+      *)
+        case "${SHELL:-}" in
+          */zsh) path_profile="$HOME/.zshrc" ;;
+          */bash) path_profile="$HOME/.bashrc" ;;
+          *) path_profile="$HOME/.profile" ;;
+        esac
+        path_line='export PATH="$HOME/.local/bin:$PATH" # mmhmem user tools'
+        if [ "$DRY_RUN" -eq 1 ]; then
+          info "[dry-run] add ~/.local/bin to PATH in $path_profile"
+        else
+          if ! grep -Fqx "$path_line" "$path_profile" 2>/dev/null; then
+            printf '\n%s\n' "$path_line" >> "$path_profile"
+          fi
+          info "PATH configured in $path_profile"
+          info 'Open a new terminal to run mmhmem by name.'
+        fi
+        ;;
     esac
   fi
 fi
@@ -694,10 +736,12 @@ if [ "$REMOVE" -eq 0 ] && [ -t 0 ]; then
   read -r warmup || die 'no answer given'
   case "$warmup" in
     y|Y|yes|YES)
-      printf '  Open the project in your agent and restart its mmhmem connection to load new settings.\n'
-      printf '  A reachable worker model is required; remote providers may charge for summaries.\n'
-      printf '  Paste this prompt (no files have been scanned or sent by this installer):\n'
-      printf '  Explore this repository, identify key source files, and use mmhmem shunt_warmup to prebuild their summary cache in batches of up to 25 files. Report what was cached or skipped.\n'
+      printf '  Open the project in your agent.\n  Restart its mmhmem connection to load new settings.\n'
+      printf '  A reachable worker model is required.\n  Remote providers may charge for summaries.\n'
+      printf '\n  Paste this prompt into your agent:\n\n'
+      printf '  Explore this repository and identify its key source files.\n'
+      printf '  Use mmhmem shunt_warmup to prebuild their summary cache\n'
+      printf '  in batches of up to 25 files.\n  Report what was cached or skipped.\n'
       ;;
   esac
 fi
