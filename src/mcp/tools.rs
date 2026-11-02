@@ -423,8 +423,10 @@ impl McpServer {
         }
         if !view.found_prior_session {
             return ok_text(format!(
-                "No active cross-agent session found for '{}'. Initialized new task ID: {}.",
-                p.project, view.task_id
+                "No active cross-agent session found for '{}'. Initialized new task ID: {}.{}",
+                p.project,
+                view.task_id,
+                self.worker_notice()
             ));
         }
         let mut md = format!(
@@ -444,6 +446,20 @@ impl McpServer {
                 ));
             }
         }
+        md.push_str(&self.worker_notice());
         ok_text(md)
+    }
+
+    /// One-line worker-unconfigured notice for session-start responses
+    /// (Req 8.1); empty when a worker model is configured (Req 8.2).
+    fn worker_notice(&self) -> String {
+        if self.state.worker_configured {
+            String::new()
+        } else {
+            "\n\nNo worker model configured — smart_read shunting and \
+             shunt_warmup stay off. Set worker_model in .mmhmem.json \
+             (or the WORKER_MODEL variable) to enable them."
+                .to_string()
+        }
     }
 }

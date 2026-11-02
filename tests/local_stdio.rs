@@ -46,9 +46,16 @@ fn spawn_stdio(data_dir: &Path) -> Command {
     cmd
 }
 
+/// Like [`spawn_stdio`] but with a worker model configured (Req 8.2 tests).
+fn spawn_stdio_with_worker(data_dir: &Path, model: &str) -> Command {
+    let mut cmd = spawn_stdio(data_dir);
+    cmd.env("WORKER_MODEL", model);
+    cmd
+}
+
 impl StdioMcp {
-    async fn new(data_dir: &Path) -> Self {
-        let mut child = spawn_stdio(data_dir).spawn().expect("spawn mmhmem stdio");
+    async fn from_command(mut cmd: Command) -> Self {
+        let mut child = cmd.spawn().expect("spawn mmhmem stdio");
         let stdin = child.stdin.take().expect("stdin pipe");
         let stdout = BufReader::new(child.stdout.take().expect("stdout pipe"));
         Self {
@@ -57,6 +64,10 @@ impl StdioMcp {
             stdout,
             next_id: 1,
         }
+    }
+
+    async fn new(data_dir: &Path) -> Self {
+        Self::from_command(spawn_stdio(data_dir)).await
     }
 
     async fn send(&mut self, line: &str) {
@@ -283,4 +294,83 @@ async fn stdio_exits_cleanly_when_stdin_closes_immediately() {
     let mcp = StdioMcp::new(data.path()).await;
     let (ok, _stderr) = mcp.shutdown().await;
     assert!(ok, "immediate EOF must exit 0");
+}
+
+#[tokio::test]
+async fn resume_notes_missing_worker_when_unconfigured() {
+    // Req 8.1: every session-start response (resume view and fresh
+    // init) carries the one-line notice naming the missing setting.
+    let data = tempfile::tempdir().unwrap();
+    let mut mcp = StdioMcp::new(data.path()).await;
+    mcp.handshake().await;
+    // Checkpoint first so the resume branch has a prior session to show.
+    mcp.request(
+        "tools/call",
+        json!({"name": "session_resume_or_handoff", "arguments": {
+            "project": "p", "agent_harness": "opencode",
+            "updated_working_state_md": "working state"
+        }}),
+    )
+    .await;
+    let resume = mcp
+        .request(
+            "tools/call",
+            json!({"name": "session_resume_or_handoff", "arguments": {
+                "project": "p", "agent_harness": "opencode"
+            }}),
+        )
+        .await;
+    let text = resume["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("No worker model configured"),
+        "resume view must carry the notice: {text}"
+    );
+    assert!(
+        text.contains("worker_model") && text.contains(".mmhmem.json"),
+        "notice must name the setting and the config file: {text}"
+    );
+    // Fresh init (no prior session) carries it too.
+    let fresh = mcp
+        .request(
+            "tools/call",
+            json!({"name": "session_resume_or_handoff", "arguments": {
+                "project": "fresh-project", "agent_harness": "opencode"
+            }}),
+        )
+        .await;
+    let text = fresh["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("No worker model configured"),
+        "fresh init must carry the notice: {text}"
+    );
+    let (ok, _stderr) = mcp.shutdown().await;
+    assert!(ok);
+}
+
+#[tokio::test]
+async fn resume_has_no_worker_notice_when_configured() {
+    // Req 8.2: with a worker model configured the notice is absent and
+    // the response content is otherwise unchanged.
+    let data = tempfile::tempdir().unwrap();
+    let mut mcp = StdioMcp::from_command(spawn_stdio_with_worker(data.path(), "stub")).await;
+    mcp.handshake().await;
+    let resume = mcp
+        .request(
+            "tools/call",
+            json!({"name": "session_resume_or_handoff", "arguments": {
+                "project": "p", "agent_harness": "opencode"
+            }}),
+        )
+        .await;
+    let text = resume["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        !text.contains("No worker model configured"),
+        "notice must be absent with a worker: {text}"
+    );
+    assert!(
+        text.contains("Initialized new task ID"),
+        "the rest of the response is unchanged: {text}"
+    );
+    let (ok, _stderr) = mcp.shutdown().await;
+    assert!(ok);
 }
