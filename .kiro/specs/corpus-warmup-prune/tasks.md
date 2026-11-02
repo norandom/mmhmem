@@ -64,7 +64,7 @@
 - [ ] 6. Integration: end-to-end warmup and prune through a stdio child
 - [ ] 6.1 Warmup integration with a real worker delegation
   - Spawn the real binary in local mode with the worker endpoint pointed at an in-test stub: call `shunt_warmup` with one above-threshold file and assert delegated=1 with worker tokens counted, a cached second call counts as a hit with no further worker traffic, the `shunt_delegated` statistics row exists, and the batch is audited.
-  - Cover the mixed batch end to end: one cached, one below-threshold, one security-critical, one missing file → all counted correctly in one response.
+  - Cover the mixed batch end to end: one cached, one below-threshold, one security-critical, one missing file, one path outside the allowed roots (denied) → all counted correctly in one response.
   - Observable: the integration suite passes against the real binary.
   - _Requirements: 1.2, 1.3, 1.4, 1.5, 1.8_
 - [ ] 6.2 Prune tool integration
@@ -107,7 +107,7 @@
 
 - [ ] 10. Breadcrumb history search: `mem_search_breadcrumbs`
 - [ ] 10.1 Breadcrumb search service
-  - Implement `services/breadcrumbs.rs`: project-scoped literal-substring search over `session_breadcrumbs` (tool name, target resource, action summary) with LIKE wildcards escaped, blank query = all crumbs newest first, optional harness filter, limit clamped to default 20 / max 100, ordered newest first; read-only over stored rows; one audit event per call plus its own breadcrumb (mem_search parity); no schema change, no FTS.
+  - Implement `services/breadcrumbs.rs`: project-scoped literal-substring search over `session_breadcrumbs` (tool name, target resource, action summary) with LIKE wildcards escaped, blank query = all crumbs newest first, optional harness filter, limit clamped to default 20 / max 100, ordered newest first; read-only over stored rows; one audit event per call plus its own breadcrumb (mem_search parity — constructed with `Some(bus)` like MemoryService, wired in `AppState::build`); no schema change, no FTS.
   - Observable: unit tests against a seeded store cover substring matches across all three fields, wildcard escaping, the harness filter, the limit clamp, blank-query listing, no-match, project isolation, and a proof that no existing row changes.
   - _Requirements: 10.2, 10.3, 10.4, 10.5_
 - [ ] 10.2 Tool handler and registration

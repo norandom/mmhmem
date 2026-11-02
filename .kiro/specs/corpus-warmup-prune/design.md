@@ -188,7 +188,7 @@ Static templates in `deploy/commands/{claude,opencode}/mmhmem-recap.md`; the ins
 | Prune tool handler | mcp | thin handler with dry_run arg | 4.1-4.3 | prune service (P0) | Service |
 | MmhmemFile loader | config | read + merge `.mmhmem.json` worker settings | 7.1-7.3, 7.5 | serde, fs (P0) | Service |
 | Installer config write | deploy | installers write `.mmhmem.json`, notices point to it | 7.6 | installers (P0) | — |
-| Breadcrumb search service | services | literal-substring search over session_breadcrumbs | 10.2, 10.3, 10.5 | Db, AuditWriter (P0) | Service |
+| Breadcrumb search service | services | literal-substring search over session_breadcrumbs | 10.2, 10.3, 10.5 | Db, AuditWriter, SessionBus (P0) | Service |
 | Breadcrumb search handler | mcp | thin args → rows render | 10.1, 10.2, 10.4 | breadcrumbs service (P0) | Service |
 | Recap command templates | deploy | installer-copied on-demand recap | 9.1-9.5 | installers (P0) | — |
 | Docs | docs | playbook + README + help | 2.1, 5.3, 9.6 | — | — |
@@ -329,7 +329,7 @@ impl MmhmemFile {
 - Literal-substring search over `session_breadcrumbs` (tool name, target resource, action summary), project-scoped, `ORDER BY created_at_epoch DESC, id DESC`, limit default 20 clamped to 100 (Req 10.2); a blank query lists all crumbs newest first (the `mem_search` blank-query precedent).
 - LIKE wildcards in the query are escaped (`ESCAPE '\'`) so `%`/`_` are literal; stored text is already redacted at write time.
 - Optional harness filter restricts matches to one calling harness (Req 10.3); an empty result is rendered as a clear no-match message by the handler (Req 10.4).
-- Read-only over stored rows: no UPDATE/DELETE/INSERT into any table (Req 10.5); one audit event per call plus its own breadcrumb — exactly the `mem_search` discipline.
+- Read-only over stored rows: no UPDATE/DELETE/INSERT into any table (Req 10.5); one audit event per call plus its own breadcrumb — exactly the `mem_search` discipline. Crumbing needs the bus: constructed like `MemoryService::new(db, audit, Some(bus))`, wired in `AppState::build`.
 - No FTS index and no schema change, deliberately: crumbs are short, recent-biased, per-project rows; a scan under `idx_breadcrumbs_proj` is the honest size of the problem.
 
 **Contracts**: Service [x]
