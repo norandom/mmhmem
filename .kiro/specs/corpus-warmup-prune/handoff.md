@@ -1,152 +1,31 @@
-# Handoff — session 2026-11-01 (local-mode complete; corpus-warmup-prune in flight)
+# handoff — corpus-warmup-prune (COMPLETE) + next steps
 
-For the next session picking this work up. Repo state at pause: everything
-committed and pushed through `bdf1c63` on `main`; working tree clean except
-an untracked `.openidea/` directory (foreign, not ours — leave it alone).
-Run `git status --porcelain && git log --oneline -5` first: the user runs
-parallel sessions (one landed CI fixes mid-session as `c77c620`).
+**Status 2026-11-02: SPEC COMPLETE — /kiro-validate-impl verdict GO.** All 30 tasks `[x]`, 47/47 AC coverage, full gates green (fmt, clippy -D warnings, 218 tests 0 failed incl. loc_caps house caps), protected-suite diff proof recorded in research.md. HEAD = a7e85b0 on main, all pushed.
 
-## Mandates that govern all work here
+## Shipped in this spec (commits 9cd27fe..a7e85b0)
 
-- **Foreground only, no subagents** (user mandate; this session honored it
-  throughout — inline reviews instead of reviewer agents).
-- One conventional commit per phase/task, push to `origin/main` after each.
-- English artifacts; EARS requirements with numeric AC IDs; Req 13-style
-  house caps (cognitive ≤ 15, ≤ 500 LOC/src file, ≤ 80 LOC/fn, ≤ 400
-  non-test LOC/task diff, tests ≤ 800 LOC/file).
-- TDD: red → green → refactor → verify per task.
+- **Req 1 warmup**: `services/warmup.rs` — `run_warmup(engine, audit, paths ≤25, question, ctx)` over the REAL smart_read path; `WarmupReport{delegated, cached, skipped_below_threshold, skipped_security, missing, denied, failed, worker tokens, notes}`; `shunt_warmup` tool; one WARMUP audit event/batch; `ReadOutcome::Shunted` gained `usage: WorkerUsage`.
+- **Req 3/4 prune**: `services/prune.rs` — `scan_stale` (preview) / `delete_stale` (exact stale rows by DISTINCT (file_path, content_sha256) pairs, one PRUNE event); `PruneService` handle; `mmhmem prune [--dry-run]` CLI; `shunt_prune` tool.
+- **Req 7 .mmhmem.json**: `config/mmhmem_file.rs` loader (env > project > global > defaults per setting; invalid JSON fail-fast naming file; BOM tolerated; key redacted source-agnostically); installers WRITE the file (`-WorkerModel/-WorkerUrl/-WorkerApiKey`, `--worker-*`) with JSON-merge preserving other keys, BOM-less UTF8 on Windows; serve stays env-only; steering structure.md amended.
+- **Req 8 notice**: session-start responses append the worker-unconfigured notice (gated on `AppState.worker_configured`); absent when configured; checkpoint branch untouched.
+- **Req 9 recap**: `deploy/commands/{claude,opencode}/mmhmem-recap.md` templates; installers copy/remove them scope-matched (claude → `.claude/commands/`, opencode → `.opencode/command/`); desktop/antigravity none; playbook recap line (token-capped); README day-to-day.
+- **Req 10 breadcrumb search**: `services/breadcrumbs.rs` — read-only LIKE-escaped substring search (tool/resource/summary), newest first, limit 20/100, optional harness filter, blank = list; `mem_search_breadcrumbs` tool; audit MEM_SEARCH_BREADCRUMBS + own crumb (mem_search parity).
+- Tool surface: NINE tools; tests/local_stdio.rs count updated; playbook <200 tokens; README nine-tool list + warmup/prune/recap sections.
 
-## Completed today (all pushed)
+## NEXT SESSION (user-decided, not started)
 
-1. **local-mode — FULL cycle, implemented and validated.** Init →
-   requirements (13 reqs/62 ACs, user-approved) → design (user-approved) →
-   tasks (21 incl. a repair: 3.3 stdio integration tests covering Req 2.4,
-   which a substring check had falsely marked covered) → implementation
-   21/21 via TDD. `mmhmem serve`/`stdio`/`stats` subcommands; stdio serving
-   with full tool parity (rmcp `transport-io`, `stdio_pipes`, stderr-only
-   diagnostics, EOF-clean exit, malformed-input resilience); local profile
-   (zero mandatory env, per-OS user dirs, optional confinement with
-   audited denials); multi-process store (busy_timeout, default 5 s,
-   `AGENT_MEM_BUSY_TIMEOUT_MS`); read-only stats store opening;
-   size-bounded audit rotation (10 MiB/keep 5, serve rotation stays off);
-   `mmhmem stats` (+`--json`); Windows/macOS native CI jobs; client-first
-   README/deploy docs + per-harness stdio examples; connection-neutral
-   SKILL.md (<200 tokens).
-   **Suite at pause: 160/160 green** (97 pre-existing, byte-identical —
-   git-diff proof recorded; 63 new). Full gate chain (fmt, clippy
-   `-D warnings`, loc caps) green locally. CI native jobs verified on the
-   GitHub runners via pushes.
-2. **Installers** `deploy/install_local.sh` + `deploy/install_local.ps1`:
-   scope prompt (global/per-project) or `--global`/`-Global`; harness
-   selection (`--agent claude,opencode,desktop,antigravity,all` or an
-   interactive multi-select menu); JSON-merge config edits for
-   OpenCode/Claude Desktop (python3 in bash, native in ps1); Antigravity
-   prints an import snippet; `--remove`/`-Remove` uninstalls (store NEVER
-   deleted); `--dry-run`/`-DryRun` (validated in WSL + on the host);
-   non-interactive guards so piped invocations fail fast instead of
-   hanging; optional worker configuration via
-   `--worker-model/--worker-url/--worker-api-key` flags + interactive
-   offer + unset notices (INTERIM — see the .mmhmem.json decision below:
-   R7.6 replaces the env embedding with config-file writing).
-3. **README motto banner** (`assets/mmhmem.jpg`, 82 KB, added under the
-   title — image content never viewed; alt text is generic).
-4. **corpus-warmup-prune quick spec** (4 phases + inline sanity review
-   PASSED): `brief.md`, `requirements.md`, `design.md`, `tasks.md`,
-   `spec.json` (phase tasks-generated, all approvals true,
-   ready_for_implementation true). Then amended mid-session (commit
-   `bdf1c63`): **Req 7 `.mmhmem.json` worker config file** (7 ACs) and
-   **Req 8 worker-unconfigured session notice** (2 ACs) added; design
-   traceability rows + directory-structure entry added.
+1. **Real install (user decision from before: do it now that .mmhmem.json landed)**: `cargo build --release` FIRST (current target/release binary is STALE pre-local-mode), then run `deploy/install_local.ps1 -Global -Agent claude,opencode` (or all harnesses) with the user's Mistral worker settings — key goes into `~/.mmhmem.json`, NEVER committed. Mistral: model `mistral-small-2603`, URL `https://api.mistral.ai/v1/chat/completions`. ASK THE USER before touching their real global config; the key must come from them.
+2. **adaptive-cache follow-up spec** (user-selected): draft via /kiro-spec-quick or step-by-step — schema v2 (`last_used_at_epoch` + optional `hit_count` on shunt_file_cache), byte-budget env var (e.g. AGENT_MEM_CACHE_MAX_BYTES ~32 MiB default), cost-aware eviction (recency × reuse × regeneration cost via line_count), per-project accounting decision (table has NO project column — path-prefix rule or v2 column), cache observability in `mmhmem stats` (rows, bytes, hit rate, evictions). Self-tuning budget explicitly REJECTED (non-deterministic). Sequenced AFTER corpus-warmup-prune (done — unblocked).
+3. Optional: breadcrumb-search surfacing beyond the tool (e.g. deeper-than-15 resume) — not requested, skip unless asked.
 
-## User decisions to honor (2026-11-01, all in this session's record)
+## Standing mandates + gotchas
 
-1. **Worker model is optional.** Warmup NEEDS it; organic accrued savings
-   don't. When unset: the MCP server shall notify at session start (Req 8)
-   and the installers already notice (implemented).
-2. **`.mmhmem.json` is the config home for the worker** (was: bake env into
-   harness registrations — superseded). JSON format, per-project
-   `./.mmhmem.json` + global `~/.mmhmem.json`, worker settings only
-   (model/api_url/api_key), per-setting precedence env > project > global >
-   defaults, serve stays environment-only, key never logged (redaction
-   parity — VERIFY the Config Debug impl actually redacts
-   `worker_api_key`, not just the token), `.gitignore` ignores
-   `.mmhmem.json`, invalid JSON → fail fast naming the file. This amends
-   steering `structure.md`'s "Config is environment-only" rule for the
-   local profile — the steering file still needs that amendment.
-3. **Warmup tool**: explicit paths list only, cap 25 per call, honest
-   corpus (real delegations, real stats; no synthetic rows).
-4. **Prune**: CLI + MCP tool (user picked both), stale-only (missing file
-   or changed content sha), dry-run/preview, stats/observations/sessions
-   untouched.
-5. **Mistral worker config, validated live**: model ID
-   `mistral-small-2603` (the docs name mistral-small-4-0-26-03 does NOT
-   exist as an API ID), URL `https://api.mistral.ai/v1/chat/completions`,
-   and a working user API key (the key stays with the user — NEVER commit
-   it anywhere; it goes into `~/.mmhmem.json` at install time).
-6. **Real install on this machine is DEFERRED** until `.mmhmem.json`
-   support lands (loader + installer writing). Then: global install, all
-   detected harnesses, Mistral worker into `~/.mmhmem.json`.
-
-## In flight — exactly where things stand
-
-The corpus-warmup-prune spec amendment (Req 7/8) is PARTIALLY applied.
-Remaining spec work, in order:
-
-1. **design.md**: add the `config/mmhmem_file.rs` component block
-   (loader: `MmhmemFile { worker_model, worker_api_url, worker_api_key }`
-   via serde, `load()` for both paths, `Option`-based per-setting merge in
-   `Config::load_local`, `ConfigError::InvalidMmhmemFile(file)` naming the
-   file) + a note that installers write the file (R7.6). Traceability rows
-   and the directory entry already exist. Reference seam already verified:
-   `Config::load_local()`/`from_env_local()` in `src/config/profile.rs`;
-   parser helpers reuse `present()`/`optional()`.
-2. **tasks.md**: add Major 8 (three sub-tasks: 8.1 loader TDD — precedence
-   matrix, absent settings, invalid-JSON fail-fast, redaction test;
-   8.2 installers write `.mmhmem.json` instead of env embedding + notice
-   wording; 8.3 README section + `.gitignore` entry). Amend task 3's
-   detail/requirements to carry Req 8 (the session-start notice). Then
-   re-run the AC coverage gate (now 36 ACs: 8+1+6+3+4+5+7+2; the check
-   script pattern lives in this session's history — a small .ps1 loop
-   over IDs vs tasks.md text).
-3. **The interrupted validations** (user said "run both", then paused):
-   `/kiro-validate-gap corpus-warmup-prune` → append findings to
-   `.kiro/specs/corpus-warmup-prune/research.md` (key finding already in
-   hand: `ShuntEngine::smart_read` returns
-   `ReadOutcome{Targeted|Direct|Cached|Shunted}` and warmup is pure
-   orchestration over it — no engine refactor; error mapping:
-   `FileNotFound`→missing, `NotConfigured`→propagate,
-   `OutsideRoots`→count denied) and `/kiro-validate-design
-   corpus-warmup-prune` → GO/NO-GO verdict. Both were loaded and
-   mid-execution when the user paused; their skill instructions and rules
-   files must be re-loaded fresh in the next session.
-4. Then implement: task 8 first (loader — the real install depends on
-   it), then `/kiro-impl corpus-warmup-prune` for the rest (warmup,
-   prune, notice, docs, integration suites, final validation).
-
-## Known gotchas pinned this session
-
-- PowerShell harness `$`-stripping: complex one-liners lose variables —
-  write a script file to `C:\Users\mariu\AppData\Local\Temp\opencode\` and
-  run it via `-File` (an `ac-coverage.ps1` from this session may still be
-  there).
-- rmcp serve API: `service.serve((reader, writer))` via
-  `use rmcp::ServiceExt;` → `RunningService`; `.waiting()` ends on stdin
-  EOF; `ServerInitializeError::ConnectionClosed` = parent gone = clean
-  exit 0; `stdio_pipes()` panics off-runtime on Linux (construct inside
-  `block_on`).
-- `tracing` macros with `?field` captures explode the cognitive-complexity
-  budget (end_session was 17/15 until the field moved into a pre-formatted
-  string).
-- PS 5.1: redirected native stderr can throw under
-  `$ErrorActionPreference='Stop'` (see `Remove-ClaudeServer` in the ps1
-  installer); `ConvertFrom-Json -AsHashtable` does not exist (5.1) —
-  PSObject + `Add-Member -Force` is the pattern used in `Merge-Json`.
-- House test conventions: tools/call errors are JSON-RPC error objects
-  with actionable messages; protocolVersion `"2025-11-25"`; the six-tool
-  pins live in this repo's own `tests/local_stdio.rs` (`names == 6`) and
-  `tests/multiprocess.rs` — they get updated to eight under this spec
-  (Req 5.4), while the protected pre-existing suite does not pin the count
-  (verified by grep before the spec was written).
-- `src/lib.rs` may show a phantom "M" in `git status` (CRLF
-  normalization noise, no content diff).
-- The untracked `.openidea/` directory is another session's — never add it.
+- Foreground only, no subagents; one conventional commit per task, push after each; English artifacts; house caps enforced BY TEST (tests/loc_caps.rs: ≤500 LOC/src, ≤80 LOC/fn, ≤800 LOC/test) — run it after every src change.
+- Gate hygiene on Windows: `cmd /c "cargo test > file 2>&1"` then `findstr /C:"FAILED" file` (exit 1 = green); NEVER chain `%ERRORLEVEL%` in one cmd line (parse-time expansion); PS Select-String is case-INSENSITIVE ('FAILED' matches '0 failed'); PS 2>&1 wraps native stderr as NativeCommandError and can flip exit codes.
+- Complex PS one-liners lose `$vars` → write a .ps1 under `C:\Users\mariu\AppData\Local\Temp\opencode\` and run via -File.
+- rusqlite `with_conn` closures are `'static + Send`: clone req fields to owned Strings BEFORE the closure (E0521). Db is Clone; AuditWriter is Clone (shared handle).
+- Cache keys use the CANONICAL path — seed tests via `std::fs::canonicalize` (Windows \\?\ prefix).
+- Adding an enum field breaks exhaustive destructures across tests/ — grep tests/ for the variant first.
+- WSL distro has NO python3: .sh json_merge falls back to manual instructions (honest, key withheld); python3 merge path unexercised locally (pre-existing code).
+- Pre-existing flake: tests/multiprocess two-process handshake failed ONCE under full-suite parallel load; passed in every subsequent run.
+- Never add .openidea/ (foreign). `.mmhmem.json` is gitignored.
