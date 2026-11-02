@@ -23,11 +23,20 @@ function Invoke-WebRequest {
     $relative = ($Uri -split '/HEAD/')[1]
     if (-not $relative) { throw "Unexpected URL: $Uri" }
     if ($fixture.Install -and $relative -eq 'deploy/install_local.ps1') {
-        [IO.File]::WriteAllText($OutFile, 'exit 0'); return
+        [IO.File]::WriteAllText($OutFile, @'
+param([switch]$Global, [switch]$NonInteractive, [string]$Binary, [string]$Agent, [string]$InstallSource)
+. (Join-Path $PSScriptRoot 'install_binary.ps1')
+Install-MmhmemBinary -Source $InstallSource -Destination $Binary
+'@); return
     }
     Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $OutFile
 }
 try {
+    if ([Console]::IsInputRedirected) {
+        $refused = $false
+        try { & (Join-Path $repo 'install.ps1') -DryRun } catch { $refused = $_ -match 'Agent selection needs a terminal' }
+        if (-not $refused) { throw 'Unattended bootstrap silently selected agents' }
+    }
     $output = & (Join-Path $repo 'install.ps1') -DryRun -Agent codex 6>&1 | Out-String
     if ($output -notmatch 'copy SKILL.md' -or $output -notmatch 'mmhmem-recap' -or $output -notmatch 'config.toml') {
         throw "Dry run missed registration, skill or recap: $output"
@@ -50,6 +59,7 @@ try {
     }
     Write-Host 'PASS: PowerShell syntax, checkout-free dry run, Codex skill/recap, removal without companions, staging cleanup'
     & (Join-Path $PSScriptRoot 'test-install-binary.ps1')
+    & (Join-Path $PSScriptRoot 'test-install-menus.ps1')
 } finally {
     $env:TEMP = $originalTemp
     $env:TMP = $originalTmp

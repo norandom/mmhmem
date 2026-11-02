@@ -17,7 +17,7 @@
 #
 # Options:
 #   --agent LIST   comma-separated harnesses: claude, opencode, desktop,
-#                  antigravity, codex, all (default: all detected).
+#                  antigravity, codex, all (default: interactive selection).
 #                  Interactive mode asks for the list when this flag is absent.
 #   --worker-model NAME   set the shunt worker model — e.g. an Ollama tag
 #                  like qwen3:latest. Stored in .mmhmem.json (global or
@@ -62,6 +62,7 @@ PROJECT_DIR=""
 DRY_RUN=0
 REMOVE=0
 BIN_OVERRIDE=""
+INSTALL_SOURCE=""
 AGENTS=""
 WORKER_MODEL=""
 WORKER_URL=""
@@ -78,6 +79,11 @@ while [ $# -gt 0 ]; do
       shift
       [ $# -ge 1 ] || die "--binary needs a path"
       BIN_OVERRIDE="$1"
+      ;;
+    --install-source)
+      shift
+      [ $# -ge 1 ] || die '--install-source needs a path'
+      INSTALL_SOURCE="$1"
       ;;
     --agent)
       shift
@@ -114,6 +120,7 @@ for a in ${AGENTS//,/ }; do
 done
 
 # --- scope -----------------------------------------------------------------
+[ -n "$AGENTS" ] || [ -t 0 ] || die 'pass --agent with a comma-separated list, or --agent all (no terminal for selection)'
 [ "$GLOBAL" -eq 1 ] && [ -n "$PROJECT_DIR" ] && die "--global and --project are mutually exclusive"
 if [ -z "$PROJECT_DIR" ] && [ "$GLOBAL" -eq 0 ]; then
   [ -t 0 ] || die "pass --global or --project DIR (stdin is not a terminal)"
@@ -135,7 +142,7 @@ fi
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
 # The file is JSON-merged (other keys preserved); the API key is never echoed.
-if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ] && [ -t 1 ]; then
+if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -n "$AGENTS" ] && [ -t 0 ] && [ -t 1 ]; then
   printf 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off): '
   read -r WORKER_MODEL || WORKER_MODEL=""
 fi
@@ -163,7 +170,7 @@ if [ "$REMOVE" -eq 0 ]; then
   else
     die "mmhmem binary not found — build it (cargo build --release) or pass --binary PATH"
   fi
-  if [ "$DRY_RUN" -eq 0 ]; then
+  if [ "$DRY_RUN" -eq 0 ] && [ -z "$INSTALL_SOURCE" ]; then
     BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
   fi
 else
@@ -377,11 +384,12 @@ want_agent() {
 # agent_requested NAME: true only when the user named it explicitly.
 agent_requested() {
   [ -z "$AGENTS" ] && return 1
+  case ",$AGENTS," in *",all,"*) return 1 ;; esac
   want_agent "$1"
 }
 
 # Interactive harness selection when no --agent list was given.
-if [ -z "$AGENTS" ] && [ -t 0 ] && [ -t 1 ]; then
+if [ -z "$AGENTS" ] && [ -t 0 ]; then
   MENU_KEYS=""
   menu=""
   menu_count=0
@@ -396,19 +404,21 @@ if [ -z "$AGENTS" ] && [ -t 0 ] && [ -t 1 ]; then
     menu_add desktop "Claude Desktop"
   fi
   [ "$HAS_ANTIGRAVITY" -eq 1 ] && menu_add antigravity "print the import snippet"
+  [ "$HAS_CODEX" -eq 1 ] && menu_add codex "OpenAI Codex CLI"
+  [ "$menu_count" -gt 0 ] || die 'no supported agents detected; install an agent, then run this installer again'
   if [ "$menu_count" -gt 0 ]; then
     while true; do
-      printf 'Which harness(es)?\n%b  [a] all listed\nChoose (comma-separated numbers, or a): ' "$menu"
+      printf '\n  Select agents\n  ----------------------------------------\n%b  [a] All listed\n  [q] Cancel\n\n  Choose one or more (e.g. 1,3): ' "$menu"
       read -r ans || die "no answer given"
       ans="$(printf '%s' "$ans" | tr -d ' ')"
       [ -z "$ans" ] && continue
-      if [ "$ans" = "a" ] || [ "$ans" = "A" ]; then AGENTS=""; break; fi
+      case "$ans" in q|Q) exit 0 ;; a|A) AGENTS="all"; break ;; esac
       picked=""
       ok=1
       IFS=','
       for n in $ans; do
         key=""
-        for pair in $MENU_KEYS; do
+        for pair in ${MENU_KEYS// /,}; do
           [ "${pair%%:*}" = "$n" ] && key="${pair#*:}"
         done
         if [ -z "$key" ]; then ok=0; break; fi
@@ -416,6 +426,7 @@ if [ -z "$AGENTS" ] && [ -t 0 ] && [ -t 1 ]; then
       done
       unset IFS
       [ "$ok" -eq 1 ] && [ -n "$picked" ] && AGENTS="${picked#,}" && break
+      printf '  Please choose numbers from the list, a, or q.\n'
     done
   fi
 fi
@@ -438,6 +449,14 @@ note_missing desktop "$([ -n "$DESKTOP_CFG_DIR" ] && echo 1 || echo 0)" "Claude 
 note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
+if [ -n "$INSTALL_SOURCE" ] && [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+  mkdir -p "$(dirname "$BIN")"
+  staged_bin="$(mktemp "$(dirname "$BIN")/.mmhmem.XXXXXX")"
+  trap 'rm -f "$staged_bin"' EXIT
+  cp "$INSTALL_SOURCE" "$staged_bin"
+  chmod +x "$staged_bin"
+  mv -f "$staged_bin" "$BIN"
+fi
 
 # --- worker config file (before registrations; they stay worker-env-free) ---
 # Req 7.6: the installer writes .mmhmem.json instead of embedding worker env.
@@ -583,7 +602,9 @@ fi
 if [ "$GLOBAL" -eq 1 ]; then
   USER_BIN="$HOME/.local/bin"
   if [ "$REMOVE" -eq 1 ]; then
-    if [ -f "$USER_BIN/mmhmem" ]; then
+    if [ "$AGENTS" != all ]; then
+      info 'shared binary kept for other agents; use --remove --agent all to remove it'
+    elif [ -f "$USER_BIN/mmhmem" ]; then
       if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] rm $USER_BIN/mmhmem"
       else

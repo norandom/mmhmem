@@ -34,8 +34,9 @@ All arguments pass through to deploy/install_local.sh, e.g.:
   ... | bash -s -- --global --agent codex      # codex via ~/.codex/config.toml
   ... | bash -s -- --remove --global          # uninstall (the store is kept)
 
-With no arguments the install is global for every harness detected on the
-machine; a worker model stays unconfigured (shunting off) until you pass
+With no arguments, menus select install/update or removal and which agents
+to configure globally. Use --agent LIST for unattended runs.
+A worker model stays unconfigured (shunting off) until you pass
 --worker-model NAME or edit .mmhmem.json.
 EOF
   exit 0
@@ -45,16 +46,43 @@ EOF
 REMOVE=0
 DRY_RUN=0
 HAS_SCOPE=0
+HAS_AGENT=0
 for a in "$@"; do
   case "$a" in
     -h|--help) usage ;;
     --remove)  REMOVE=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --global|--project) HAS_SCOPE=1 ;;
+    --agent) HAS_AGENT=1 ;;
   esac
 done
 if [ "$HAS_SCOPE" -eq 0 ]; then
   set -- --global "$@"
+fi
+
+# The bootstrap itself may arrive on stdin via curl | bash. Read menus from
+# the controlling terminal, never from the downloaded script stream.
+if [ "$HAS_AGENT" -eq 0 ]; then
+  { exec 3<> /dev/tty; } 2>/dev/null || die 'agent selection needs a terminal; pass --agent codex (or --agent all) for unattended use'
+  if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$RAW/deploy/banner.ansi" >&3 2>/dev/null || true
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO- "$RAW/deploy/banner.ansi" >&3 2>/dev/null || true
+    fi
+  fi
+  printf '\n  mmhmem  /  shared memory for your agents\n  ----------------------------------------\n' >&3
+  if [ "$REMOVE" -eq 0 ]; then
+    while true; do
+      printf '\n  [1] Install or update\n  [2] Remove integrations\n  [q] Cancel\n\n  Choose an action: ' >&3
+      read -r choice <&3 || die 'no answer given'
+      case "$choice" in
+        1) break ;;
+        2) REMOVE=1; set -- "$@" --remove; break ;;
+        q|Q) exit 0 ;;
+      esac
+    done
+  fi
 fi
 
 # --- platform -----------------------------------------------------------------
@@ -119,13 +147,11 @@ fi
 
 # --- run the engine -------------------------------------------------------------
 if [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
-  mkdir -p "$(dirname "$BIN")"
-  # Rename a complete file on the destination filesystem; never truncate a running binary.
-  staged_bin="$(mktemp "$(dirname "$BIN")/.mmhmem.XXXXXX")"
-  trap 'rm -rf "$tmp"; rm -f "${staged_bin:-}"' EXIT
-  cp "$tmp/mmhmem" "$staged_bin"
-  chmod +x "$staged_bin"
-  mv -f "$staged_bin" "$BIN"
+  set -- "$@" --install-source "$tmp/mmhmem"
 fi
 info "running the installer"
-bash "$tree/install_local.sh" --binary "$BIN" "$@" < /dev/null
+if [ "$HAS_AGENT" -eq 0 ]; then
+  bash "$tree/install_local.sh" --binary "$BIN" "$@" <&3
+else
+  bash "$tree/install_local.sh" --binary "$BIN" "$@" < /dev/null
+fi

@@ -10,7 +10,7 @@ your working state. Cache large-file summaries instead of paying to read the
 same files again.
 
 Each agent runs mmhmem locally and shares your per-user memory store. The
-installers register detected agents and install the workflow playbook.
+installers let you choose your agents and install the workflow playbook.
 
 ## Install
 
@@ -26,6 +26,17 @@ Linux release builds default to static musl for broad distribution compatibility
 The current published `v0.2.2` predates that default and still requires glibc;
 see [Linux compatibility](docs/installation.md#linux-compatibility).
 
+The menu offers **Install/update** or **Remove**, then lets you choose agents
+by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
+To open removal directly:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
+```
+
+For unattended use, append `--agent codex,claude` or `--agent all`.
+Removal preserves your memory and worker settings.
+
 ### Windows x64
 
 Run in PowerShell 5.1 or later:
@@ -34,7 +45,21 @@ Run in PowerShell 5.1 or later:
 irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 | iex
 ```
 
-Close agents using mmhmem before updating a running Windows binary.
+The menu offers **Install/update** or **Remove**, then lets you choose agents
+by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
+Agents can stay open during updates; restart them when ready to use the new version.
+
+To open removal directly, or select agents without menus:
+
+```powershell
+$installer = [scriptblock]::Create((irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1))
+& $installer -Remove                     # choose agents to remove
+# Or: & $installer -Agent 'codex,claude' # install/update only these agents
+# Or: & $installer -Remove -Agent all   # remove all detected integrations
+```
+
+Removal preserves your memory and worker settings. Claude Desktop detection
+supports both traditional and MSIX installations.
 
 ### macOS — Apple Silicon or Intel
 
@@ -43,6 +68,17 @@ curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | b
 ```
 
 The installer selects the matching architecture automatically.
+
+The menu offers **Install/update** or **Remove**, then lets you choose agents
+by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
+To open removal directly:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
+```
+
+For unattended use, append `--agent codex,claude` or `--agent all`.
+Removal preserves your memory and worker settings.
 
 For install locations, agent selection, dry runs, updates and removal, see
 [installation options](docs/installation.md).

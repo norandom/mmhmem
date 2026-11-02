@@ -16,7 +16,7 @@
 #
 # Options:
 #   -Agent LIST   comma-separated harnesses: claude, opencode, desktop,
-#                 antigravity, codex, all (default: all detected).
+#                 antigravity, codex, all (default: interactive selection).
 #                 Interactive mode asks for the list when this flag is absent.
 #   -WorkerModel NAME   set the shunt worker model - e.g. an Ollama tag like
 #                 qwen3:latest. Stored in .mmhmem.json (global or project
@@ -52,6 +52,7 @@ param(
     [switch]$Global,
     [string]$ProjectDir,
     [string]$Binary,
+    [string]$InstallSource,
     [string]$Agent,
     [string]$WorkerModel,
     [string]$WorkerUrl,
@@ -93,9 +94,10 @@ function Want-Agent([string]$name) {
     return $Agents -contains $name
 }
 function Agent-Requested([string]$name) {
-    if ($Agents.Count -eq 0) { return $false }
+    if ($Agents.Count -eq 0 -or $Agents -contains 'all') { return $false }
     return Want-Agent $name
 }
+if (-not $Agent -and -not $Interactive) { Die 'pass -Agent with a comma-separated list, or -Agent all (no terminal for selection)' }
 
 # --- scope --------------------------------------------------------------------
 if ($Global -and $ProjectDir) { Die '-Global and -ProjectDir are mutually exclusive' }
@@ -126,7 +128,7 @@ if ($ProjectDir -and -not (Test-Path -LiteralPath $ProjectDir -PathType Containe
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
 # The file is JSON-merged (other keys preserved); the API key is never echoed.
-if (-not $Remove -and -not $WorkerModel -and $Interactive) {
+if (-not $Remove -and -not $WorkerModel -and $Interactive -and $Agent) {
     $WorkerModel = Read-Host 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off)'
 }
 # Scope-selected worker-config file (project scope: the installer's project
@@ -158,7 +160,7 @@ if ($Remove) {
     # Removal only needs the standard copy location (global installs).
     $Bin = $UserBin
 } elseif ($Binary) {
-    $Bin = if ($DryRun) { [IO.Path]::GetFullPath($Binary) } else { (Resolve-Path -LiteralPath $Binary).Path }
+    $Bin = if ($DryRun -or $InstallSource) { [IO.Path]::GetFullPath($Binary) } else { (Resolve-Path -LiteralPath $Binary).Path }
 } elseif (Get-Command mmhmem -ErrorAction SilentlyContinue) {
     $Bin = (Get-Command mmhmem).Source
 } elseif (Test-Path -LiteralPath (Join-Path $RepoRoot "target\release\$Exe")) {
@@ -259,6 +261,18 @@ $HasClaude = [bool](Get-Command claude -ErrorAction SilentlyContinue)
 $OpenCodeGlobalCfg = Join-Path $HOME '.config\opencode\opencode.json'
 $HasOpenCode = ((Get-Command opencode -ErrorAction SilentlyContinue) -ne $null) -or (Test-Path -LiteralPath $OpenCodeGlobalCfg)
 $DesktopCfgDir = if ($env:APPDATA) { Join-Path $env:APPDATA 'Claude' } else { Join-Path $HOME 'Library/Application Support/Claude' }
+# MSIX virtualizes Claude's roaming data; prefer that live profile over a legacy path.
+if ($env:LOCALAPPDATA) {
+    $packages = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path -LiteralPath $packages) {
+        $desktopProfiles = @(Get-ChildItem -LiteralPath $packages -Directory -Filter 'Claude_*' | ForEach-Object {
+            $profile = Join-Path $_.FullName 'LocalCache\Roaming\Claude'
+            if (Test-Path -LiteralPath $profile -PathType Container) { $profile }
+        })
+        if ($desktopProfiles.Count -gt 1) { Die 'Multiple Claude Desktop package profiles found; cannot choose a config safely.' }
+        if ($desktopProfiles.Count -eq 1) { $DesktopCfgDir = $desktopProfiles[0] }
+    }
+}
 $HasDesktop = Test-Path -LiteralPath $DesktopCfgDir -PathType Container
 $HasAntigravity = ((Get-Command antigravity -ErrorAction SilentlyContinue) -ne $null) -or (Test-Path -LiteralPath (Join-Path $HOME '.gemini'))
 $CodexCfgDir = Join-Path $HOME '.codex'
@@ -308,7 +322,7 @@ function Remove-CodexRegistration() {
     Info "codex registration removed: $cfg"
 }
 
-if (-not $Agent -and $Interactive -and $Host.Name -eq 'ConsoleHost') {
+if (-not $Agent -and $Interactive) {
     $menu = New-Object System.Collections.Generic.List[string]
     $keys = New-Object System.Collections.Generic.List[string]
     if ($HasClaude) { $menu.Add('  [1] claude - Claude Code CLI'); $keys.Add('claude') }
@@ -316,22 +330,28 @@ if (-not $Agent -and $Interactive -and $Host.Name -eq 'ConsoleHost') {
     if ($HasDesktop -and $Global) { $menu.Add('  [3] desktop - Claude Desktop'); $keys.Add('desktop') }
     if ($HasAntigravity) { $menu.Add('  [4] antigravity - print the import snippet'); $keys.Add('antigravity') }
     if ($HasCodex) { $menu.Add('  [5] codex - OpenAI Codex CLI'); $keys.Add('codex') }
+    if ($menu.Count -eq 0) { Die 'No supported agents detected. Install an agent, then run this installer again.' }
+    # Number only the entries actually displayed (detection may leave gaps).
+    for ($i = 0; $i -lt $menu.Count; $i++) { $menu[$i] = $menu[$i] -replace '\[\d+\]', ('[' + ($i + 1) + ']') }
     if ($menu.Count -gt 0) {
         while ($true) {
-            $prompt = "Which harness(es)?`n" + ($menu -join "`n") + "`n  [a] all listed`nChoose (comma-separated numbers, or a)"
+            $verb = if ($Remove) { 'Remove integrations from' } else { 'Connect' }
+            $prompt = "`n  $verb your agents`n  ----------------------------------------`n" + ($menu -join "`n") + "`n  [a] All listed`n  [q] Cancel`n`n  Choose one or more (e.g. 1,3)"
             $ans = Read-Host $prompt
             $ans = ($ans -replace '\s', '')
             if (-not $ans) { continue }
-            if ($ans -match '^(?i)a$') { $Agents = @(); break }
+            if ($ans -eq 'q') { exit 0 }
+            if ($ans -match '^(?i)a$') { $Agents = @('all'); break }
             $nums = $ans -split ','
             $picked = @()
             $ok = $true
             foreach ($n in $nums) {
-                if ($n -match '^\d+$' -and [int]$n -ge 1 -and [int]$n -le $keys.Count) {
+                if ($n -match '^[1-5]$' -and [int]$n -le $keys.Count) {
                     $picked += $keys[[int]$n - 1]
                 } else { $ok = $false; break }
             }
             if ($ok -and $picked.Count -gt 0) { $Agents = $picked; break }
+            Write-Host '  Please choose numbers from the list, a, or q.' -ForegroundColor Yellow
         }
     }
 }
@@ -354,6 +374,11 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
+if ($InstallSource -and -not $Remove -and -not $DryRun) {
+    # Commit the staged bootstrap download only after the user selects agents.
+    . (Join-Path $PSScriptRoot 'install_binary.ps1')
+    Install-MmhmemBinary -Source $InstallSource -Destination $Bin
+}
 
 # --- worker config file (before registrations; they stay worker-env-free) -----
 # Req 7.6: the installers write .mmhmem.json instead of embedding worker env.
@@ -465,7 +490,8 @@ if ((Want-Agent 'codex') -and $HasCodex) {
 # --- copied binary (global installs) -----------------------------------------------------
 if ($Global) {
     if ($Remove) {
-        if (Test-Path -LiteralPath $UserBin) {
+        if ($Agents -notcontains 'all') { Info 'Shared binary kept for other agents; use -Remove -Agent all to remove it.' }
+        elseif (Test-Path -LiteralPath $UserBin) {
             if ($DryRun) { Info "[dry-run] rm $UserBin" }
             else {
                 try {

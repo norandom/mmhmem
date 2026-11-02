@@ -10,6 +10,26 @@ param(
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
+$interactive = -not [Console]::IsInputRedirected
+if (-not $Agent) {
+    if (-not $interactive) { throw 'Agent selection needs a terminal. Pass -Agent codex (or -Agent all) for unattended use.' }
+    if ($Host.UI.SupportsVirtualTerminal -and -not $env:NO_COLOR -and $env:TERM -ne 'dumb') {
+        try {
+            $art = Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy/banner.ansi'
+            Write-Host ([Text.Encoding]::UTF8.GetString($art.RawContentStream.ToArray()))
+        } catch { } # Decoration must never prevent installation.
+    }
+    Write-Host "`n  mmhmem  /  shared memory for your agents" -ForegroundColor Cyan
+    Write-Host '  ----------------------------------------'
+    if (-not $Remove) {
+        do {
+            Write-Host "`n  [1] Install or update`n  [2] Remove integrations`n  [q] Cancel`n"
+            $choice = Read-Host '  Choose an action'
+            if ($choice -eq 'q') { return }
+        } until ($choice -in @('1', '2'))
+        if ($choice -eq '2') { $Remove = [switch]$true }
+    }
+}
 if ($env:OS -ne 'Windows_NT') { throw 'Use install.sh on Linux or macOS.' }
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if ($arch -ne 'AMD64') { throw "No Windows $arch release asset; Windows x64 is required." }
@@ -35,12 +55,12 @@ try {
             $download = Join-Path $stage 'mmhmem.exe'
             Invoke-WebRequest -UseBasicParsing $release -OutFile $download
             if ((Get-Item -LiteralPath $download).Length -eq 0) { throw 'Empty binary download.' }
-            . (Join-Path $stage 'deploy/install_binary.ps1')
-            Install-MmhmemBinary -Source $download -Destination $binary
         }
     }
-    $engineArgs = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $stage 'deploy/install_local.ps1'),
-        '-Global', '-NonInteractive', '-Binary', $binary)
+    $engineArgs = @('-NoProfile', '-File', (Join-Path $stage 'deploy/install_local.ps1'),
+        '-Global', '-Binary', $binary)
+    if ($Agent) { $engineArgs += '-NonInteractive' }
+    if (-not $Remove -and -not $DryRun) { $engineArgs += '-InstallSource', $download }
     foreach ($key in @('Agent', 'WorkerModel', 'WorkerUrl', 'WorkerApiKey')) {
         if ($PSBoundParameters.ContainsKey($key)) { $engineArgs += "-$key", $PSBoundParameters[$key] }
     }

@@ -28,7 +28,27 @@ case "$url" in
     [ "${FAIL_BINARY:-0}" = 0 ] || exit 22
     printf 'test binary: never execute\n' > "$out" ;;
   */deploy/install_local.sh)
-    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$TEST_ARGS"\n' > "$out" ;;
+    if [ "${TEST_REAL_ENGINE:-0}" = 1 ]; then
+      cp "$TEST_ROOT/deploy/install_local.sh" "$out"
+    else
+      cat > "$out" <<'ENGINE'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$@" > "$TEST_ARGS"
+source_file=""; binary=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --binary) shift; binary="$1" ;;
+    --install-source) shift; source_file="$1" ;;
+  esac
+  shift
+done
+if [ -n "$source_file" ]; then
+  mkdir -p "$(dirname "$binary")"
+  cp "$source_file" "$binary"
+fi
+ENGINE
+    fi ;;
   */HEAD/*) cp "$TEST_ROOT/${url#*/HEAD/}" "$out" ;;
   *) exit 23 ;;
 esac
@@ -92,6 +112,7 @@ env HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$root/deploy/install_lo
 grep -q 'local mode removed' "$scratch/engine.log"
 [ ! -d "$scratch/home/.agents" ]
 echo 'PASS: Bash syntax, dry run, global default, Linux/Apple assets, platform refusals, failed-download preservation, removal, cleanup'
+PATH="$scratch/bin:$PATH" python3 "$root/scripts/test-install-menus.py" "$root" "$scratch"
 if [ -n "$candidate" ]; then
   python3 "$root/ci/scripts/probe_install.py" --binary "$candidate" --expected-sha256 "$expected_sha256" --source "$root" --report "$report"
 fi

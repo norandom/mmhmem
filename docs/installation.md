@@ -57,11 +57,22 @@ irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 -OutFile 
 .\install.ps1 -Remove
 ```
 
-Bootstraps default to user-wide registration for detected agents. Removal
-keeps the memory store. Dry runs leave installed binaries and configuration
+Bootstraps default to menus for install/update or removal, then agent selection,
+with user-wide registration. Enter comma-separated numbers, `a` for all listed
+agents, or `q` to cancel. The color banner is derived from the README image;
+set `NO_COLOR=1` for plain output. Unattended runs must specify `--agent LIST`
+or `-Agent LIST`; `all` selects all detected agents.
+
+Removal keeps the memory store and worker settings. Removing selected agents
+also keeps the shared binary for other integrations; selecting `all` removes it
+when possible. Dry runs leave installed binaries and configuration
 unchanged; temporary companion downloads are cleaned up. A source checkout
 can instead run `deploy/install_local.sh` or `deploy/install_local.ps1` with
 an explicit binary; see [development](development.md).
+
+On Windows, Claude Desktop MSIX profiles are detected under
+`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` and take precedence
+over the traditional `%APPDATA%\Claude` path.
 
 ## Agent connections and plugins
 
