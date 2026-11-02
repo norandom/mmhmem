@@ -33,7 +33,12 @@ impl StdioMcp {
             .env("AGENT_MEM_AUDIT_ROTATE_KEEP", keep.to_string())
             .env_remove("AGENT_MEM_TOKEN")
             .env_remove("AGENT_MEM_ALLOWED_ROOTS")
-            .env_remove("WORKER_API_URL")
+            // Blank — not removed: removed worker vars fall back to the
+            // machine's global .mmhmem.json (armed on dev hosts); blank
+            // wins over the file lookup and is treated as missing.
+            .env("WORKER_API_URL", "")
+            .env("WORKER_MODEL", "")
+            .env("WORKER_API_KEY", "")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -19,7 +19,12 @@ fn run_stats(data_dir: &Path, json: bool) -> std::process::Output {
         .env("AGENT_MEM_DATA_DIR", data_dir)
         .env_remove("AGENT_MEM_TOKEN")
         .env_remove("AGENT_MEM_ALLOWED_ROOTS")
-        .env_remove("WORKER_API_URL");
+        // Blank — not removed: removed worker vars fall back to the
+        // machine's global .mmhmem.json (armed on dev hosts); blank wins
+        // over the file lookup and is treated as missing.
+        .env("WORKER_API_URL", "")
+        .env("WORKER_MODEL", "")
+        .env("WORKER_API_KEY", "");
     if json {
         cmd.arg("--json");
     }

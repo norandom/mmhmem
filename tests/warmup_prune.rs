@@ -54,9 +54,14 @@ fn spawn_cmd(data_dir: &Path, roots: Option<&str>, worker: Option<(&str, &str)>)
             cmd.env("WORKER_API_URL", url).env("WORKER_MODEL", model);
         }
         None => {
-            cmd.env_remove("WORKER_API_URL");
-            cmd.env_remove("WORKER_MODEL");
-            cmd.env_remove("WORKER_API_KEY");
+            // Blank — not removed: a removed var falls back to the machine's
+            // global .mmhmem.json (worker armed on dev hosts during
+            // dogfooding), which silently turns "worker unconfigured" tests
+            // into configured ones — one test even hit the real worker.
+            // Blank wins over the file lookup and is treated as missing.
+            cmd.env("WORKER_API_URL", "")
+                .env("WORKER_MODEL", "")
+                .env("WORKER_API_KEY", "");
         }
     }
     cmd.stdin(Stdio::piped())

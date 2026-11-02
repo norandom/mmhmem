@@ -15,9 +15,12 @@ fn prune(data_dir: &Path, dry_run: bool) -> (bool, String) {
     cmd.arg("prune")
         .env("AGENT_MEM_DATA_DIR", data_dir)
         .env_remove("AGENT_MEM_LOG_FILE")
-        .env_remove("WORKER_MODEL")
-        .env_remove("WORKER_API_URL")
-        .env_remove("WORKER_API_KEY");
+        // Blank — not removed: removed worker vars fall back to the
+        // machine's global .mmhmem.json (armed on dev hosts); blank wins
+        // over the file lookup and is treated as missing.
+        .env("WORKER_MODEL", "")
+        .env("WORKER_API_URL", "")
+        .env("WORKER_API_KEY", "");
     if dry_run {
         cmd.arg("--dry-run");
     }

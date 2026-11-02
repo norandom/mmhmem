@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, ErrorData, InitializeResult};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData, InitializeResult, ToolsCapability};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 use super::params::{
@@ -23,6 +23,12 @@ impl ServerHandler for McpServer {
         let mut info = InitializeResult::default();
         info.server_info.name = "mmhmem".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();
+        // Req 1.6 (amendment 2026-11-02): advertise the tools capability.
+        // rmcp's `#[tool_handler]` injects this only into its generated
+        // `get_info`; this manual override supersedes it, so set it here.
+        // Without it, capability-negotiating clients (OpenCode) enumerate
+        // zero tools. No `listChanged` claim: the server never emits them.
+        info.capabilities.tools = Some(ToolsCapability::default());
         info.instructions = Some(
             "mmhmem: cross-agent memory + I/O shunt server. Call session_resume_or_handoff \
              first; prefer smart_read over raw reads of large files (offset/limit for edits); \

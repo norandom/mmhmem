@@ -84,6 +84,12 @@ async fn tools_list_exposes_the_six_tools_and_call_round_trips_memory() {
     let (status, body) = mcp_call(&client, &base, "secret-token", &mut session, init).await;
     assert_eq!(status, 200);
     assert!(body.contains("serverInfo"));
+    // Req 1.6 (amendment 2026-11-02): the initialize response must advertise
+    // the tools capability for capability-negotiating clients.
+    assert!(
+        body.contains("\"tools\""),
+        "tools capability not advertised: {body}"
+    );
     // initialized notification (no id)
     let (status, _) = mcp_call(
         &client,

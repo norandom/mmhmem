@@ -35,9 +35,13 @@ fn spawn_stdio(data_dir: &Path) -> Command {
         .env_remove("AGENT_MEM_TOKEN")
         .env_remove("AGENT_MEM_ALLOWED_ROOTS")
         .env_remove("AGENT_MEM_LOG_FILE")
-        .env_remove("WORKER_API_URL")
-        .env_remove("WORKER_MODEL")
-        .env_remove("WORKER_API_KEY")
+        // Blank — not removed: a removed var falls back to the machine's
+        // global .mmhmem.json (worker armed on dev hosts during dogfooding),
+        // which turns "worker unconfigured" tests into configured ones.
+        // Blank wins over the file lookup and is treated as missing.
+        .env("WORKER_API_URL", "")
+        .env("WORKER_MODEL", "")
+        .env("WORKER_API_KEY", "")
         .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -118,6 +122,12 @@ impl StdioMcp {
         assert!(
             init["result"]["serverInfo"]["name"].as_str().is_some(),
             "serverInfo missing: {init}"
+        );
+        // Req 2.7 (amendment 2026-11-02): the handshake must advertise the
+        // tools capability or capability-negotiating harnesses see no tools.
+        assert!(
+            init["result"]["capabilities"]["tools"].is_object(),
+            "tools capability not advertised: {init}"
         );
         self.send(INITIALIZED).await;
         init
