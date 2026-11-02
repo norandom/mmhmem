@@ -217,6 +217,14 @@ Every implementation task carries the Req 13 complexity caps in its acceptance c
   - _Requirements: 1.6_
   - Verified: full gate green 219/219 (nextest 610140ac, 2026-11-02) — both handshake asserts pass against the real binary
 
+- [x] 16. Amendment (2026-11-02): commit token_stats rows before the tool response returns
+- [x] 16.1 Await the stats INSERT inline in `ShuntEngine::record_stat` (`src/services/shunt.rs`)
+  - `record_stat` fired `tokio::spawn` without awaiting: the tool response could return before the row committed — `warmup_delegates_for_real_then_serves_cached` failed deterministically on macOS CI (twice, same assert at the second-connection read) — and rows could be lost when the child exits right after a call; now an `async fn` awaited at both call sites (cache hit, delegated), warn-on-error preserved
+  - Observable: the existing warmup/stats tests assert the row right after the call and pass deterministically on all platforms; no test change needed
+  - _Depends: 3.1_
+  - _Requirements: 10.1_
+  - Verified: full gate green 219/219 (nextest aef79cb8, 2026-11-02)
+
 ## Implementation Notes
 
 - Host toolchain is `x86_64-pc-windows-msvc` (user confirmed MSVC preferred, 2026-11-01); `cc`-based C builds (rusqlite `bundled`) verified working. Do not switch to gnu/mingw.

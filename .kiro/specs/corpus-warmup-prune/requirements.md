@@ -15,7 +15,7 @@ mmhmem's token-efficiency corpus accrues only from live agent activity: a fresh 
 
 #### Acceptance Criteria
 1. The mmhmem binary shall expose a `shunt_warmup` tool that accepts an explicit list of file paths together with the project and harness context, in both serve and local modes.
-2. When the tool runs, each listed file shall go through the same shunt evaluation as a targeted large read: eligible files (at or above the threshold, not security-critical, not already cached) are delegated to the configured worker model, their summaries cached by content, and a real `shunt_delegated` statistics row recorded.
+2. When the tool runs, each listed file shall go through the same shunt evaluation as a targeted large read: eligible files (at or above the threshold, not security-critical, not already cached) are delegated to the configured worker model, their summaries cached by content, and a real `shunt_delegated` statistics row recorded and committed before the tool's response returns (amendment 2026-11-02: fire-and-forget stats writes raced cross-connection readers and could lose rows on quick shutdown).
 3. When a listed file is already cached for the same content and query fingerprint, the tool shall count it as a cache hit and make no worker call.
 4. When a listed file is below the shunt threshold or security-critical, the tool shall skip it and state the reason in the response; when a listed file is missing or unreadable, the tool shall report it without failing the rest of the batch.
 5. The tool's response shall summarize the batch: delegated count, cache-hit count, skipped counts by reason, failed count, and the worker tokens spent.

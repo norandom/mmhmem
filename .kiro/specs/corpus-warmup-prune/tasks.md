@@ -125,3 +125,10 @@
   - Observable: the full deterministic suite passes on a host with an armed global worker config, and no test reaches the network
   - _Requirements: 3.7, 8.1_
   - Verified: full gate green 219/219 (nextest 610140ac, 2026-11-02)
+
+- [x] 12. Amendment (2026-11-02): shunt_warmup stats rows commit before the response returns
+- [x] 12.1 Inherit the inline stats commit from the shunt engine (cross-agent-memory-server task 16.1)
+  - warmup rides the same `record_stat` path; the macOS-deterministic failure `warmup_delegates_for_real_then_serves_cached` (stats row invisible from a second connection) is fixed by the awaited INSERT
+  - Observable: the test passes deterministically; no change needed in the test itself
+  - _Requirements: 1.2_
+  - Verified: full gate green 219/219 (nextest aef79cb8, 2026-11-02)
