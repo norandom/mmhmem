@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 
 use super::local_dirs;
+use super::mmhmem_file::MmhmemFile;
 use super::{
     optional, parse_port, parse_shunt_min_lines, present, Config, ConfigError,
     DEFAULT_AUDIT_MAX_BYTES_LOCAL, DEFAULT_AUDIT_ROTATE_KEEP, DEFAULT_BUSY_TIMEOUT_MS,
@@ -31,10 +32,14 @@ pub enum Profile {
 }
 
 impl Config {
-    /// Loads the local-profile config from the process environment
-    /// (Req 2.5: zero mandatory variables).
+    /// Loads the local-profile config: worker settings from the process
+    /// environment merged with `.mmhmem.json` (project over global,
+    /// Req 7.1); everything else stays env-only.
     pub fn load_local() -> Result<Self, ConfigError> {
-        Self::from_env_local(&|key| std::env::var(key).ok())
+        let file = MmhmemFile::load_default_locations()?;
+        let env = |key: &str| std::env::var(key).ok();
+        let merged = MmhmemFile::merged_lookup(&env, &file);
+        Self::from_env_local(&merged)
     }
 
     /// Pure local-profile parser; tests inject a lookup closure.

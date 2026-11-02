@@ -1,8 +1,10 @@
-//! Env-only runtime configuration (task 1.3; design.md "File Structure Plan"
+//! Runtime configuration (task 1.3; design.md "File Structure Plan"
 //! config.rs entry and "Components and Interfaces" Config row).
 //!
-//! All configuration comes from environment variables — no config files are
-//! parsed at runtime (steering structure.md "Code Organization Principles").
+//! The serve profile is env-only; the local profile additionally reads
+//! worker settings from `.mmhmem.json` (global + project, corpus-warmup-prune
+//! Req 7; steering structure.md "Code Organization Principles" — no other
+//! config files are parsed at runtime).
 //! Validation is fail-fast: `AGENT_MEM_TOKEN` and `AGENT_MEM_ALLOWED_ROOTS`
 //! are required, and any malformed value aborts startup with a clear error
 //! before any socket or database work (design.md "Error Handling").
@@ -12,6 +14,8 @@ use std::path::PathBuf;
 
 /// Per-OS per-user data-dir resolution for the local profile (Req 3.1).
 pub mod local_dirs;
+/// Worker settings from `.mmhmem.json` for the local profile (Req 7).
+pub mod mmhmem_file;
 /// Profile dimension and local-profile configuration loading (Req 3.2).
 pub mod profile;
 
@@ -148,6 +152,9 @@ pub enum ConfigError {
     InvalidAuditMaxBytes(String),
     /// `AGENT_MEM_AUDIT_ROTATE_KEEP` is not a u32 ≥ 1.
     InvalidAuditRotateKeep(String),
+    /// A `.mmhmem.json` exists but cannot be read or parsed as JSON; the
+    /// payload names the offending file (Req 7.3).
+    InvalidMmhmemFile(PathBuf),
 }
 
 impl fmt::Display for ConfigError {
@@ -182,6 +189,12 @@ impl fmt::Display for ConfigError {
             ConfigError::InvalidAuditRotateKeep(raw) => {
                 write!(f, "{ENV_AUDIT_ROTATE_KEEP}={raw:?} is not a valid retention count (u32 >= 1)")
             }
+            ConfigError::InvalidMmhmemFile(path) => write!(
+                f,
+                "config file {} exists but is not valid JSON (fix or remove it; the local \
+                 profile reads worker settings from .mmhmem.json)",
+                path.display()
+            ),
         }
     }
 }
