@@ -254,7 +254,8 @@ impl ShuntEngine {
             avoided_est: est,
         };
         self.audit_shunt(ctx, AuditEventType::IoShuntCacheHit, &meta);
-        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, path, sha, None);
+        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, path, sha, None)
+            .await;
         self.crumb(
             ctx,
             "smart_read:cache_hit",
@@ -315,7 +316,8 @@ impl ShuntEngine {
             &path,
             &sha,
             Some(usage),
-        );
+        )
+        .await;
         self.crumb(
             ctx,
             "smart_read:delegated",
@@ -418,7 +420,7 @@ impl ShuntEngine {
     }
 
     /// One token_stats row for a shunt outcome (Req 10.1, 10.3).
-    fn record_stat(
+    async fn record_stat(
         &self,
         ctx: &CallCtx<'_>,
         kind: &'static str,
@@ -438,12 +440,13 @@ impl ShuntEngine {
             worker_completion_tokens: usage.map(|u| u.completion_tokens),
             details: serde_json::json!({"file": path.display().to_string(), "sha256": sha}),
         };
-        let db = self.db.clone();
-        tokio::spawn(async move {
-            if let Err(e) = stats::record(&db, row).await {
-                tracing::warn!("token_stats insert failed: {e}");
-            }
-        });
+        // Req 10.1 (amendment 2026-11-02): commit the row BEFORE the tool
+        // response returns. The previous fire-and-forget spawn raced
+        // cross-connection readers (deterministic macOS CI failure) and
+        // could lose the row on quick shutdown.
+        if let Err(e) = stats::record(&self.db, row).await {
+            tracing::warn!("token_stats insert failed: {e}");
+        }
     }
 
     /// Automatic breadcrumb when a session bus is attached (Req 2.4).
