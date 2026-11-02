@@ -13,7 +13,7 @@ use super::shunt_types::{BypassReason, CallCtx, ReadOutcome, ReadRequest};
 use crate::storage::audit::{AuditEventType, AuditWriter};
 
 /// Outcome counters for one warmup batch (Req 1.5).
-#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
 pub struct WarmupReport {
     /// Files delegated to the worker (real calls, real cache rows).
     pub delegated: u32,
@@ -34,6 +34,9 @@ pub struct WarmupReport {
     pub worker_prompt_tokens: u64,
     /// Worker completion tokens across delegated calls (Req 1.5).
     pub worker_completion_tokens: u64,
+    /// Per-file reasons for every non-delegated, non-cached outcome, in
+    /// batch order (bounded by the path cap). Rendered as the details list.
+    pub notes: Vec<String>,
 }
 
 /// Maximum number of paths in one warmup batch (Req 1.6).
@@ -62,6 +65,35 @@ impl std::fmt::Display for WarmupError {
 }
 
 impl std::error::Error for WarmupError {}
+
+/// Renders the batch summary as the tool response text (Req 1.5): all
+/// outcome counters, the worker token totals, and a per-file details list
+/// for the non-delegated outcomes.
+pub fn render_report(report: &WarmupReport) -> String {
+    let mut md = format!(
+        "Corpus warmup: {delegated} delegated, {cached} cached, \
+         {skipped_below_threshold} below threshold, {skipped_security} security-skipped, \
+         {missing} missing, {denied} denied, {failed} failed. \
+         Worker tokens: {p} prompt + {c} completion.",
+        delegated = report.delegated,
+        cached = report.cached,
+        skipped_below_threshold = report.skipped_below_threshold,
+        skipped_security = report.skipped_security,
+        missing = report.missing,
+        denied = report.denied,
+        failed = report.failed,
+        p = report.worker_prompt_tokens,
+        c = report.worker_completion_tokens,
+    );
+    if !report.notes.is_empty() {
+        md.push_str("\nPer-file details:");
+        for note in &report.notes {
+            md.push_str("\n- ");
+            md.push_str(note);
+        }
+    }
+    md
+}
 
 /// Runs each path through the real shunt stages and counts the outcomes
 /// (Req 1.2-1.5). Per-file misses/denials/failures are counted, never fatal;
@@ -94,10 +126,29 @@ pub async fn run_warmup(
         };
         match engine.smart_read(&req).await {
             // Not reachable in warmup (no offset/limit), counted defensively.
-            Ok(ReadOutcome::Targeted { .. }) => report.skipped_below_threshold += 1,
-            Ok(ReadOutcome::Direct { reason, .. }) => match reason {
-                BypassReason::SecurityCritical => report.skipped_security += 1,
-                BypassReason::BelowThreshold => report.skipped_below_threshold += 1,
+            Ok(ReadOutcome::Targeted { .. }) => {
+                report.skipped_below_threshold += 1;
+                report
+                    .notes
+                    .push(format!("{path}: targeted read (unexpected in warmup)"));
+            }
+            Ok(ReadOutcome::Direct {
+                reason,
+                total_lines,
+                ..
+            }) => match reason {
+                BypassReason::SecurityCritical => {
+                    report.skipped_security += 1;
+                    report
+                        .notes
+                        .push(format!("{path}: security-critical pattern (direct read)"));
+                }
+                BypassReason::BelowThreshold => {
+                    report.skipped_below_threshold += 1;
+                    report
+                        .notes
+                        .push(format!("{path}: below threshold ({total_lines} lines)"));
+                }
             },
             Ok(ReadOutcome::Cached { .. }) => report.cached += 1,
             Ok(ReadOutcome::Shunted { usage, .. }) => {
@@ -105,9 +156,21 @@ pub async fn run_warmup(
                 report.worker_prompt_tokens += usage.prompt_tokens;
                 report.worker_completion_tokens += usage.completion_tokens;
             }
-            Err(ShuntError::FileNotFound(_)) | Err(ShuntError::Io(_)) => report.missing += 1,
-            Err(ShuntError::OutsideAllowedRoots(_)) => report.denied += 1,
-            Err(ShuntError::Worker(_)) => report.failed += 1,
+            Err(ShuntError::FileNotFound(_)) | Err(ShuntError::Io(_)) => {
+                report.missing += 1;
+                report.notes.push(format!("{path}: missing or unreadable"));
+            }
+            Err(ShuntError::OutsideAllowedRoots(_)) => {
+                report.denied += 1;
+                report.notes.push(format!("{path}: outside allowed roots"));
+            }
+            Err(ShuntError::Worker(e)) => {
+                report.failed += 1;
+                let reason: String = e.chars().take(120).collect();
+                report
+                    .notes
+                    .push(format!("{path}: worker call failed ({reason})"));
+            }
             // Req 1.7: worker-unconfigured aborts the whole batch with the
             // engine's own actionable error (smart_read parity).
             Err(e @ ShuntError::WorkerNotConfigured) => return Err(WarmupError::Engine(e)),
@@ -378,5 +441,74 @@ mod tests {
             .filter(|l| l.contains("WARMUP"))
             .count();
         assert_eq!(warmup_events, 1, "exactly one batch summary event");
+    }
+
+    #[tokio::test]
+    async fn notes_collect_per_file_reasons_in_batch_order() {
+        // Task 1.2: every non-delegated, non-cached outcome carries its
+        // path + reason, in batch order.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let small = write_lines(dir.path(), "small.rs", 10);
+        let auth = write_lines(dir.path(), "auth_utils.rs", 200);
+        let batch = [small, String::from("no-such-file.rs"), auth];
+        let env = setup(dir.path(), None);
+        let report = run_warmup(&env.engine, &env.audit, &batch, QUESTION, ctx())
+            .await
+            .expect("mixed batch succeeds");
+        assert_eq!(report.notes.len(), 3);
+        assert!(report.notes[0].contains("small.rs"), "{}", report.notes[0]);
+        assert!(
+            report.notes[0].contains("below threshold"),
+            "{}",
+            report.notes[0]
+        );
+        assert!(
+            report.notes[1].contains("no-such-file.rs"),
+            "{}",
+            report.notes[1]
+        );
+        assert!(report.notes[1].contains("missing"), "{}", report.notes[1]);
+        assert!(
+            report.notes[2].contains("auth_utils.rs"),
+            "{}",
+            report.notes[2]
+        );
+        assert!(report.notes[2].contains("security"), "{}", report.notes[2]);
+    }
+
+    #[test]
+    fn render_shows_all_counters_tokens_and_details() {
+        // Req 1.5: the response text carries every counter, the worker
+        // token totals, and the per-file details list.
+        let report = WarmupReport {
+            delegated: 2,
+            cached: 1,
+            skipped_below_threshold: 3,
+            skipped_security: 1,
+            missing: 1,
+            denied: 1,
+            failed: 1,
+            worker_prompt_tokens: 4242,
+            worker_completion_tokens: 1717,
+            notes: vec!["big.rs: below threshold (10 lines)".to_string()],
+        };
+        let md = render_report(&report);
+        for expected in ["2", "1", "3", "4242", "1717", "big.rs", "below threshold"] {
+            assert!(
+                md.contains(expected),
+                "render must mention {expected}: {md}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_omits_details_when_no_notes() {
+        let report = WarmupReport {
+            delegated: 1,
+            ..WarmupReport::default()
+        };
+        let md = render_report(&report);
+        assert!(!md.contains("Per-file details"), "no notes section: {md}");
+        assert!(md.contains("1"), "counters still shown: {md}");
     }
 }
