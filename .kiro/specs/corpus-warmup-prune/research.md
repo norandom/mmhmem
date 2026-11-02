@@ -88,3 +88,16 @@ Only `tests/local_stdio.rs` pins the tool count (two places, lines 153 and 264-2
 2. Extend `WarmupReport` with `denied` + `failed` buckets per F1 before implementing Major 1 (keeps the render honest for AC 1.4/1.5).
 3. Fix design Modified Files (F3) and amend steering `structure.md` (F4) before `/kiro-impl`.
 4. Implement Major 8 first (loader) — the real install depends on it (owner decision, handoff).
+
+---
+
+## Implementation validation (2026-11-02, task 7.1)
+
+- Gates: cargo fmt --check 0; cargo clippy --all-targets -- -D warnings 0; cargo test --no-fail-fast exit 0 - 218 passed, 0 failed across all binaries (incl. loc_caps house caps).
+- Protected-suite diff proof (78aafb0..HEAD, tests/): only the declared spec-driven updates - tests/audit_redaction.rs (event-type count, Req 1.8/3.5/10), tests/local_stdio.rs (tool count + notice tests, Req 5.4/8), tests/shunt.rs (1 line: '..' in the Shunted destructure, Req 1.5); new feature tests: warmup.rs, prune_cli.rs, warmup_prune.rs. All other pre-existing tests byte-identical.
+- AC coverage gate: 47/47 bidirectional PASS.
+- Smoke: mmhmem --help lists prune; mmhmem prune --dry-run on a fresh store exits 0 with the honest no-store message; stdio child boot/handshake/clean-exit exercised by the integration suite.
+- Cross-task contracts verified end to end: loader-installer file format (real binary loaded the installer-written .mmhmem.json, key redacted live); warmup to real stats rows via the real shunt path; prune CLI+tool share the service fns; breadcrumbs crumb parity; notice gated on AppState.worker_configured.
+- Boundary audit: no schema changes (audit enum only, not DDL); no TTL/size eviction; no synthetic stats; no auto-prune; no hooks (recap is a static template); no FTS over breadcrumbs; prune deletes only shunt_file_cache rows; serve stays env-only (loader only in load_local); .mmhmem.json carries worker settings only.
+- Environment notes: WSL distro has no python3, so the .sh python3 merge path is unexercised locally (fallback path tested; python3 code pre-existing and unchanged). One pre-existing flake observed once early in the session (multiprocess two-process handshake under parallel load); passed in every subsequent full run.
+- DECISION: GO. Caveat: implementation ran foreground (no subagent reviews, per session mandate); each task carried its own TDD + full-gate evidence instead.
