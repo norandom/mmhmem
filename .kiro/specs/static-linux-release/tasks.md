@@ -125,7 +125,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Requirements: 3.1, 3.2, 3.4, 3.5, 3.6, 3.7, 4.1, 4.6_
 
 - [ ] 5. Implement guarded draft-release delivery
-- [ ] 5.1 Verify release-run provenance before upload
+- [x] 5.1 Verify release-run provenance before upload
   - Resolve the requested tag and trusted successful CI run, requiring the exact matching commit and all required job results.
   - Download only the named bundle from that run and check schema, publishable state and all artifact hashes.
   - Require an existing draft release; reject conflicting Linux assets and arbitrary local binary inputs.
@@ -187,6 +187,7 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Task 5.1: Native PS5.1 provenance and strict bundle validation passed independent offline review (two valid cases, 43 rejection cases; `tmp/publisher-provenance-review.log`). Actual exported report shape validated without modifying the dirty local bundle. `Invoke-LinuxReleaseValidation` returns delivery context/file hashes; task 5.2 must recheck draft state immediately before writes. Focused native helper avoids a Python prerequisite.
 - Task 4.2: Native guarded export and full canonical `all` plus same-ID follow-up export passed (`tmp/static-release-all-4.2.log`, bundle `tmp/static-release-all-4.2/`); independent native wrapper review passed. Hosted artifact convention is `linux-static-<revision>-<run_id>-<run_attempt>`, validation ID `ci-<run_id>-<run_attempt>`. Local wrapper captures provenance before fixed positional CI transport and only exports into fresh non-reparse repo tmp directories. File-returning release/deploy consumers now use verified bytes.
 - Task 4.1: `verified_bundle(src, revision, validation_id, source_clean=False)` awaits final schema verification before returning a Directory; public `static_release` delegates to it. Canonical `static-gate` passed actual candidate linkage, scratch/pristine startup, both non-TLS runtime matrices and six assembly tests including real-candidate failure injection (`tmp/static-gate-green.log`); independent review approved. Local dirty results are explicitly non-publishable.
 - User scope amendment: TLS-specific task 3.3 was withdrawn; partial work is preserved in ignored `tmp/retired-tls-task/`. Required bundle cases exclude TLS; the same missing/failed-case negative assertions now exercise server cases. Canonical bundle-check passed after this scope change (`tmp/bundle-check-scoped-final.log`). Existing standalone HTTPS fixture remains optional; production TLS behavior is untouched.
