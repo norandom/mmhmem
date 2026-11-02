@@ -481,3 +481,107 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
 
     mcp.shutdown().await;
 }
+
+// ---------- 10.3: breadcrumb search end to end ----------
+
+#[tokio::test]
+async fn breadcrumb_search_finds_real_crumbs_end_to_end() {
+    // Req 10.1-10.5 through the real binary: real breadcrumbs (a
+    // checkpoint plus a smart_read call) are found by keyword and harness
+    // filter, newest first, with no stored row modified.
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let small = write_lines(files.path(), "small.rs", 10);
+
+    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
+    mcp.handshake().await;
+
+    // Two harnesses make real crumbs: a checkpoint and a smart_read.
+    mcp.call(
+        "session_resume_or_handoff",
+        json!({"project": "p", "agent_harness": "claude-code",
+               "updated_working_state_md": "state"}),
+    )
+    .await;
+    mcp.call(
+        "smart_read",
+        json!({"project": "p", "agent_harness": "opencode",
+               "file_path": small, "question": "q"}),
+    )
+    .await;
+
+    let resp = mcp
+        .call(
+            "mem_search_breadcrumbs",
+            json!({"project": "p", "agent_harness": "opencode", "query": "handoff"}),
+        )
+        .await;
+    let text = StdioMcp::text_of(&resp);
+    assert!(
+        text.contains("session_resume_or_handoff") || text.contains("session_handoff"),
+        "keyword hits the checkpoint crumbs: {text}"
+    );
+    assert!(text.contains("Newest First"), "render header: {text}");
+
+    // Blank query lists all crumbs newest first (Req 10.2): the later
+    // smart_read crumb sorts before the session crumbs.
+    let resp = mcp
+        .call(
+            "mem_search_breadcrumbs",
+            json!({"project": "p", "agent_harness": "opencode", "query": ""}),
+        )
+        .await;
+    let text = StdioMcp::text_of(&resp);
+    let smart_pos = text.find("smart_read");
+    let checkpoint_pos = text.find("session");
+    assert!(
+        smart_pos
+            .map(|s| checkpoint_pos.map(|c| s < c).unwrap_or(false))
+            .unwrap_or(false),
+        "the later smart_read crumb sorts first: {text}"
+    );
+
+    // Harness filter: opencode's crumb only.
+    let resp = mcp
+        .call(
+            "mem_search_breadcrumbs",
+            json!({"project": "p", "agent_harness": "opencode",
+                   "query": "smart_read", "harness": "opencode"}),
+        )
+        .await;
+    let text = StdioMcp::text_of(&resp);
+    assert!(
+        text.contains("[opencode]"),
+        "filter keeps the opencode crumb: {text}"
+    );
+
+    let resp = mcp
+        .call(
+            "mem_search_breadcrumbs",
+            json!({"project": "p", "agent_harness": "opencode",
+                   "query": "smart_read", "harness": "claude-code"}),
+        )
+        .await;
+    let text = StdioMcp::text_of(&resp);
+    assert!(
+        text.contains("No breadcrumbs matched"),
+        "other harness's crumbs are filtered out: {text}"
+    );
+
+    // No stored row was modified by the searches: total rows = the three
+    // tool-call crumbs plus each search's own crumb (mem_search parity).
+    let db = open_store(data.path());
+    let count: i64 = db
+        .with_conn(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM session_breadcrumbs WHERE project = 'p'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .expect("count");
+    assert_eq!(count, 7, "3 call crumbs + 4 own search crumbs: {count}");
+
+    mcp.shutdown().await;
+}
