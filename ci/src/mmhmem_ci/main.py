@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def server_probe(self, src: dagger.Directory, validation_id: str) -> str:
+        """Check candidate server startup, health and bearer authentication."""
+        from .static_release import server_probe_check
+
+        return await server_probe_check(src, validation_id)
+
+    @function
     async def local_probe(self, src: dagger.Directory, validation_id: str) -> str:
         """Exercise the explicit static candidate's local public interfaces."""
         from .static_release import local_probe_check

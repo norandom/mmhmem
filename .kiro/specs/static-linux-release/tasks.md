@@ -80,7 +80,7 @@ marketplace packages remain outside the change boundary.
   - _Depends: 1.2, 2.1, 2.2_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.4_
 
-- [ ] 3.2 Verify server startup and authentication
+- [x] 3.2 Verify server startup and authentication
   - Extend the same explicit-artifact probe with server startup, health success, unauthenticated MCP rejection and authenticated MCP initialization.
   - Confirm bounded shutdown and useful failure diagnostics without changing production authentication behavior.
   - Done when the probe report includes all server cases for the same candidate checksum and leaves no child process running.
@@ -181,6 +181,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 3.2: Independent `server-probe` passed health/authentication/Streamable HTTP initialization and graceful SIGTERM shutdown on both userlands (`tmp/server-probe-review-deadline.log`). SSE includes an empty data/id/retry preamble; skip empty events. Socket inactivity timeouts are insufficient: the probe uses a Linux main-thread absolute HTTP deadline, verified with slow headers/body and cleanup regressions.
 - Task 3.1 resumed after approved upstream repair `8db5f54`: fresh independent `local-probe` passed component tests, musl build/ELF checks and explicit-candidate local cases on Debian/Alpine (`tmp/local-probe-review.log`). Current candidate SHA-256 is `fa3bffb60baf890e224a71371e969b513e742dca647d56d84b217e09867c96fc`. Statistics assert populated recorded-session rows and existing typed zero-valued aggregates, not invented nonzero savings. Final bundle inspection must use the release basename.
 - Task 3.1: Earlier explicit-candidate local probes passed Debian and Alpine; final verification exposed a genuine upstream concurrent-first-open storage failure. Independent debug reproduced child exit 1 (`database is locked: Error code 5`) within 0.5 seconds with a 5000 ms timeout. Debug returned `STOP_FOR_HUMAN`; no production workaround, test filtering or acceptance retry was applied. Partial probe changes remain uncommitted pending upstream repair and fresh review. Evidence: `tmp/local-probe-final.log`, `tmp/diagnose-fresh-open.log`; scope report: `implementation-blocker.md`.
 - Task 2.4: `check_bundle.py --bundle DIR --expected-revision SHA [--require-publishable]` validates artifact and referenced report consistency. Runtime reports require passed status, validation ID and matching name/image/kernel/architecture/cpu/artifact_sha256/cases. Independent `bundle-check` passed ten checker and five support tests (`tmp/bundle-check-review.log`).

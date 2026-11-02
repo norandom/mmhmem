@@ -14,6 +14,28 @@ TARGET = "x86_64-unknown-linux-musl"
 RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alpine:3.22"}
 
 
+async def server_probe_check(src: dagger.Directory, validation_id: str) -> str:
+    """Run server failures and exercise the same candidate in both userlands."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
+                   .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_release.py", "-v"])
+                   .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_server.py", "-v"]).stderr())
+    binary, _, build = await build_candidate(src, validation_id)
+    checksum = build["artifact"]["sha256"]
+    results = []
+    for name in RUNTIME_IMAGES:
+        runtime = (instrumented_runtime(name, src, validation_id)
+                   .with_file("/candidate", binary, permissions=0o755)
+                   .with_exec(["python3", "ci/scripts/inspect_static.py", "--binary", "/candidate",
+                               "--expected-sha256", checksum, "--report", "/reports/linkage.json"])
+                   .with_exec(["python3", "ci/scripts/probe_release.py", "--binary", "/candidate",
+                               "--expected-sha256", checksum, "--expected-version", build["package_version"],
+                               "--validation-id", validation_id, "--mode", "all", "--report", "/reports/server.json"]))
+        results.append({"name": name, "probe": json.loads(await runtime.stdout())})
+    return json.dumps({"status": "passed", "validation_id": validation_id, "tests": tests, "runtimes": results}, indent=2)
+
+
 async def local_probe_check(src: dagger.Directory, validation_id: str) -> str:
     """Run probe failure tests before exercising an internal application file."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
