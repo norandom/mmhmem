@@ -73,7 +73,7 @@ sh deploy/install_local.sh --binary /path/to/mmhmem
 
 Or build it yourself (`cargo build --release`) and let the installer find the
 binary in `target/release`. The installer registers every harness it finds
-(Claude Code, OpenCode, Claude Desktop, Antigravity), asks whether to install
+(Claude Code, OpenCode, Claude Desktop, Antigravity, Codex), asks whether to install
 globally or per project and which harnesses, ships the `/mmhmem-recap` command
 for Claude Code and OpenCode, writes worker settings into `.mmhmem.json`
 (`-WorkerModel` / `--worker-model` and friends), and undoes itself with

@@ -17,8 +17,8 @@
 #
 # Options:
 #   --agent LIST   comma-separated harnesses: claude, opencode, desktop,
-#                  antigravity, all (default: all detected). Interactive
-#                  mode asks for the list when this flag is absent.
+#                  antigravity, codex, all (default: all detected).
+#                  Interactive mode asks for the list when this flag is absent.
 #   --worker-model NAME   set the shunt worker model — e.g. an Ollama tag
 #                  like qwen3:latest. Stored in .mmhmem.json (global or
 #                  project per scope); interactive mode offers this when no
@@ -41,6 +41,9 @@
 #   - Claude Code CLI registers via its own CLI; OpenCode and Claude
 #     Desktop configs are JSON-merged in place (python3 required for the
 #     merge; without it the script prints the manual steps instead).
+#   - Codex registers through ~/.codex/config.toml as a managed
+#     [mcp_servers.mmhmem] block (global only; a project install skips it
+#     with a note) and gets the /mmhmem-recap prompt in ~/.codex/prompts.
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
 #   - Claude Code and OpenCode additionally get the /mmhmem-recap command
@@ -50,7 +53,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "install_local.sh: $*" >&2; exit 1; }
 info() { echo "[mmhmem] $*"; }
 
@@ -105,8 +108,8 @@ while [ $# -gt 0 ]; do
 done
 for a in ${AGENTS//,/ }; do
   case "$a" in
-    claude|opencode|desktop|antigravity|all) ;;
-    *) die "unknown agent '$a' (valid: claude, opencode, desktop, antigravity, all)" ;;
+    claude|opencode|desktop|antigravity|codex|all) ;;
+    *) die "unknown agent '$a' (valid: claude, opencode, desktop, antigravity, codex, all)" ;;
   esac
 done
 
@@ -318,6 +321,49 @@ for d in "$HOME/Library/Application Support/Claude" "$HOME/.config/Claude"; do
 done
 HAS_ANTIGRAVITY=0
 { command -v antigravity >/dev/null 2>&1 || [ -d "$HOME/.gemini" ]; } && HAS_ANTIGRAVITY=1
+CODEX_CFG_DIR="$HOME/.codex"
+HAS_CODEX=0
+{ command -v codex >/dev/null 2>&1 || [ -d "$CODEX_CFG_DIR" ]; } && HAS_CODEX=1
+CODEX_COMMAND_SRC="$REPO_ROOT/deploy/commands/codex/mmhmem-recap.md"
+
+# Codex registers through ~/.codex/config.toml (global, TOML). The section
+# is a managed block between marker comments so no TOML parser is needed:
+# install replaces the block, remove strips it.
+CODEX_BEGIN='# BEGIN mmhmem (managed by install_local.sh -- do not edit)'
+CODEX_END='# END mmhmem'
+codex_block() { # $1 = binary path (TOML-escaped)
+  printf '%s\n[mcp_servers.mmhmem]\ncommand = "%s"\nargs = ["stdio"]\n%s' \
+    "$CODEX_BEGIN" "$(printf '%s' "$1" | sed 's/\\/\\\\/g')" "$CODEX_END"
+}
+set_codex_registration() { # $1 = binary path
+  cfg="$CODEX_CFG_DIR/config.toml"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "[dry-run] merge [mcp_servers.mmhmem] into $cfg"
+    return 0
+  fi
+  mkdir -p "$CODEX_CFG_DIR"
+  block="$(codex_block "$1")"
+  {
+    if [ -f "$cfg" ]; then
+      sed "/^$CODEX_BEGIN\$/,/^$CODEX_END\$/d" "$cfg"
+    fi
+    printf '%s\n' "$block"
+  } > "$cfg.new"
+  mv "$cfg.new" "$cfg"
+  info "codex registration written: $cfg"
+}
+remove_codex_registration() {
+  cfg="$CODEX_CFG_DIR/config.toml"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "[dry-run] remove [mcp_servers.mmhmem] from $cfg"
+    return 0
+  fi
+  [ -f "$cfg" ] || return 0
+  grep -q "^$CODEX_BEGIN\$" "$cfg" || return 0
+  sed "/^$CODEX_BEGIN\$/,/^$CODEX_END\$/d" "$cfg" > "$cfg.new"
+  mv "$cfg.new" "$cfg"
+  info "codex registration removed: $cfg"
+}
 
 # want_agent NAME: true when the selection (or the default) includes it.
 want_agent() {
@@ -388,6 +434,7 @@ note_missing claude "$HAS_CLAUDE" "Claude Code CLI"
 note_missing opencode "$HAS_OPENCODE" "OpenCode"
 note_missing desktop "$([ -n "$DESKTOP_CFG_DIR" ] && echo 1 || echo 0)" "Claude Desktop"
 note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
+note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
 
 # --- worker config file (before registrations; they stay worker-env-free) ---
@@ -508,6 +555,20 @@ if want_agent antigravity && [ "$HAS_ANTIGRAVITY" -eq 1 ]; then
   registered="antigravity-manual $registered"
 fi
 
+# --- OpenAI Codex CLI (global config.toml; managed block) ---------------------------
+if want_agent codex && [ "$HAS_CODEX" -eq 1 ]; then
+  if [ "$REMOVE" -eq 1 ]; then
+    remove_codex_registration
+    remove_command "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
+  elif [ "$GLOBAL" -eq 1 ]; then
+    set_codex_registration "$BIN"
+    command_tmpl "$CODEX_COMMAND_SRC" "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
+    registered="codex $registered"
+  else
+    info "Codex reads a global config only; skipped for a per-project install (run again with --global)"
+  fi
+fi
+
 # --- copied binary (global installs) ----------------------------------------------
 if [ "$GLOBAL" -eq 1 ]; then
   USER_BIN="$HOME/.local/bin"
@@ -516,8 +577,11 @@ if [ "$GLOBAL" -eq 1 ]; then
       if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] rm $USER_BIN/mmhmem"
       else
-        rm -f "$USER_BIN/mmhmem"
-        info "removed binary copy: $USER_BIN/mmhmem"
+        if rm -f "$USER_BIN/mmhmem"; then
+          info "removed binary copy: $USER_BIN/mmhmem"
+        else
+          info "binary copy is in use (a harness may be running): $USER_BIN/mmhmem - delete it manually later"
+        fi
       fi
     fi
   elif [ "$BIN" != "$USER_BIN/mmhmem" ]; then

@@ -16,8 +16,8 @@
 #
 # Options:
 #   -Agent LIST   comma-separated harnesses: claude, opencode, desktop,
-#                 antigravity, all (default: all detected). Interactive
-#                 mode asks for the list when this flag is absent.
+#                 antigravity, codex, all (default: all detected).
+#                 Interactive mode asks for the list when this flag is absent.
 #   -WorkerModel NAME   set the shunt worker model - e.g. an Ollama tag like
 #                 qwen3:latest. Stored in .mmhmem.json (global or project
 #                 per scope); interactive mode offers this when no flag given.
@@ -38,6 +38,9 @@
 #     is app-wide and is skipped in project mode.
 #   - Claude Code CLI registers via its own CLI; OpenCode and Claude
 #     Desktop configs are JSON-merged in place, preserving existing keys.
+#   - Codex registers through ~/.codex/config.toml as a managed
+#     [mcp_servers.mmhmem] block (global only; a project install skips it
+#     with a note) and gets the /mmhmem-recap prompt in ~/.codex/prompts.
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
 #   - Claude Code and OpenCode additionally get the /mmhmem-recap command
@@ -78,9 +81,9 @@ function Remove-ClaudeServer([string[]]$ClaudeArgs) {
 $Agents = @()
 if ($Agent) {
     $Agents = ($Agent -split ',') | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ }
-    $valid = @('claude', 'opencode', 'desktop', 'antigravity', 'all')
+    $valid = @('claude', 'opencode', 'desktop', 'antigravity', 'codex', 'all')
     foreach ($a in $Agents) {
-        if ($valid -notcontains $a) { Die "unknown agent '$a' (valid: claude, opencode, desktop, antigravity, all)" }
+        if ($valid -notcontains $a) { Die "unknown agent '$a' (valid: claude, opencode, desktop, antigravity, codex, all)" }
     }
 }
 function Want-Agent([string]$name) {
@@ -257,6 +260,52 @@ $HasOpenCode = ((Get-Command opencode -ErrorAction SilentlyContinue) -ne $null) 
 $DesktopCfgDir = if ($env:APPDATA) { Join-Path $env:APPDATA 'Claude' } else { Join-Path $HOME 'Library/Application Support/Claude' }
 $HasDesktop = Test-Path -LiteralPath $DesktopCfgDir -PathType Container
 $HasAntigravity = ((Get-Command antigravity -ErrorAction SilentlyContinue) -ne $null) -or (Test-Path -LiteralPath (Join-Path $HOME '.gemini'))
+$CodexCfgDir = Join-Path $HOME '.codex'
+$HasCodex = ((Get-Command codex -ErrorAction SilentlyContinue) -ne $null) -or (Test-Path -LiteralPath $CodexCfgDir)
+$CodexCommandSrc = Join-Path $RepoRoot 'deploy\commands\codex\mmhmem-recap.md'
+
+# Codex registers through ~/.codex/config.toml (global, TOML). The section
+# is a managed block between marker comments so no TOML parser is needed:
+# install replaces the block, remove strips it.
+$CodexBegin = '# BEGIN mmhmem (managed by install_local.ps1 -- do not edit)'
+$CodexEnd = '# END mmhmem'
+function Codex-Block([string]$bin) {
+    $esc = $bin.Replace('\', '\\')
+    "$CodexBegin`n[mcp_servers.mmhmem]`ncommand = `"$esc`"`nargs = [`"stdio`"]`n$CodexEnd"
+}
+function Set-CodexRegistration([string]$bin) {
+    $cfg = Join-Path $CodexCfgDir 'config.toml'
+    if ($DryRun) { Info "[dry-run] merge [mcp_servers.mmhmem] into $cfg"; return }
+    New-Item -ItemType Directory -Path $CodexCfgDir -Force | Out-Null
+    $block = Codex-Block $bin
+    $lines = @()
+    if (Test-Path -LiteralPath $cfg) {
+        $lines = Get-Content -LiteralPath $cfg
+        $start = [Array]::IndexOf($lines, $CodexBegin)
+        if ($start -ge 0) {
+            $end = [Array]::IndexOf($lines, $CodexEnd)
+            if ($end -ge $start) {
+                $keep = @($lines[0..($start - 1)] + $lines[($end + 1)..($lines.Count - 1)] | Where-Object { $null -ne $_ })
+                $lines = $keep
+            }
+        }
+    }
+    ($lines + $block) | Set-Content -LiteralPath $cfg -Encoding UTF8
+    Info "codex registration written: $cfg"
+}
+function Remove-CodexRegistration() {
+    $cfg = Join-Path $CodexCfgDir 'config.toml'
+    if ($DryRun) { Info "[dry-run] remove [mcp_servers.mmhmem] from $cfg"; return }
+    if (-not (Test-Path -LiteralPath $cfg)) { return }
+    $lines = Get-Content -LiteralPath $cfg
+    $start = [Array]::IndexOf($lines, $CodexBegin)
+    if ($start -lt 0) { return }
+    $end = [Array]::IndexOf($lines, $CodexEnd)
+    if ($end -lt $start) { return }
+    $keep = @($lines[0..($start - 1)] + $lines[($end + 1)..($lines.Count - 1)] | Where-Object { $null -ne $_ })
+    $keep | Set-Content -LiteralPath $cfg -Encoding UTF8
+    Info "codex registration removed: $cfg"
+}
 
 if (-not $Agent -and $Interactive -and $Host.Name -eq 'ConsoleHost') {
     $menu = New-Object System.Collections.Generic.List[string]
@@ -265,6 +314,7 @@ if (-not $Agent -and $Interactive -and $Host.Name -eq 'ConsoleHost') {
     if ($HasOpenCode) { $menu.Add('  [2] opencode - OpenCode'); $keys.Add('opencode') }
     if ($HasDesktop -and $Global) { $menu.Add('  [3] desktop - Claude Desktop'); $keys.Add('desktop') }
     if ($HasAntigravity) { $menu.Add('  [4] antigravity - print the import snippet'); $keys.Add('antigravity') }
+    if ($HasCodex) { $menu.Add('  [5] codex - OpenAI Codex CLI'); $keys.Add('codex') }
     if ($menu.Count -gt 0) {
         while ($true) {
             $prompt = "Which harness(es)?`n" + ($menu -join "`n") + "`n  [a] all listed`nChoose (comma-separated numbers, or a)"
@@ -301,6 +351,7 @@ Note-Missing 'claude' $HasClaude 'Claude Code CLI'
 Note-Missing 'opencode' $HasOpenCode 'OpenCode'
 Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
+Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
 
 # --- worker config file (before registrations; they stay worker-env-free) -----
@@ -393,14 +444,32 @@ if ((Want-Agent 'antigravity') -and $HasAntigravity) {
     $Registered.Add('antigravity-manual') | Out-Null
 }
 
+# --- OpenAI Codex CLI (global config.toml; managed block) -------------------------------
+if ((Want-Agent 'codex') -and $HasCodex) {
+    if ($Remove) {
+        Remove-CodexRegistration
+        Remove-Command (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
+    } elseif ($Global) {
+        Set-CodexRegistration $Bin
+        Set-Command $CodexCommandSrc (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
+        $Registered.Add('codex') | Out-Null
+    } else {
+        Info "Codex reads a global config only; skipped for a per-project install (run again with -Global)"
+    }
+}
+
 # --- copied binary (global installs) -----------------------------------------------------
 if ($Global) {
     if ($Remove) {
         if (Test-Path -LiteralPath $UserBin) {
             if ($DryRun) { Info "[dry-run] rm $UserBin" }
             else {
-                Remove-Item -LiteralPath $UserBin -Force
-                Info "removed binary copy: $UserBin"
+                try {
+                    Remove-Item -LiteralPath $UserBin -Force
+                    Info "removed binary copy: $UserBin"
+                } catch {
+                    Info "binary copy is in use (a harness may be running): $UserBin - delete it manually later"
+                }
             }
         }
     } elseif ($Bin -ne $UserBin) {
