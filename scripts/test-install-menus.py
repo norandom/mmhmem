@@ -55,19 +55,22 @@ def terminal_case(answers, dry_run=True):
             pass
 
 
-output = terminal_case('1\n9\n1,3\n')
+output = terminal_case('1\n9\n1,3\nn\nn\n')
 assert '[3] codex' in output and 'Please choose numbers' in output, output
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'codex'}, output
 assert 'harnesses: claude-desktop' not in output, output
 output = terminal_case('2\n3\n')
 assert 'local mode removed' in output and 'harnesses: codex' in output, output
 assert 'shared binary kept' in output, output
-output = terminal_case('1\na\n')
+output = terminal_case('1\na\nn\nn\n')
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'claude-desktop', 'codex'}, output
 output = terminal_case('q\n')
 assert 'running the installer' not in output, output
 output = terminal_case('1\nq\n', dry_run=False)
 assert not (home / '.local/bin/mmhmem').exists(), 'Cancel installed a binary'
+output = terminal_case('1\n3\ny\ntest-model\nhttps://worker.example/v1/\n\ny\n')
+assert 'worker model: test-model' in output and 'worker_api_url' in output, output
+assert 'shunt_warmup' in output and '25 files' in output, output
 result = subprocess.run(['bash', str(root / 'deploy/install_local.sh'), '--global', '--dry-run'],
                         input='', text=True, capture_output=True, env=env)
 assert result.returncode != 0 and 'pass --agent' in result.stderr, result

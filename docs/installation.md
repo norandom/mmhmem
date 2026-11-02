@@ -63,6 +63,19 @@ agents, or `q` to cancel. The color banner is derived from the README image;
 set `NO_COLOR=1` for plain output. Unattended runs must specify `--agent LIST`
 or `-Agent LIST`; `all` selects all detected agents.
 
+After agent selection, interactive installation offers optional worker setup:
+model ID, an OpenAI-compatible base URL (such as `https://api.openai.com/v1`),
+and an API key entered without echo. The base URL is converted to the
+`/chat/completions` endpoint used by mmhmem. A complete chat-completions URL
+also works. Empty URL/key answers preserve existing values; without existing
+settings the endpoint defaults to local Ollama and the key is optional.
+The installer does not download or start a model.
+
+At the end, you can request a prompt to explore the project and prepare its
+summary cache using `shunt_warmup`, up to 25 files per batch. Run this in your
+agent after restarting its mmhmem connection. The installer itself does not
+scan the project or call the worker. Hosted providers may charge for summaries.
+
 Removal keeps the memory store and worker settings. Removing selected agents
 also keeps the shared binary for other integrations; selecting `all` removes it
 when possible. Dry runs leave installed binaries and configuration

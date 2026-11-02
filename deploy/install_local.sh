@@ -142,10 +142,6 @@ fi
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
 # The file is JSON-merged (other keys preserved); the API key is never echoed.
-if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -n "$AGENTS" ] && [ -t 0 ] && [ -t 1 ]; then
-  printf 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off): '
-  read -r WORKER_MODEL || WORKER_MODEL=""
-fi
 # Scope-selected worker-config file (project scope: the installer's project
 # dir, which the spawned child also uses as its working directory).
 WORKER_CONFIG_FILE=""
@@ -449,6 +445,37 @@ note_missing desktop "$([ -n "$DESKTOP_CFG_DIR" ] && echo 1 || echo 0)" "Claude 
 note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
+# --- optional worker setup -------------------------------------------------
+if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
+  printf '\n  Optional: summary cache\n  ----------------------------------------\n'
+  printf '  A worker model prepares reusable file summaries. Memory works without it.\n'
+  printf '  Skip to preserve existing settings. This does not download or start a model.\n'
+  printf '  Configure a worker model now? [y/N]: '
+  read -r configure_worker || die 'no answer given'
+  case "$configure_worker" in
+    y|Y|yes|YES)
+      printf '  Model ID (empty = skip): '
+      read -r WORKER_MODEL || die 'no answer given'
+      if [ -n "$WORKER_MODEL" ]; then
+        printf '  OpenAI-compatible base URL (e.g. https://api.openai.com/v1; empty = keep existing / local Ollama): '
+        read -r entered_url || die 'no answer given'
+        if [ -n "$entered_url" ]; then
+          entered_url="${entered_url%/}"
+          case "$entered_url" in
+            */chat/completions) WORKER_URL="$entered_url" ;;
+            *) WORKER_URL="$entered_url/chat/completions" ;;
+          esac
+        fi
+        if [ -z "$WORKER_KEY" ]; then
+          printf '  API key (hidden; empty = keep existing / none for local Ollama): '
+          read -r -s WORKER_KEY || die 'no answer given'
+          printf '\n'
+        fi
+      fi
+      ;;
+  esac
+fi
+# --- end optional worker setup ---------------------------------------------
 if [ -n "$INSTALL_SOURCE" ] && [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   mkdir -p "$(dirname "$BIN")"
   staged_bin="$(mktemp "$(dirname "$BIN")/.mmhmem.XXXXXX")"
@@ -653,11 +680,24 @@ else
       info "worker model: $WORKER_MODEL (store it in $WORKER_CONFIG_FILE by hand — the automatic merge failed as printed above)"
     fi
   else
-    info "worker model not configured — shunting and warmup stay off; re-run with --worker-model NAME (e.g. an Ollama tag) or set worker_model in $WORKER_CONFIG_FILE"
+    info "worker settings unchanged; summaries and warmup require worker_model in $WORKER_CONFIG_FILE or WORKER_MODEL in the environment"
   fi
   info "store: per-user default (~/.local/share/mmhmem or ~/Library/Application Support/mmhmem); created on first use"
   info "check your savings any time: $BIN stats"
 fi
 if [ "$DRY_RUN" -eq 1 ]; then
   info "dry run — nothing was written; re-run without --dry-run to apply"
+fi
+if [ "$REMOVE" -eq 0 ] && [ -t 0 ]; then
+  printf '\n  Optional: explore and prebuild your project cache\n'
+  printf '  Show the prompt to run in your agent? [y/N]: '
+  read -r warmup || die 'no answer given'
+  case "$warmup" in
+    y|Y|yes|YES)
+      printf '  Open the project in your agent and restart its mmhmem connection to load new settings.\n'
+      printf '  A reachable worker model is required; remote providers may charge for summaries.\n'
+      printf '  Paste this prompt (no files have been scanned or sent by this installer):\n'
+      printf '  Explore this repository, identify key source files, and use mmhmem shunt_warmup to prebuild their summary cache in batches of up to 25 files. Report what was cached or skipped.\n'
+      ;;
+  esac
 fi

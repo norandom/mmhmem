@@ -128,9 +128,6 @@ if ($ProjectDir -and -not (Test-Path -LiteralPath $ProjectDir -PathType Containe
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
 # The file is JSON-merged (other keys preserved); the API key is never echoed.
-if (-not $Remove -and -not $WorkerModel -and $Interactive -and $Agent) {
-    $WorkerModel = Read-Host 'Worker model for shunting (e.g. qwen3:latest via local Ollama; empty = skip, shunting stays off)'
-}
 # Scope-selected worker-config file (project scope: the installer's project
 # dir, which the spawned child also uses as its working directory).
 $WorkerConfigFile = if ($Remove) { $null }
@@ -374,6 +371,29 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
+# --- optional worker setup -------------------------------------------------
+if (-not $Remove -and -not $WorkerModel -and $Interactive) {
+    Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
+    Write-Host '  A worker model prepares reusable file summaries. Memory works without it.'
+    Write-Host '  Skip to preserve existing settings. This does not download or start a model.'
+    $configureWorker = Read-Host '  Configure a worker model now? [y/N]'
+    if ($configureWorker -match '^(?i)y(es)?$') {
+        $WorkerModel = (Read-Host '  Model ID (empty = skip)').Trim()
+        if ($WorkerModel) {
+            $enteredUrl = (Read-Host '  OpenAI-compatible base URL (e.g. https://api.openai.com/v1; empty = keep existing / local Ollama)').Trim().TrimEnd('/')
+            if ($enteredUrl) {
+                $WorkerUrl = if ($enteredUrl.EndsWith('/chat/completions')) { $enteredUrl } else { "$enteredUrl/chat/completions" }
+            }
+            if (-not $WorkerApiKey) {
+                $secureKey = Read-Host '  API key (hidden; empty = keep existing / none for local Ollama)' -AsSecureString
+                $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+                try { $WorkerApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer) }
+                finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer) }
+            }
+        }
+    }
+}
+# --- end optional worker setup ---------------------------------------------
 if ($InstallSource -and -not $Remove -and -not $DryRun) {
     # Commit the staged bootstrap download only after the user selects agents.
     . (Join-Path $PSScriptRoot 'install_binary.ps1')
@@ -527,9 +547,19 @@ if ($Remove) {
     if ($WorkerModel) {
         Info "worker model: $WorkerModel (shunting and warmup active; stored in $WorkerConfigFile)"
     } else {
-        Info "worker model not configured - shunting and warmup stay off; re-run with -WorkerModel NAME (e.g. an Ollama tag) or set worker_model in $WorkerConfigFile"
+        Info "worker settings unchanged; summaries and warmup require worker_model in $WorkerConfigFile or WORKER_MODEL in the environment"
     }
     Info "store: per-user default (%APPDATA%\mmhmem); created on first use"
     Info "check your savings any time: $Bin stats"
 }
 if ($DryRun) { Info 'dry run - nothing was written; re-run without -DryRun to apply' }
+if (-not $Remove -and $Interactive) {
+    Write-Host "`n  Optional: explore and prebuild your project cache"
+    $warmup = Read-Host '  Show the prompt to run in your agent? [y/N]'
+    if ($warmup -match '^(?i)y(es)?$') {
+        Write-Host '  Open the project in your agent and restart its mmhmem connection to load new settings.'
+        Write-Host '  A reachable worker model is required; remote providers may charge for summaries.'
+        Write-Host '  Paste this prompt (no files have been scanned or sent by this installer):'
+        Write-Host '  Explore this repository, identify key source files, and use mmhmem shunt_warmup to prebuild their summary cache in batches of up to 25 files. Report what was cached or skipped.'
+    }
+}
