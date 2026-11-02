@@ -231,6 +231,9 @@ The playbook is under 200 tokens and works in every supported harness; see
 - Prune: `mmhmem prune --dry-run` previews stale cache rows (file gone or
   content changed), `mmhmem prune` removes exactly those — the same logic
   the `shunt_prune` tool offers agents.
+- After a context clear: `/mmhmem-recap` (shipped by the installers for
+  Claude Code and OpenCode) pulls the last session recap — working state,
+  objective, and breadcrumbs — on demand, no hooks.
 - Liveness (serve mode): `GET /healthz` (no auth) or `mmhmem healthcheck`
   from the host.
 - Audit: serve mode writes `/var/log/agent-memory/audit.jsonl` (or your
