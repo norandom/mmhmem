@@ -129,6 +129,49 @@ fn report_of(missing: usize, changed: usize, fresh: u32) -> PruneReport {
     }
 }
 
+/// Renders the pass result as the response text; PREVIEW marks a
+/// scan-only pass (Req 3.3, 4.2).
+pub fn render_report(report: PruneReport, preview: bool) -> String {
+    let head = if preview {
+        "Prune preview (dry run — nothing deleted):"
+    } else {
+        "Prune complete:"
+    };
+    let mut md = format!(
+        "{head} {} missing + {} changed stale rows, {} kept fresh.",
+        report.removed_missing, report.removed_changed, report.kept_fresh
+    );
+    if preview && report.removed_total() > 0 {
+        md.push_str(" Re-run without dry_run to remove the stale rows.");
+    }
+    md
+}
+
+/// Prune service handle for the MCP layer (the CLI constructs its own from
+/// config; both call the same free functions, so behavior is identical).
+#[derive(Clone)]
+pub struct PruneService {
+    db: Db,
+    audit: AuditWriter,
+}
+
+impl PruneService {
+    /// New service over db + audit.
+    pub fn new(db: Db, audit: AuditWriter) -> Self {
+        Self { db, audit }
+    }
+
+    /// Preview pass (Req 3.2, 4.2): counts only — nothing is deleted.
+    pub async fn scan(&self) -> anyhow::Result<PruneReport> {
+        scan_stale(&self.db).await
+    }
+
+    /// Deletion pass (Req 3.1): removes exactly the stale rows and audits.
+    pub async fn delete(&self, ctx: CallCtx<'_>) -> anyhow::Result<PruneReport> {
+        delete_stale(&self.db, &self.audit, ctx).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

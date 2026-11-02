@@ -28,7 +28,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::services::boilerplate::BoilerplateWriter;
+use crate::services::breadcrumbs::BreadcrumbService;
 use crate::services::memory::MemoryService;
+use crate::services::prune::PruneService;
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt::ShuntEngine;
 use crate::services::stats::{OtelSink, StatsCollector};
@@ -51,6 +53,10 @@ pub struct Services {
     /// Boilerplate writer (always present; worker may be unconfigured, Req 9.4 —
     /// confinement still runs before the worker check).
     pub boilerplate: BoilerplateWriter,
+    /// Read-only breadcrumb history search (corpus-warmup-prune Req 10).
+    pub breadcrumbs: BreadcrumbService,
+    /// Stale-cache pruning (corpus-warmup-prune Req 3, 4).
+    pub prune: PruneService,
 }
 
 /// Shared application state handed to the MCP service factory and middleware.
@@ -62,6 +68,8 @@ pub struct AppState {
     pub audit: AuditWriter,
     /// Optional OTel telemetry (task 9.1; no-op unless enabled).
     pub telemetry: Arc<Telemetry>,
+    /// Whether a worker model is configured (Req 8 notice gate).
+    pub worker_configured: bool,
     /// Service graph.
     pub services: Services,
 }
@@ -81,6 +89,9 @@ impl AppState {
             Arc::clone(&telemetry) as Arc<dyn OtelSink>,
         );
         let worker = WorkerClient::from_config(&config).ok();
+        let worker_configured = worker.is_some();
+        let breadcrumbs = BreadcrumbService::new(db.clone(), audit.clone(), Some(bus.clone()));
+        let prune = PruneService::new(db.clone(), audit.clone());
         let shunt = ShuntEngine::new(
             db.clone(),
             audit.clone(),
@@ -99,12 +110,15 @@ impl AppState {
             config,
             audit,
             telemetry,
+            worker_configured,
             services: Services {
                 bus,
                 memory,
                 stats,
                 shunt,
                 boilerplate,
+                breadcrumbs,
+                prune,
             },
         })
     }

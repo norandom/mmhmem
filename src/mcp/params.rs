@@ -143,3 +143,48 @@ pub struct MemRecordParams {
     #[serde(default)]
     pub files: Option<String>,
 }
+
+/// `shunt_warmup` arguments (corpus-warmup-prune Req 1.1).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct WarmupParams {
+    /// Project name.
+    pub project: String,
+    /// Calling harness.
+    pub agent_harness: String,
+    /// Key files to summarize (max 25 per batch, Req 1.6).
+    pub paths: Vec<String>,
+    /// The question summaries answer; defaults to the canonical
+    /// summarization question so warmup rows align with later reads.
+    #[serde(default = "default_question")]
+    pub question: String,
+}
+
+/// `shunt_prune` arguments (corpus-warmup-prune Req 4.1).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct PruneParams {
+    /// Project name.
+    pub project: String,
+    /// Calling harness.
+    pub agent_harness: String,
+    /// Preview only — nothing is deleted (Req 4.2).
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `mem_search_breadcrumbs` arguments (corpus-warmup-prune Req 10.1).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct BreadcrumbSearchParams {
+    /// Project name.
+    pub project: String,
+    /// Calling harness.
+    pub agent_harness: String,
+    /// Literal substring across tool name, target resource, and action
+    /// summary; blank lists the project's crumbs newest first.
+    pub query: String,
+    /// Restrict matches to one calling harness (Req 10.3).
+    #[serde(default)]
+    pub harness: Option<String>,
+    /// Max results (default 20, capped at 100, Req 10.2).
+    #[serde(default = "default_limit")]
+    pub limit: u16,
+}

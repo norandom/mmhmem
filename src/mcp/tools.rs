@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock, ErrorData, InitializeResult};
 use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 
 use super::params::{
-    BoilerplateParams, MemGetParams, MemRecordParams, MemSearchParams, ResumeParams,
-    SmartReadParams,
+    BoilerplateParams, BreadcrumbSearchParams, MemGetParams, MemRecordParams, MemSearchParams,
+    PruneParams, ResumeParams, SmartReadParams, WarmupParams,
 };
 use super::server::McpServer;
 
@@ -34,10 +34,13 @@ impl ServerHandler for McpServer {
     }
 }
 use crate::services::boilerplate::WriteRequest;
+use crate::services::breadcrumbs::{render_rows, BreadcrumbSearch};
 use crate::services::memory::{RecordRequest, SearchRequest};
+use crate::services::prune::render_report as render_prune;
 use crate::services::session_bus::ClientUsage;
 use crate::services::shunt::ReadOutcome;
-use crate::services::shunt_types::ReadRequest as ShuntReadRequest;
+use crate::services::shunt_types::{CallCtx, ReadRequest as ShuntReadRequest};
+use crate::services::warmup::{render_report as render_warmup, run_warmup};
 
 /// Success result with one text content block.
 fn ok_text(md: String) -> Result<CallToolResult, ErrorData> {
@@ -271,6 +274,104 @@ impl McpServer {
                     "Recorded observation #{id} ({}) in project '{}'.",
                     p.obs_type, p.project
                 ))
+            },
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Warm the corpus: run key files (max 25 per batch) through the real shunt path — worker-delegated or cached structural summaries with honest stats. Threshold/security files are skipped, missing/denied/failed paths are counted without aborting the batch."
+    )]
+    async fn shunt_warmup(
+        &self,
+        Parameters(p): Parameters<WarmupParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let state = self.state.clone();
+        with_span(
+            &state,
+            "shunt_warmup",
+            &p.agent_harness,
+            &p.project,
+            || async {
+                let ctx = CallCtx {
+                    project: &p.project,
+                    harness: &p.agent_harness,
+                    task: None,
+                };
+                match run_warmup(
+                    &state.services.shunt,
+                    &state.audit,
+                    &p.paths,
+                    &p.question,
+                    ctx,
+                )
+                .await
+                {
+                    Ok(report) => ok_text(render_warmup(&report)),
+                    Err(e) => Err(err(e)),
+                }
+            },
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Remove stale cache rows: entries whose file is missing or whose content hash changed. dry_run previews the grouped counts; fresh rows are never touched."
+    )]
+    async fn shunt_prune(
+        &self,
+        Parameters(p): Parameters<PruneParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let state = self.state.clone();
+        with_span(
+            &state,
+            "shunt_prune",
+            &p.agent_harness,
+            &p.project,
+            || async {
+                let ctx = CallCtx {
+                    project: &p.project,
+                    harness: &p.agent_harness,
+                    task: None,
+                };
+                let report = if p.dry_run {
+                    state.services.prune.scan().await
+                } else {
+                    state.services.prune.delete(ctx).await
+                };
+                match report {
+                    Ok(report) => ok_text(render_prune(report, p.dry_run)),
+                    Err(e) => Err(err(e)),
+                }
+            },
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Search the project's breadcrumb history (literal substring over tool name, target resource, action summary), newest first — what earlier sessions did beyond the last 15 crumbs the resume view returns. Blank query lists all crumbs; optional harness filter."
+    )]
+    async fn mem_search_breadcrumbs(
+        &self,
+        Parameters(p): Parameters<BreadcrumbSearchParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let state = self.state.clone();
+        with_span(
+            &state,
+            "mem_search_breadcrumbs",
+            &p.agent_harness,
+            &p.project,
+            || async {
+                let req = BreadcrumbSearch {
+                    project: &p.project,
+                    harness: &p.agent_harness,
+                    task: None,
+                    query: &p.query,
+                    filter_harness: p.harness.as_deref(),
+                    limit: p.limit,
+                };
+                let rows = state.services.breadcrumbs.search(&req).await.map_err(err)?;
+                ok_text(render_rows(&rows))
             },
         )
         .await

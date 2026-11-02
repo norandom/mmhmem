@@ -79,6 +79,7 @@ fn like_pattern(query: &str) -> String {
 
 /// Read-only breadcrumb search service (mem_search parity: audit event +
 /// own breadcrumb per call; no stored row is ever modified).
+#[derive(Clone)]
 pub struct BreadcrumbService {
     db: Db,
     audit: AuditWriter,
@@ -162,7 +163,29 @@ impl BreadcrumbService {
         self.crumb(&ctx, req.query, &format!("{n} matches")).await;
         Ok(rows)
     }
+}
 
+/// Renders the matches newest first with timestamp, harness, tool,
+/// resource, and summary — or the clear no-match message (Req 10.4).
+pub fn render_rows(rows: &[CrumbRow]) -> String {
+    if rows.is_empty() {
+        return "No breadcrumbs matched your query.".to_string();
+    }
+    let mut md = String::from("### Breadcrumb Matches (Newest First)\n");
+    for r in rows {
+        md.push_str(&format!(
+            "- [{}] {}({}) at {}: {}\n",
+            r.harness,
+            r.tool,
+            r.resource.clone().unwrap_or_default(),
+            r.created_at_epoch,
+            r.summary
+        ));
+    }
+    md
+}
+
+impl BreadcrumbService {
     /// Own breadcrumb when a session bus is attached (mem_search parity).
     async fn crumb(&self, ctx: &CallCtx<'_>, resource: &str, summary: &str) {
         if let Some(bus) = &self.bus {
