@@ -70,6 +70,7 @@ marketplace packages remain outside the change boundary.
 
 - [ ] 3. Exercise the release file through public application interfaces
 - [ ] 3.1 Verify local MCP behavior and persistent state
+  - _Blocked: Upstream local-mode task 2.1 production SQLite initialization fails under concurrent fresh-open with SQLITE_BUSY despite the configured timeout; scope approval is required before production Rust changes (see implementation-blocker.md)._
   - Accept an explicit candidate path and expected checksum; do not select Cargo's implicit test executable.
   - Check version and MCP initialization/tool discovery, write an observation and checkpoint through public tools, then restart against the same isolated store.
   - Assert memory search/detail retrieval and both existing statistics output formats after the recorded session.
@@ -180,6 +181,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 3.1: Earlier explicit-candidate local probes passed Debian and Alpine; final verification exposed a genuine upstream concurrent-first-open storage failure. Independent debug reproduced child exit 1 (`database is locked: Error code 5`) within 0.5 seconds with a 5000 ms timeout. Debug returned `STOP_FOR_HUMAN`; no production workaround, test filtering or acceptance retry was applied. Partial probe changes remain uncommitted pending upstream repair and fresh review. Evidence: `tmp/local-probe-final.log`, `tmp/diagnose-fresh-open.log`; scope report: `implementation-blocker.md`.
 - Task 2.4: `check_bundle.py --bundle DIR --expected-revision SHA [--require-publishable]` validates artifact and referenced report consistency. Runtime reports require passed status, validation ID and matching name/image/kernel/architecture/cpu/artifact_sha256/cases. Independent `bundle-check` passed ten checker and five support tests (`tmp/bundle-check-review.log`).
 - Task 2.3: Reusable `worker_service()` uses Dagger `as_service(args=...)`, explicitly starts/stops across probes, and exposes public roots plus HTTPS `/receipts`. Independent `worker-fixture` passed hostname/trust/rejection/receipt checks (`tmp/worker-fixture-review.log`). Health checks can produce initial TLS EOF diagnostics; compare later diagnostics against their baseline.
 - Task 2.2: `inspect_static.py` accepts explicit binary/checksum/report inputs and validates static PIE without rejecting all dynamic metadata. Six positive/negative component tests passed independent canonical `static-inspection` (`tmp/static-inspection-review.log`). Final candidate inspection remains an integration gate.
