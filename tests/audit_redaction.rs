@@ -8,10 +8,10 @@
 use std::collections::BTreeMap;
 
 use mmhmem::storage::audit::{
-    redact_secrets, AuditEventType, AuditWriter, REDACTED_PRIVATE_TAG, REDACTED_SECRET,
+    AuditEventType, AuditWriter, REDACTED_PRIVATE_TAG, REDACTED_SECRET, redact_secrets,
 };
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 

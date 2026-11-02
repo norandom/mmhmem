@@ -69,9 +69,11 @@ mod tests {
     fn version_is_three_part_numeric() {
         let parts: Vec<&str> = VERSION.split('.').collect();
         assert_eq!(parts.len(), 3);
-        assert!(parts
-            .iter()
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())));
+        assert!(
+            parts
+                .iter()
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        );
     }
 
     #[test]

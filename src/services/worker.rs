@@ -36,8 +36,7 @@ and a line range [L<start>-L<end>]. No conversational prose.";
 
 /// Code-writer system prompt (Req 4.1): follow the reference file's
 /// conventions, output only raw source code (callers strip fences, Req 4.2).
-pub const CODE_WRITER_SYSTEM: &str =
-    "You are a deterministic code generator. Follow the reference file's conventions \
+pub const CODE_WRITER_SYSTEM: &str = "You are a deterministic code generator. Follow the reference file's conventions \
 exactly. Output ONLY raw source code: no markdown fences, no explanation.";
 
 /// Token usage reported by the worker API `usage` field (Req 10.2).

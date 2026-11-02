@@ -10,8 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::present;
 use super::ConfigError;
+use super::present;
 
 /// Folder name under the per-user application-data location (Req 3.1).
 pub const APP_DIR_NAME: &str = "mmhmem";

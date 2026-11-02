@@ -12,7 +12,7 @@
 
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt_types::CallCtx;
-use crate::storage::audit::{redact_secrets, AuditEventType, AuditWriter};
+use crate::storage::audit::{AuditEventType, AuditWriter, redact_secrets};
 use crate::storage::db::Db;
 
 /// Compact index row returned by search (Req 5.1: ~50-100 tokens per result).

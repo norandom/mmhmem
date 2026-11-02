@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN};
-use mmhmem::mcp::server::{router, AppState};
+use mmhmem::mcp::server::{AppState, router};
 
 fn test_state(token: &str) -> (tempfile::TempDir, Arc<AppState>) {
     let roots = tempfile::tempdir().unwrap();
@@ -131,10 +131,12 @@ async fn tools_list_exposes_the_six_tools_and_call_round_trips_memory() {
     let record = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mem_record_observation","arguments":{"project":"p","agent_harness":"opencode","obs_type":"discovery","title":"e2e obs","narrative":"recorded over MCP","facts":"f","files":"src/x.rs"}}}"#;
     let (status, body) = mcp_call(&client, &base, "secret-token", &mut session, record).await;
     assert_eq!(status, 200, "body={body}");
-    assert!(sse_json(&body)[0]["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("#1"));
+    assert!(
+        sse_json(&body)[0]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("#1")
+    );
 
     let search = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mem_search","arguments":{"project":"p","agent_harness":"opencode","query":"e2e"}}}"#;
     let (status, body) = mcp_call(&client, &base, "secret-token", &mut session, search).await;

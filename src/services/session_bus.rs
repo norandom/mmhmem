@@ -15,7 +15,7 @@
 use rusqlite::OptionalExtension;
 
 use crate::config::Config;
-use crate::storage::audit::{redact_secrets, AuditEventType, AuditWriter};
+use crate::storage::audit::{AuditEventType, AuditWriter, redact_secrets};
 use crate::storage::db::Db;
 
 /// Working-state cap in characters: 1,500 tokens at ~4 chars/token (Req 2.5).

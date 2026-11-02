@@ -29,7 +29,7 @@ pub use crate::services::shunt_types::{BypassReason, ReadOutcome, ShuntError};
 use crate::services::shunt_types::{CallCtx, Evaluation, FileView, ReadRequest};
 use crate::services::stats;
 use crate::services::worker::WorkerClient;
-use crate::storage::audit::{sha256_hex, AuditEventType, AuditWriter};
+use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
 
 /// Security-critical path pattern, case-insensitive (Req 3.3; design.md

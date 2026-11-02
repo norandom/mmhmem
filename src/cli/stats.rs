@@ -200,11 +200,7 @@ fn thousands(n: i64) -> String {
         }
         out.push(c);
     }
-    if n < 0 {
-        format!("-{out}")
-    } else {
-        out
-    }
+    if n < 0 { format!("-{out}") } else { out }
 }
 
 #[derive(Serialize)]

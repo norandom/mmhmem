@@ -6,9 +6,9 @@ use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN, ENV_WORKER_API_URL, E
 use mmhmem::services::shunt::{ShuntEngine, ShuntError};
 use mmhmem::services::shunt_cache::{cache_store, query_fingerprint};
 use mmhmem::services::shunt_types::CallCtx;
-use mmhmem::services::warmup::{render_report, run_warmup, WarmupError, WarmupReport};
+use mmhmem::services::warmup::{WarmupError, WarmupReport, render_report, run_warmup};
 use mmhmem::services::worker::WorkerClient;
-use mmhmem::storage::audit::{sha256_hex, AuditWriter};
+use mmhmem::storage::audit::{AuditWriter, sha256_hex};
 use mmhmem::storage::db::Db;
 
 const QUESTION: &str = "Summarize exported symbols, signatures, and control flow.";

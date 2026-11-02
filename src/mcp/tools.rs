@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData, InitializeResult};
-use rmcp::{tool, tool_handler, tool_router, ServerHandler};
+use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 use super::params::{
     BoilerplateParams, BreadcrumbSearchParams, MemGetParams, MemRecordParams, MemSearchParams,
@@ -34,7 +34,7 @@ impl ServerHandler for McpServer {
     }
 }
 use crate::services::boilerplate::WriteRequest;
-use crate::services::breadcrumbs::{render_rows, BreadcrumbSearch};
+use crate::services::breadcrumbs::{BreadcrumbSearch, render_rows};
 use crate::services::memory::{RecordRequest, SearchRequest};
 use crate::services::prune::render_report as render_prune;
 use crate::services::session_bus::ClientUsage;

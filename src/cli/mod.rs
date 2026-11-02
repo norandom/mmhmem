@@ -15,12 +15,11 @@ use std::process::ExitCode;
 use anyhow::Context;
 
 use crate::config::Config;
-use crate::storage::db::{Db, DB_FILE_NAME};
+use crate::storage::db::{DB_FILE_NAME, Db};
 
 /// Printed when the store has no statistics yet (Req 8.5): empty is not an
 /// error — a fresh local install simply has nothing to report yet.
-pub const NO_STATS_MESSAGE: &str =
-    "No token-savings statistics recorded yet. Use mmhmem from a harness (stdio \
+pub const NO_STATS_MESSAGE: &str = "No token-savings statistics recorded yet. Use mmhmem from a harness (stdio \
      or serve mode), then run `mmhmem stats` again.";
 
 pub use prune::run_prune;

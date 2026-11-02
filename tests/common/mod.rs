@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN};
-use mmhmem::mcp::server::{router, AppState};
+use mmhmem::mcp::server::{AppState, router};
 
 /// Builds an AppState with everything rooted in fresh tempdirs.
 /// Returns (roots, data, logs, state).

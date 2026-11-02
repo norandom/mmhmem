@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::AUTHORIZATION;
@@ -20,7 +21,6 @@ use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use subtle::ConstantTimeEq;

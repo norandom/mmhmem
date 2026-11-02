@@ -8,7 +8,7 @@
 use serde::Serialize;
 
 use super::shunt_types::CallCtx;
-use crate::storage::audit::{sha256_hex, AuditEventType, AuditWriter};
+use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
 
 /// Grouped outcome for one prune pass (Req 3.3).
@@ -255,15 +255,21 @@ mod tests {
                 kept_fresh: 1,
             }
         );
-        assert!(lookup(&fx, &fresh, &sha256_hex(b"current content\n"))
-            .await
-            .is_some());
-        assert!(lookup(&fx, &changed, &sha256_hex(b"old content\n"))
-            .await
-            .is_some());
-        assert!(lookup(&fx, &missing, &sha256_hex(b"old content\n"))
-            .await
-            .is_some());
+        assert!(
+            lookup(&fx, &fresh, &sha256_hex(b"current content\n"))
+                .await
+                .is_some()
+        );
+        assert!(
+            lookup(&fx, &changed, &sha256_hex(b"old content\n"))
+                .await
+                .is_some()
+        );
+        assert!(
+            lookup(&fx, &missing, &sha256_hex(b"old content\n"))
+                .await
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -277,9 +283,11 @@ mod tests {
         assert_eq!(report.removed_missing, 1);
         assert_eq!(report.removed_changed, 1);
         assert_eq!(report.kept_fresh, 1);
-        assert!(lookup(&fx, &fresh, &sha256_hex(b"current content\n"))
-            .await
-            .is_some());
+        assert!(
+            lookup(&fx, &fresh, &sha256_hex(b"current content\n"))
+                .await
+                .is_some()
+        );
         assert!(
             lookup(&fx, &changed, &old_sha).await.is_none(),
             "changed row must be gone"

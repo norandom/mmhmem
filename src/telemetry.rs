@@ -17,14 +17,14 @@ mod imp {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider as _;
     use opentelemetry::trace::{Span, Tracer, TracerProvider as _};
-    use opentelemetry::KeyValue;
     use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
+    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::SdkTracerProvider;
-    use opentelemetry_sdk::Resource;
 
     use super::*;
     use crate::storage::audit::redact_secrets;
@@ -320,7 +320,7 @@ mod imp {
     }
 }
 
-pub use imp::{init_from_config, Telemetry, ToolSpan};
+pub use imp::{Telemetry, ToolSpan, init_from_config};
 
 #[cfg(test)]
 mod tests {
@@ -358,8 +358,8 @@ mod tests {
     #[cfg(feature = "otel")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn feature_on_with_endpoint_exports_span_to_stub() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::AsyncReadExt;
         use tokio::net::TcpListener;
 

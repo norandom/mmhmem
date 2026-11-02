@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN};
-use mmhmem::mcp::server::{router, AppState};
+use mmhmem::mcp::server::{AppState, router};
 
 fn test_state(token: &str) -> (tempfile::TempDir, tempfile::TempDir, Arc<AppState>) {
     let roots = tempfile::tempdir().unwrap();

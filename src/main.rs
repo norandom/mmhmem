@@ -150,7 +150,7 @@ fn spawn_signal_handler(ct: CancellationToken) {
 /// SIGTERM on unix, Ctrl-C elsewhere (Windows has no SIGTERM).
 #[cfg(unix)]
 async fn shutdown_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
         sigterm.recv().await;
     }

@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::services::prune::{delete_stale, render_report, scan_stale};
 use crate::services::shunt_types::CallCtx;
 use crate::storage::audit::AuditWriter;
-use crate::storage::db::{Db, DB_FILE_NAME};
+use crate::storage::db::{DB_FILE_NAME, Db};
 
 /// Printed when the store does not exist yet (Req 3.4).
 pub const NO_STORE_MESSAGE: &str =

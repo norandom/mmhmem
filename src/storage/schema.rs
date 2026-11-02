@@ -8,8 +8,8 @@
 
 use std::cmp::Ordering;
 
-use rusqlite::ffi;
 use rusqlite::Connection;
+use rusqlite::ffi;
 
 /// Schema version stored in `PRAGMA user_version`.
 pub const SCHEMA_VERSION: u32 = 1;
