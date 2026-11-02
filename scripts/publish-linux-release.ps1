@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Validate a CI-built static Linux bundle for delivery to an existing draft.
+Deliver a verified CI-built static Linux bundle to an existing draft.
 .DESCRIPTION
 Only a named artifact from a trusted successful CI run is accepted. This
-validation entrypoint performs no release writes and never accepts a local
-binary. The returned context is also used by the draft delivery step.
+publisher never accepts a local binary or creates/publishes a release.
+Use -ValidateOnly to check provenance and conflicts without uploading assets.
 #>
 [CmdletBinding()]
 param([string]$Tag,[string]$RunId,[switch]$ValidateOnly)
@@ -102,8 +102,72 @@ function Invoke-LinuxReleaseValidation {
     if ($hashes[$script:LinuxAssetName] -cne $manifest.artifact.sha256) {throw 'Artifact checksum changed after validation'}
     return [pscustomobject]@{Tag=$Tag;RunId=$RunId;RunAttempt=$attempt;Revision=$revision;ReleaseId=$release.id;ArtifactName=$artifactName;BundleDirectory=$bundle;ScratchDirectory=$scratch;Manifest=$manifest;Hashes=$hashes;ExistingHashes=$existing}
 }
+function Assert-LinuxDeliveryFiles($Context) {
+    foreach ($name in @($script:LinuxAssetName,'SHA256SUMS','verification.json')) {
+        $actual=(Get-FileHash -LiteralPath (Get-ReleaseBundleFile $Context.BundleDirectory $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -cne $Context.Hashes[$name]) {throw "Validated delivery file changed: $name"}
+    }
+}
+function Get-LinuxDeliveryDraft($Context) {
+    if ((Resolve-ReleaseTag $Context.Tag) -cne $Context.Revision) {throw 'Tag commit changed after validation'}
+    $release=Get-ReleaseApi ('releases/tags/'+[uri]::EscapeDataString($Context.Tag))
+    if ($release.draft -isnot [bool] -or -not $release.draft -or $release.tag_name -cne $Context.Tag -or
+        (Get-ReleaseField $release 'id' integer) -ne $Context.ReleaseId) {throw 'Validated draft release state changed; refusing delivery'}
+    return $release
+}
+function Get-LinuxDeliveryAsset($Release,[string]$Name) {
+    $assets=@($Release.assets | Where-Object {$_.name -ceq $Name})
+    if ($assets.Count -gt 1 -or ($assets.Count -eq 1 -and $assets[0].state -cne 'uploaded')) {throw "Conflicting duplicate or incomplete Linux asset: $Name"}
+    if ($assets.Count) {return $assets[0]}
+    return $null
+}
+function Assert-LinuxRemoteBytes($Context,[string]$Name) {
+    $destination=Join-Path $Context.ScratchDirectory ('confirm-'+[guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $destination | Out-Null
+    $null=Invoke-ReleaseGh @('release','download',$Context.Tag,'--repo',$script:ReleaseRepository,'--pattern',$Name,'--dir',$destination)
+    $actual=(Get-FileHash -LiteralPath (Get-ReleaseBundleFile $destination $Name) -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -cne $Context.Hashes[$Name]) {throw "Conflicting or corrupted remote Linux asset: $Name"}
+    return $actual
+}
+function Invoke-LinuxReleaseDelivery {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)]$Context)
+    Assert-LinuxDeliveryFiles $Context
+    $delivered=@{}
+    foreach ($name in @($script:LinuxAssetName,'SHA256SUMS','verification.json')) {
+        $release=Get-LinuxDeliveryDraft $Context
+        $existing=Get-LinuxDeliveryAsset $release $name
+        if (-not $existing) {
+            # Recheck every file immediately before each write. A mutation of a
+            # later file must not silently reuse its prior validation result.
+            Assert-LinuxDeliveryFiles $Context
+            $path=Get-ReleaseBundleFile $Context.BundleDirectory $name
+            $uploadFailure=$null
+            try {$null=Invoke-ReleaseGh @('release','upload',$Context.Tag,$path,'--repo',$script:ReleaseRepository)}
+            catch {$uploadFailure=$_.Exception.Message}
+            # Upload can succeed remotely while its acknowledgement is lost.
+            # Inspect remote state once; never overwrite or blindly retry.
+            $release=Get-LinuxDeliveryDraft $Context
+            if (-not (Get-LinuxDeliveryAsset $release $name)) {
+                throw "Upload did not produce a completed asset: $name. $uploadFailure"
+            }
+        }
+        $delivered[$name]=Assert-LinuxRemoteBytes $Context $name
+    }
+    Assert-LinuxDeliveryFiles $Context
+    $null=Get-LinuxDeliveryDraft $Context
+    return [pscustomobject]@{Tag=$Context.Tag;ReleaseId=$Context.ReleaseId;Revision=$Context.Revision;Hashes=$delivered}
+}
+function Invoke-LinuxReleasePublish {
+    [CmdletBinding()]
+    param([string]$Tag,[string]$RunId,[switch]$ValidateOnly)
+    $context=Invoke-LinuxReleaseValidation -Tag $Tag -RunId $RunId
+    if ($ValidateOnly) {return $context}
+    return (Invoke-LinuxReleaseDelivery $context)
+}
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference='Stop'
-    $context=Invoke-LinuxReleaseValidation -Tag $Tag -RunId $RunId
-    Write-Host "Validated draft inputs: tag=$Tag run=$RunId revision=$($context.Revision). No assets uploaded."
+    $result=Invoke-LinuxReleasePublish -Tag $Tag -RunId $RunId -ValidateOnly:$ValidateOnly
+    if ($ValidateOnly) {Write-Host "Validated draft inputs: tag=$Tag run=$RunId revision=$($result.Revision). No assets uploaded."}
+    else {Write-Host "Verified draft delivery: tag=$Tag revision=$($result.Revision) sha256=$($result.Hashes[$script:LinuxAssetName]). Release remains a draft."}
 }

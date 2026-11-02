@@ -11,6 +11,8 @@ $script:ReleaseScratchRoot=Join-Path $scratch 'downloads'
 $script:Revision = 'a' * 40
 $script:Mode = 'valid'
 $script:Calls = New-Object System.Collections.Generic.List[string]
+$script:RemoteAssets = @{}
+$script:DeliveryWrites = New-Object System.Collections.Generic.List[string]
 $script:FixtureRoot = Join-Path $scratch 'fixture'
 $script:FakeArtifact = 'linux-static-' + $script:Revision + '-123-2'
 $script:Cases = @('pristine_startup','version','mcp_initialize','tools_list','persistence','stats_text','stats_json','server_health','server_auth')
@@ -95,12 +97,16 @@ function global:gh {
     $script:Calls.Add(($arguments -join ' '))
     $global:LASTEXITCODE=0
     if ($arguments[0] -eq 'api') {
+        if ($arguments.Count -ne 4 -or $arguments[1] -ne '--method' -or $arguments[2] -ne 'GET' -or $arguments[3] -notlike 'repos/norandom/mmhmem/*') {throw 'Unsafe metadata request'}
         $endpoint=$arguments[-1]
         if ($endpoint -like '*/git/ref/tags/*') {
             if ($script:Mode -eq 'missing-tag') { $global:LASTEXITCODE=1; return 'tag missing' }
             return (@{ref='refs/tags/v-test';object=@{type='tag';sha=('e'*40)}} | ConvertTo-Json -Depth 5 -Compress)
         }
-        if ($endpoint -like '*/git/tags/*') { return (@{object=@{type='commit';sha=$script:Revision}} | ConvertTo-Json -Depth 5 -Compress) }
+        if ($endpoint -like '*/git/tags/*') {
+            $resolved=if ($script:Mode -eq 'tag-moved') {'f'*40} else {$script:Revision}
+            return (@{object=@{type='commit';sha=$resolved}} | ConvertTo-Json -Depth 5 -Compress)
+        }
         if ($endpoint -like '*/actions/workflows/ci.yml') { return (@{id=22;path='.github/workflows/ci.yml';state='active'} | ConvertTo-Json -Compress) }
         if ($endpoint -like '*/actions/runs/123') {
             $run=@{id=123;run_attempt=2;name='CI';path='.github/workflows/ci.yml';workflow_id=22;status='completed';conclusion='success';event='push';head_branch='main';head_sha=$script:Revision;repository=@{full_name='norandom/mmhmem'};head_repository=@{full_name='norandom/mmhmem'}}
@@ -138,7 +144,18 @@ function global:gh {
             if ($script:Mode -eq 'missing-release') {$global:LASTEXITCODE=1;return 'release missing'}
             $release=@{id=456;tag_name='v-test';draft=$true;assets=@(@{name='mmhmem.exe';id=77;state='uploaded'})}
             if ($script:Mode -eq 'published') {$release.draft=$false}
+            if ($script:Mode -eq 'published-before-write') {$release.draft=$false}
+            if ($script:FinalPublished) {$release.draft=$false}
+            if ($script:Mode -eq 'published-mid-delivery' -and $script:RemoteAssets.Count) {$release.draft=$false}
+            if ($script:Mode -eq 'release-changed') {$release.id=999}
             if ($script:Mode -in @('conflict','identical')) {$release.assets+=@{name='mmhmem-linux-x86_64';id=88;state='uploaded'}}
+            foreach ($name in $script:RemoteAssets.Keys) {$release.assets+=@{name=$name;id=($script:RemoteAssets[$name].Id);state='uploaded'}}
+            if ($script:Mode -eq 'remote-duplicate') {$release.assets+=@{name='mmhmem-linux-x86_64';id=998;state='uploaded'}}
+            if ($script:Mode -eq 'remote-incomplete') {$release.assets[-1].state='starter'}
+            if ($script:Mode -eq 'local-mid-delivery' -and $script:RemoteAssets.Count -and -not $script:ContextMutated) {
+                [IO.File]::AppendAllText((Join-Path $script:CurrentContext.BundleDirectory 'verification.json'),'changed after first upload')
+                $script:ContextMutated=$true
+            }
             return ($release | ConvertTo-Json -Depth 5 -Compress)
         }
         throw "Unexpected fake API: $endpoint"
@@ -153,8 +170,28 @@ function global:gh {
     if ($arguments[0] -eq 'release' -and $arguments[1] -eq 'download') {
         $target=$arguments[[array]::IndexOf($arguments,'--dir')+1]
         New-Item -ItemType Directory -Path $target -Force | Out-Null
+        $name=$arguments[[array]::IndexOf($arguments,'--pattern')+1]
+        if ($script:RemoteAssets.ContainsKey($name)) {
+            $bytes=$script:RemoteAssets[$name].Bytes
+            if ($script:Mode -eq 'corrupt-download') {$bytes=[Text.Encoding]::UTF8.GetBytes('corrupted remote response')}
+            [IO.File]::WriteAllBytes((Join-Path $target $name),$bytes)
+            if ($script:Mode -eq 'publish-on-last-download' -and $name -eq 'verification.json') {$script:FinalPublished=$true}
+            return
+        }
         $content=if ($script:Mode -eq 'identical') {'synthetic offline fixture; never execute'} else {'conflicting bytes'}
         [IO.File]::WriteAllText((Join-Path $target 'mmhmem-linux-x86_64'),$content,[Text.UTF8Encoding]::new($false))
+        return
+    }
+    if ($arguments[0] -eq 'release' -and $arguments[1] -eq 'upload') {
+        if ($arguments.Count -ne 6 -or $arguments[2] -ne 'v-test' -or $arguments[4] -ne '--repo' -or $arguments[5] -ne 'norandom/mmhmem') {throw 'Unsafe upload invocation'}
+        $path=$arguments[3];$name=[IO.Path]::GetFileName($path)
+        if ($name -notin @('mmhmem-linux-x86_64','SHA256SUMS','verification.json')) {throw 'Other platform upload attempted'}
+        $script:DeliveryWrites.Add($name)
+        if ($script:Mode -eq 'absent-ack') {$global:LASTEXITCODE=1;return 'network failure before upload'}
+        if ($script:Mode -eq 'partial-failure' -and $name -eq 'SHA256SUMS') {$global:LASTEXITCODE=1;return 'interrupted second upload'}
+        $bytes=if ($script:Mode -eq 'race-conflict') {[Text.Encoding]::UTF8.GetBytes('concurrent different asset')} else {[IO.File]::ReadAllBytes($path)}
+        $script:RemoteAssets[$name]=@{Id=(100+$script:RemoteAssets.Count);Bytes=$bytes}
+        if ($script:Mode -in @('lost-ack','race-conflict')) {$global:LASTEXITCODE=1;return 'lost upload acknowledgement'}
         return
     }
     throw "Forbidden or unexpected fake gh action: $($arguments -join ' ')"
@@ -162,7 +199,7 @@ function global:gh {
 try {
     foreach ($positive in @('valid','identical')) {
         $script:Mode=$positive; $script:Calls.Clear()
-        $context=Invoke-LinuxReleaseValidation -Tag 'v-test' -RunId '123'
+        $context=Invoke-LinuxReleasePublish -Tag 'v-test' -RunId '123' -ValidateOnly
         if ($context.Manifest.revision -ne $script:Revision -or $context.ReleaseId -ne 456) {throw 'Valid provenance was not retained'}
         if (@($script:Calls | Where-Object {$_ -match 'upload|create|edit|delete|clobber'}).Count) {throw 'Validation performed a write'}
     }
@@ -174,7 +211,7 @@ try {
     $negative['scratch']='scratch|pass'; $negative['missing-scratch']='scratch'; $negative['pristine']='pristine|match'
     foreach ($mode in $negative.Keys) {
         $script:Mode=$mode; $script:Calls.Clear(); $caught=$false
-        try {$null=Invoke-LinuxReleaseValidation -Tag 'v-test' -RunId '123'} catch {
+        try {$null=Invoke-LinuxReleasePublish -Tag 'v-test' -RunId '123'} catch {
             $caught=$true
             if ($_.Exception.Message -notmatch $negative[$mode]) {throw "Wrong rejection for ${mode}: $($_.Exception.Message)"}
         }
@@ -188,6 +225,51 @@ try {
     try {$null=Invoke-LinuxReleaseValidation -Tag 'v-test' -RunId '123' -Binary 'arbitrary-local-file'} catch {$caught=$true}
     if (-not $caught -or $script:Calls.Count) {throw 'Arbitrary binary parameter was not rejected before gh'}
     Write-Host "PASS: 2 valid and $($negative.Count) offline provenance/bundle rejection cases; zero release writes"
+    if (-not (Get-Command Invoke-LinuxReleaseDelivery -ErrorAction SilentlyContinue)) {throw 'Missing exact-byte draft delivery'}
+    function New-DeliveryContext {
+        $script:Mode='valid';$script:Calls.Clear();$script:RemoteAssets=@{};$script:DeliveryWrites.Clear();$script:ContextMutated=$false;$script:FinalPublished=$false
+        return (Invoke-LinuxReleaseValidation -Tag 'v-test' -RunId '123')
+    }
+    function Assert-Delivered($Context) {
+        foreach ($name in @('mmhmem-linux-x86_64','SHA256SUMS','verification.json')) {
+            if (-not $script:RemoteAssets.ContainsKey($name)) {throw "Missing delivered $name"}
+            $hash=[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($script:RemoteAssets[$name].Bytes)).Replace('-','').ToLowerInvariant()
+            if ($hash -cne $Context.Hashes[$name]) {throw "Wrong delivered bytes: $name"}
+        }
+        if (@($script:Calls | Where-Object {$_ -match 'release (create|edit|delete)|clobber'}).Count) {throw 'Forbidden release mutation'}
+    }
+    $context=New-DeliveryContext
+    $null=Invoke-LinuxReleasePublish -Tag 'v-test' -RunId '123'
+    Assert-Delivered $context
+    if (($script:DeliveryWrites -join ',') -ne 'mmhmem-linux-x86_64,SHA256SUMS,verification.json') {throw 'Expected exact three delivery files'}
+    $writes=$script:DeliveryWrites.Count
+    $null=Invoke-LinuxReleaseDelivery $context
+    Assert-Delivered $context
+    if ($script:DeliveryWrites.Count -ne $writes) {throw 'Identical retry uploaded again'}
+    foreach ($deliveryCase in @('lost-ack','partial-failure')) {
+        $context=New-DeliveryContext;$script:Mode=$deliveryCase;$failed=$false
+        try {$null=Invoke-LinuxReleaseDelivery $context} catch {$failed=$true}
+        if ($deliveryCase -eq 'lost-ack' -and $failed) {throw 'Lost acknowledgement was not reconciled'}
+        if ($deliveryCase -eq 'partial-failure') {
+            if (-not $failed -or -not $script:RemoteAssets.ContainsKey('mmhmem-linux-x86_64')) {throw 'Interrupted upload did not preserve first asset'}
+            $script:Mode='valid';$script:DeliveryWrites.Clear();$null=Invoke-LinuxReleaseDelivery $context
+            if ($script:DeliveryWrites.Contains('mmhmem-linux-x86_64')) {throw 'Partial retry replaced an existing asset'}
+        }
+        Assert-Delivered $context
+    }
+    foreach ($deliveryCase in @('published-before-write','published-mid-delivery','publish-on-last-download','release-changed','tag-moved','race-conflict','absent-ack','corrupt-download','local-mutation','local-mid-delivery','remote-conflict','remote-duplicate','remote-incomplete')) {
+        $context=New-DeliveryContext;$script:Mode=$deliveryCase;$failed=$false;$script:CurrentContext=$context
+        if ($deliveryCase -eq 'local-mutation') {[IO.File]::AppendAllText((Join-Path $context.BundleDirectory 'verification.json'),'tamper')}
+        if ($deliveryCase -in @('remote-conflict','remote-duplicate','remote-incomplete')) {
+            $script:RemoteAssets['mmhmem-linux-x86_64']=@{Id=100;Bytes=[Text.Encoding]::UTF8.GetBytes('conflicting existing asset')}
+        }
+        try {$null=Invoke-LinuxReleaseDelivery $context} catch {$failed=$true}
+        if (-not $failed) {throw "Accepted invalid delivery: $deliveryCase"}
+        if ($deliveryCase -in @('published-before-write','release-changed','tag-moved','local-mutation','remote-conflict','remote-duplicate','remote-incomplete') -and $script:DeliveryWrites.Count) {throw "Uploaded before rejecting $deliveryCase"}
+        if ($deliveryCase -in @('published-mid-delivery','local-mid-delivery') -and $script:DeliveryWrites.Count -ne 1) {throw "Continued writing after state change: $deliveryCase"}
+        if (@($script:Calls | Where-Object {$_ -match 'release (create|edit|delete)|clobber'}).Count) {throw "Forbidden mutation for $deliveryCase"}
+    }
+    Write-Host 'PASS: exact delivery, identical and partial retries, lost acknowledgements, state races, tampering and download equality'
 } finally {
     Remove-Item Function:\gh -ErrorAction SilentlyContinue
     $resolved=[IO.Path]::GetFullPath($scratch)
