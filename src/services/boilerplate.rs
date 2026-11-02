@@ -22,7 +22,7 @@ use crate::services::session_bus::SessionBus;
 use crate::services::shunt_types::CallCtx;
 use crate::services::stats;
 use crate::services::worker::{WorkerClient, WorkerUsage};
-use crate::storage::audit::{sha256_hex, AuditEventType, AuditWriter};
+use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
 
 /// One boilerplate_write call's input (bundled to stay under the clippy
@@ -239,7 +239,7 @@ impl BoilerplateWriter {
     async fn persist(
         &self,
         ctx: &CallCtx<'_>,
-        gen: Generated,
+        generated: Generated,
     ) -> Result<WriteAck, BoilerplateError> {
         let Generated {
             target,
@@ -248,7 +248,7 @@ impl BoilerplateWriter {
             usage,
             latency_ms,
             reference_chars,
-        } = gen;
+        } = generated;
         let code = strip_fences(&raw_code);
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)

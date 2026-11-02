@@ -49,11 +49,10 @@ async fn daemon_boots_serves_and_audits() {
             .timeout(Duration::from_millis(200))
             .send()
             .await
+            && r.status() == 200
         {
-            if r.status() == 200 {
-                up = true;
-                break;
-            }
+            up = true;
+            break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

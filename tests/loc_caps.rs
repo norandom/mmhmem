@@ -80,11 +80,7 @@ fn step_str(b: &[u8], out: &mut [u8], i: &mut usize) -> St {
     }
     let closed = b[*i] == b'"';
     *i += 1;
-    if closed {
-        St::Normal
-    } else {
-        St::Str
-    }
+    if closed { St::Normal } else { St::Str }
 }
 
 /// One byte in Block-comment state until `*/`.
@@ -183,10 +179,10 @@ fn fn_extents(skeleton: &str) -> Vec<(String, usize, usize)> {
     let lines: Vec<&str> = skeleton.lines().collect();
     let mut out = Vec::new();
     for (idx, line) in lines.iter().enumerate() {
-        if is_fn_signature(line) {
-            if let Some(close) = body_close_line(&lines, idx) {
-                out.push((fn_name(line), idx + 1, close + 1));
-            }
+        if is_fn_signature(line)
+            && let Some(close) = body_close_line(&lines, idx)
+        {
+            out.push((fn_name(line), idx + 1, close + 1));
         }
     }
     out

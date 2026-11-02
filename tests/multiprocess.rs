@@ -9,14 +9,14 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::time::timeout;
 
 use mmhmem::services::shunt_cache;
 use mmhmem::storage::audit::sha256_hex;
-use mmhmem::storage::db::{Db, DB_FILE_NAME};
+use mmhmem::storage::db::{DB_FILE_NAME, Db};
 
 const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
 const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
@@ -98,11 +98,10 @@ impl StdioMcp {
         let resp = self
             .request("tools/call", json!({"name": name, "arguments": arguments}))
             .await;
-        let text = resp["result"]["content"][0]["text"]
+        resp["result"]["content"][0]["text"]
             .as_str()
             .map(str::to_string)
-            .unwrap_or_else(|| resp.to_string());
-        text
+            .unwrap_or_else(|| resp.to_string())
     }
 
     async fn handshake(&mut self) {

@@ -69,8 +69,8 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::config::Config;
 
@@ -276,14 +276,14 @@ impl AuditWriter {
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
-        if self.audit_max_bytes > 0 {
-            if let Err(e) = super::audit_rotate::rotate_if_needed(
+        if self.audit_max_bytes > 0
+            && let Err(e) = super::audit_rotate::rotate_if_needed(
                 &self.path,
                 self.audit_max_bytes,
                 self.audit_rotate_keep,
-            ) {
-                tracing::warn!("audit rotation failed (appending anyway): {e}");
-            }
+            )
+        {
+            tracing::warn!("audit rotation failed (appending anyway): {e}");
         }
         let mut file = OpenOptions::new()
             .create(true)

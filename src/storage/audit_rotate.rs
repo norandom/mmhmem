@@ -38,12 +38,11 @@ pub fn rotate_if_needed(path: &Path, max_bytes: u64, keep: u32) -> io::Result<()
     for i in (1..keep).rev() {
         let from = rotated_path(path, i);
         let to = rotated_path(path, i + 1);
-        if from.exists() {
-            if let Err(e) = fs::rename(&from, &to) {
-                if e.kind() != io::ErrorKind::NotFound {
-                    return Err(e);
-                }
-            }
+        if from.exists()
+            && let Err(e) = fs::rename(&from, &to)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            return Err(e);
         }
     }
     // Active file becomes the newest rotated slot; the next append
@@ -82,12 +81,11 @@ fn cleanup_at_or_beyond(path: &Path, keep: usize) -> io::Result<()> {
                 Some(n) => n,
                 None => continue,
             };
-            if slot >= keep {
-                if let Err(e) = fs::remove_file(entry.path()) {
-                    if e.kind() != io::ErrorKind::NotFound {
-                        return Err(e);
-                    }
-                }
+            if slot >= keep
+                && let Err(e) = fs::remove_file(entry.path())
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                return Err(e);
             }
         }
     }

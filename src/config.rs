@@ -3,8 +3,7 @@
 //!
 //! The serve profile is env-only; the local profile additionally reads
 //! worker settings from `.mmhmem.json` (global + project, corpus-warmup-prune
-//! Req 7; steering structure.md "Code Organization Principles" — no other
-//! config files are parsed at runtime).
+//! Req 7) — no other config files are parsed at runtime.
 //! Validation is fail-fast: `AGENT_MEM_TOKEN` and `AGENT_MEM_ALLOWED_ROOTS`
 //! are required, and any malformed value aborts startup with a clear error
 //! before any socket or database work (design.md "Error Handling").
@@ -173,7 +172,10 @@ impl fmt::Display for ConfigError {
                 write!(f, "{ENV_PORT}={raw:?} is not a valid port (u16, 0-65535)")
             }
             ConfigError::InvalidShuntMinLines(raw) => {
-                write!(f, "{ENV_SHUNT_MIN_LINES}={raw:?} is not a valid shunt threshold (u32 > 0)")
+                write!(
+                    f,
+                    "{ENV_SHUNT_MIN_LINES}={raw:?} is not a valid shunt threshold (u32 > 0)"
+                )
             }
             ConfigError::MissingUserDirEnv(var) => write!(
                 f,
@@ -181,13 +183,22 @@ impl fmt::Display for ConfigError {
                  (the local profile resolves its default data dir from it)"
             ),
             ConfigError::InvalidBusyTimeoutMs(raw) => {
-                write!(f, "{ENV_BUSY_TIMEOUT_MS}={raw:?} is not a valid busy timeout (u64 ms)")
+                write!(
+                    f,
+                    "{ENV_BUSY_TIMEOUT_MS}={raw:?} is not a valid busy timeout (u64 ms)"
+                )
             }
             ConfigError::InvalidAuditMaxBytes(raw) => {
-                write!(f, "{ENV_AUDIT_MAX_BYTES}={raw:?} is not a valid rotation threshold (u64 bytes)")
+                write!(
+                    f,
+                    "{ENV_AUDIT_MAX_BYTES}={raw:?} is not a valid rotation threshold (u64 bytes)"
+                )
             }
             ConfigError::InvalidAuditRotateKeep(raw) => {
-                write!(f, "{ENV_AUDIT_ROTATE_KEEP}={raw:?} is not a valid retention count (u32 >= 1)")
+                write!(
+                    f,
+                    "{ENV_AUDIT_ROTATE_KEEP}={raw:?} is not a valid retention count (u32 >= 1)"
+                )
             }
             ConfigError::InvalidMmhmemFile(path) => write!(
                 f,
