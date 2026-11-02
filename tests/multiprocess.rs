@@ -80,13 +80,33 @@ impl StdioMcp {
                 .await
                 .expect("timed out waiting for a response line")
                 .expect("stdout ended before the response arrived");
-            assert!(n > 0, "stdout closed while waiting for id {id}");
+            if n == 0 {
+                self.closed_stdout(id).await;
+            }
             let msg: Value = serde_json::from_str(line.trim())
                 .unwrap_or_else(|e| panic!("non-JSON stdout frame {line:?}: {e}"));
             if msg.get("id").and_then(Value::as_u64) == Some(id) {
                 return msg;
             }
         }
+    }
+
+    async fn closed_stdout(&mut self, id: u64) -> ! {
+        let status = timeout(Duration::from_secs(2), self.child.wait()).await;
+        if status.is_err() {
+            let _ = self.child.kill().await;
+        }
+        let mut stderr = String::new();
+        if let Some(mut error_stream) = self.child.stderr.take() {
+            let _ = timeout(
+                Duration::from_secs(2),
+                error_stream.read_to_string(&mut stderr),
+            )
+            .await;
+        }
+        panic!(
+            "stdout closed while waiting for id {id}; child status: {status:?}; stderr: {stderr}"
+        );
     }
 
     async fn request(&mut self, method: &str, params: Value) -> Value {
@@ -369,4 +389,15 @@ async fn concurrent_fresh_open_is_safe() {
         obs_tables >= 6,
         "schema fully applied exactly once (no torn DDL race)"
     );
+}
+
+#[tokio::test]
+#[should_panic(expected = "cannot create data dir")]
+async fn startup_failure_includes_child_stderr() {
+    let directory = tempfile::tempdir().unwrap();
+    let unusable = directory.path().join("not-a-directory");
+    std::fs::write(&unusable, "fixture").unwrap();
+    let mut child = StdioMcp::new(&unusable).await;
+    // No write race: invalid local state fails before protocol processing.
+    child.wait_for(1).await;
 }

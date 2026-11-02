@@ -23,6 +23,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+use super::db_init;
+#[cfg(test)]
 use super::schema;
 use crate::config::{Config, DEFAULT_BUSY_TIMEOUT_MS};
 
@@ -87,13 +89,11 @@ impl Db {
     /// is set BEFORE the schema batch so a concurrent first-open by another
     /// process waits instead of failing (Req 6.1/6.2).
     fn open_at_with_timeout(db_path: &Path, busy_timeout_ms: u64) -> Result<Db> {
-        let conn = Connection::open(db_path)
+        let mut conn = Connection::open(db_path)
             .with_context(|| format!("cannot open sqlite db {}", db_path.display()))?;
         conn.busy_timeout(Duration::from_millis(busy_timeout_ms))
             .with_context(|| format!("cannot set busy timeout on {}", db_path.display()))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
-        schema::apply(&conn)?;
+        db_init::initialize(&mut conn, busy_timeout_ms)?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
         })

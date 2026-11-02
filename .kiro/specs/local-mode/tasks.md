@@ -53,6 +53,8 @@ Use whichever pattern fits the work breakdown:
 
 - [ ] 2. Core storage: multi-process access and local audit
 - [x] 2.1 Multi-process-safe store access
+  - Reopened with user approval on 2026-11-02: fix reproduced concurrent first-open SQLite initialization contention within the configured timeout, add timeout/concurrency regressions, and preserve startup stderr in the multiprocess test. This upstream repair is approved as a prerequisite to static-linux-release.
+  - Repair verified: canonical GNU tests, default/OTel clippy, formatting, and full musl tests/release passed; independent review approved. `db_init` retries only SQLITE_BUSY within one deadline and rolls back failed schema attempts. Logs: `tmp/store-startup-*.log`.
   - Make every store connection wait for a busy store up to the configurable timeout (default 5 seconds) instead of failing immediately, so multiple local processes on one machine serialize through the store engine without corruption, lost updates, or partial actions.
   - Apply the timeout at open, keep it configurable through the profile variable, and restate the storage concurrency invariant: per-process connection, lock never held across an await within a process, store-level serialization across processes, no lock files or coordination services.
   - Keep every existing public storage interface unchanged so the existing suite runs unmodified.

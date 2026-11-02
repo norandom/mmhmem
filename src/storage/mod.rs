@@ -8,4 +8,5 @@
 pub mod audit;
 pub mod audit_rotate;
 pub mod db;
+mod db_init;
 pub mod schema;
