@@ -72,7 +72,7 @@ install. Every platform ships as a release asset with a stable name, so the
 The installer needs only itself and four companion files (the playbook and the
 recap command templates) — fetched raw, still no checkout:
 
-**Linux / macOS / WSL**
+**Linux / macOS**
 
 ```sh
 # 1) binary for your platform
@@ -129,7 +129,7 @@ for Claude Code and OpenCode, writes worker settings into `.mmhmem.json`
 `--remove` / `-Remove`:
 
 ```sh
-sh deploy/install_local.sh                   # macOS / Linux / WSL
+sh deploy/install_local.sh                   # macOS / Linux
 powershell -File deploy\install_local.ps1    # Windows
 ```
 

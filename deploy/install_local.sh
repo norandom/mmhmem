@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mmhmem local-mode installer (macOS / Linux / WSL).
+# mmhmem local-mode installer (macOS / Linux).
 #
 # Registers `mmhmem stdio` as a local MCP server in the harnesses you
 # choose and installs the unified-memory playbook — or, with --remove,
