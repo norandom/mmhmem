@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Join-Path $PSScriptRoot '..'
 
 # 1. Sync sources into the WSL build VM (delete-stray so removed files vanish).
-wsl -d Debian -e bash -c "rsync -a --delete --exclude target --exclude .git --exclude data --exclude log --exclude workspace --exclude .env --exclude .kiro --exclude .opencode /mnt/d/Source/mmhmem/ ~/mmhmem-ci/"
+wsl -d Debian -e bash -c "rsync -a --delete --exclude target --exclude tmp --exclude .openidea --exclude .git --exclude data --exclude log --exclude workspace --exclude .env --exclude .kiro --exclude .opencode /mnt/d/Source/mmhmem/ ~/mmhmem-ci/"
 if ($LASTEXITCODE -ne 0) { throw "rsync into the WSL build VM failed" }
 
 # 2. Run the dagger module from the synced copy (--src .. = the synced repo

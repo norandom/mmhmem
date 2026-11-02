@@ -1,0 +1,22 @@
+{
+  "name": "mmhmem",
+  "interface": {
+    "displayName": "mmhmem Memory"
+  },
+  "plugins": [
+    {
+      "name": "unified-memory",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/norandom/mmhmem.git",
+        "path": "./plugins/unified-memory",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

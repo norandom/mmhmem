@@ -60,7 +60,7 @@ your agents and their model providers.
 **Install from the latest release** — no Rust toolchain, no `git clone`.
 Releases are cut irregularly; the latest one is always the tested variant to
 install. Every platform ships as a release asset with a stable name, so the
-`releases/latest/download/…` URLs below always fetch the newest tested build:
+`releases/latest/download/…` endpoints used by the installers fetch that build:
 
 | Platform | Asset |
 |---|---|
@@ -69,56 +69,70 @@ install. Every platform ships as a release asset with a stable name, so the
 | macOS (Intel) | `mmhmem-macos-x86_64` |
 | Windows (x64) | `mmhmem.exe` |
 
-The installer needs only itself and four companion files (the playbook and the
-recap command templates) — fetched raw, still no checkout:
+The one-liners install the latest release binary and register detected harnesses
+for your user account. No checkout is needed.
 
 **Linux / macOS**
 
 ```sh
-# 1) binary for your platform
-curl -fsSL -o mmhmem \
-  https://github.com/norandom/mmhmem/releases/latest/download/mmhmem-linux-x86_64
-# macOS Apple Silicon: .../mmhmem-macos-aarch64, Intel: .../mmhmem-macos-x86_64
-chmod +x mmhmem
-
-# 2) installer + companion files (raw fetch, no checkout)
-d=$(mktemp -d)
-b=https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy
-mkdir -p "$d/deploy/skills/unified-memory" "$d/deploy/commands/claude" \
-         "$d/deploy/commands/opencode" "$d/deploy/commands/codex"
-curl -fsSL -o "$d/deploy/install_local.sh"                  "$b/install_local.sh"
-curl -fsSL -o "$d/deploy/skills/unified-memory/SKILL.md"    "$b/skills/unified-memory/SKILL.md"
-curl -fsSL -o "$d/deploy/commands/claude/mmhmem-recap.md"   "$b/commands/claude/mmhmem-recap.md"
-curl -fsSL -o "$d/deploy/commands/opencode/mmhmem-recap.md" "$b/commands/opencode/mmhmem-recap.md"
-curl -fsSL -o "$d/deploy/commands/codex/mmhmem-recap.md"     "$b/commands/codex/mmhmem-recap.md"
-
-# 3) install for the harnesses you use (here: Claude Code, user-wide)
-sh "$d/deploy/install_local.sh" --binary "$PWD/mmhmem" --global --agent claude
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash
+# One harness only (global is still the default):
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --agent claude
+# Uninstall; keep the memory store:
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
 ```
 
-**Windows**
+Requires Bash and curl or wget; Python 3 enables automatic JSON config merges.
+The binary is installed at `~/.local/bin/mmhmem`. Linux ARM64 has no release
+asset; build from source for that architecture.
+The Linux release uses glibc; musl-only systems need a compatible build from
+source. Shell portability does not imply binary compatibility with every libc.
+
+**Windows x64 (PowerShell 5.1+)**
 
 ```powershell
-# 1) binary
-irm https://github.com/norandom/mmhmem/releases/latest/download/mmhmem.exe -OutFile mmhmem.exe
-
-# 2) installer + companion files (raw fetch, no checkout)
-$d = "$env:TEMP\mmhmem-install"
-$b = 'https://raw.githubusercontent.com/norandom/mmhmem/HEAD/deploy'
-New-Item -ItemType Directory -Force -Path "$d\deploy\skills\unified-memory",
-    "$d\deploy\commands\claude", "$d\deploy\commands\opencode", "$d\deploy\commands\codex" | Out-Null
-irm "$b/install_local.ps1" -OutFile "$d\deploy\install_local.ps1"
-irm "$b/skills/unified-memory/SKILL.md" -OutFile "$d\deploy\skills\unified-memory\SKILL.md"
-irm "$b/commands/claude/mmhmem-recap.md" -OutFile "$d\deploy\commands\claude\mmhmem-recap.md"
-irm "$b/commands/opencode/mmhmem-recap.md" -OutFile "$d\deploy\commands\opencode\mmhmem-recap.md"
-irm "$b/commands/codex/mmhmem-recap.md" -OutFile "$d\deploy\commands\codex\mmhmem-recap.md"
-
-# 3) install for the harnesses you use (here: Claude Code, user-wide)
-powershell -File "$d\deploy\install_local.ps1" -Binary "$PWD\mmhmem.exe" -Global -Agent claude
+irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 | iex
+# Save the script to pass options:
+irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 -OutFile install.ps1
+.\install.ps1 -Agent codex
+.\install.ps1 -Remove
 ```
 
-`HEAD` in the raw URLs is the repo's default branch under whatever name, so
-the fetches track it automatically.
+Windows installs at `%LOCALAPPDATA%\Programs\mmhmem\mmhmem.exe`. Close harnesses
+using mmhmem before updating a running Windows binary. Both bootstraps default
+to user-wide installation. Use `--dry-run` / `-DryRun` to preview: temporary
+helper downloads are cleaned up, and binaries and user configuration stay unchanged.
+Worker settings remain unchanged unless supplied explicitly.
+
+The binary comes from this repository's **latest GitHub release**. Installer
+and playbook files come from `HEAD`, the repository's default branch, and are
+maintained independently of the binary.
+
+### Skill marketplace
+
+The bootstraps install a standalone playbook. To manage it as a plugin instead,
+add **norandom/mmhmem** as your marketplace:
+
+```sh
+# Claude Code
+claude plugin marketplace add https://github.com/norandom/mmhmem.git
+claude plugin install unified-memory@mmhmem
+
+# Codex
+codex plugin marketplace add norandom/mmhmem
+codex plugin add unified-memory@mmhmem
+```
+
+The plugin contains the skill only. Install/connect the binary above first, or
+connect a remote mmhmem MCP server; the plugin does not start another server.
+When switching from the bootstrap's standalone skill, remove only its
+`unified-memory` directory from `~/.claude/skills` (Claude) or `~/.agents/skills`
+(Codex) to avoid duplicate discovery. Restart the harness.
+
+The repo also includes portable and Gemini/Antigravity manifests for consumers
+supporting those formats; Gemini CLI marketplace commands are not assumed.
+Other Agent Skills clients can use `deploy/skills/unified-memory/SKILL.md`.
+See [.marketplace/README.md](.marketplace/README.md) for build and release checks.
 
 Or build it yourself (`cargo build --release`) and let the installer find the
 binary in `target/release`. The installer registers every harness it finds
@@ -129,7 +143,7 @@ for Claude Code and OpenCode, writes worker settings into `.mmhmem.json`
 `--remove` / `-Remove`:
 
 ```sh
-sh deploy/install_local.sh                   # macOS / Linux
+bash deploy/install_local.sh                 # macOS / Linux
 powershell -File deploy\install_local.ps1    # Windows
 ```
 

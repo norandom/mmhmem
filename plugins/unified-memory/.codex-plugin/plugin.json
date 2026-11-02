@@ -1,0 +1,23 @@
+{
+  "name": "unified-memory",
+  "version": "0.1.0",
+  "description": "Resume work, retrieve project memory, and checkpoint handoffs when using mmhmem across coding agents.",
+  "author": {
+    "name": "norandom",
+    "url": "https://github.com/norandom"
+  },
+  "homepage": "https://github.com/norandom/mmhmem/tree/main/deploy/skills/unified-memory",
+  "repository": "https://github.com/norandom/mmhmem",
+  "keywords": ["memory","handoff","mmhmem"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "mmhmem Memory",
+    "shortDescription": "Resume work and share project memory across agents",
+    "longDescription": "Resume work, retrieve project memory, and checkpoint handoffs when using mmhmem across coding agents.",
+    "developerName": "norandom",
+    "category": "Productivity",
+    "capabilities": [],
+    "websiteURL": "https://github.com/norandom/mmhmem/tree/main/deploy/skills/unified-memory",
+    "defaultPrompt": "Use unified-memory to resume this project\u0027s working state."
+  }
+}

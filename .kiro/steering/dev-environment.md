@@ -58,6 +58,12 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
 
 ## WSL: Debian build VM only
 
+- User clarification (2026-11-02): no Git Bash on Windows. Use native
+  PowerShell for Windows work. WSL may execute scripts only through CI;
+  use `scripts/dagger-ci.ps1`, never ad hoc WSL shell validation. Shipping
+  shell scripts target ordinary Linux/macOS and must not depend on WSL,
+  Git Bash, the developer's distro, or workstation mount paths.
+
 - Distro `Debian` (default), user `mc`. Other distros exist (`Debian-MW`,
   `NixOS`, `NixOS-AI`) — do not use them for this project.
 - **Never run the mmhmem service directly inside WSL.** WSL is a build/CI VM:

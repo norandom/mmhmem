@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "unified-memory",
+      "displayName": "mmhmem Memory",
+      "shortDescription": "Resume work and share project memory across agents",
+      "category": "Productivity",
+      "keywords": ["memory", "handoff", "mmhmem"],
+      "defaultPrompt": "Use unified-memory to resume this project's working state."
+    }
+  ]
+}

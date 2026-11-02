@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "unified-memory",
+  "version": "0.1.0",
+  "description": "Resume work, retrieve project memory, and checkpoint handoffs when using mmhmem across coding agents.",
+  "author": {
+    "name": "norandom",
+    "url": "https://github.com/norandom"
+  },
+  "homepage": "https://github.com/norandom/mmhmem/tree/main/deploy/skills/unified-memory",
+  "repository": "https://github.com/norandom/mmhmem",
+  "keywords": ["memory","handoff","mmhmem"]
+}

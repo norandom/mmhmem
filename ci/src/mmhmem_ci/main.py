@@ -62,6 +62,26 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def distribution(self, src: dagger.Directory) -> str:
+        """Installer and marketplace checks on GNU and BusyBox Linux userlands."""
+        results = []
+        for image, setup in [
+            ("debian:bookworm-slim", ["sh", "-c", "apt-get update -qq && apt-get install -y -qq bash jq python3 python3-yaml"]),
+            ("alpine:3.22", ["apk", "add", "--no-cache", "bash", "jq", "python3", "py3-yaml"]),
+        ]:
+            output = await (
+                dag.container().from_(image)
+                .with_exec(setup)
+                .with_directory("/src", src)
+                .with_workdir("/src")
+                .with_exec(["bash", "scripts/test-install.sh"])
+                .with_exec(["python3", "scripts/check-marketplace.py"])
+                .stdout()
+            )
+            results.append(f"{image}: {output}")
+        return "\n".join(results)
+
+    @function
     async def fmt(self, src: dagger.Directory) -> str:
         """Blocking: rustfmt check (Req 13.5)."""
         return await rust_container(src).with_exec(["cargo", "fmt", "--check"]).stdout()
@@ -239,6 +259,7 @@ class MmhmemCi:
         """The full blocking pipeline (without the model-gated e2e suite,
         which runs as a separate workflow job with credentials)."""
         results: dict[str, str] = {
+            "distribution (Debian + Alpine)": await self.distribution(src),
             "fmt": await self.fmt(src),
             "clippy (default + otel)": await self.clippy(src),
             "test": await self.test(src),

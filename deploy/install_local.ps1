@@ -57,7 +57,8 @@ param(
     [string]$WorkerUrl,
     [string]$WorkerApiKey,
     [switch]$Remove,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,7 +66,7 @@ $ErrorActionPreference = 'Stop'
 # Interactivity: prompts only make sense on a real terminal. When stdin is
 # redirected (CI, script callers, this harness) the flagless invocation
 # must fail fast instead of hanging on Read-Host.
-$Interactive = -not [Console]::IsInputRedirected
+$Interactive = -not $NonInteractive -and -not [Console]::IsInputRedirected
 
 function Info([string]$msg) { Write-Host "[mmhmem] $msg" }
 function Die([string]$msg) { Write-Host "install_local.ps1: $msg" -ForegroundColor Red; exit 1 }
@@ -157,7 +158,7 @@ if ($Remove) {
     # Removal only needs the standard copy location (global installs).
     $Bin = $UserBin
 } elseif ($Binary) {
-    $Bin = (Resolve-Path -LiteralPath $Binary).Path
+    $Bin = if ($DryRun) { [IO.Path]::GetFullPath($Binary) } else { (Resolve-Path -LiteralPath $Binary).Path }
 } elseif (Get-Command mmhmem -ErrorAction SilentlyContinue) {
     $Bin = (Get-Command mmhmem).Source
 } elseif (Test-Path -LiteralPath (Join-Path $RepoRoot "target\release\$Exe")) {
@@ -167,7 +168,7 @@ if ($Remove) {
 }
 
 $SkillSrc = Join-Path $RepoRoot 'deploy\skills\unified-memory\SKILL.md'
-if (-not (Test-Path -LiteralPath $SkillSrc)) { Die "SKILL.md not found at $SkillSrc (run from a repo checkout)" }
+if (-not $Remove -and -not (Test-Path -LiteralPath $SkillSrc)) { Die "SKILL.md not found at $SkillSrc" }
 function Install-Skill([string]$dir) {
     if ($DryRun) { Info "[dry-run] copy SKILL.md -> $dir\SKILL.md"; return }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -449,8 +450,11 @@ if ((Want-Agent 'codex') -and $HasCodex) {
     if ($Remove) {
         Remove-CodexRegistration
         Remove-Command (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
+        Remove-Skill (Join-Path $HOME '.agents\skills\unified-memory')
+        $Registered.Add('codex') | Out-Null
     } elseif ($Global) {
         Set-CodexRegistration $Bin
+        Install-Skill (Join-Path $HOME '.agents\skills\unified-memory')
         Set-Command $CodexCommandSrc (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
         $Registered.Add('codex') | Out-Null
     } else {

@@ -1,7 +1,32 @@
 # Handoff: one-line installers (install.sh / install.ps1) + README quickstart rewrite
 
-Status: **IN PROGRESS, blocked mid-task.** This file is the source of truth
-for whoever picks this up — do not assume any other in-flight context.
+Status: **Implementation updated; distribution checks passed (2026-11-02).**
+
+## Current pickup notes (supersede the historical handoff below)
+
+- Root Windows bootstrap now exists; both bootstraps use latest-release
+  binaries and HEAD registration/playbook files. Dry runs avoid binary writes.
+- Marketplace builders adapt the sibling Skills repository's `lib.sh` and
+  `lib.ps1`, with shared templates and generated Codex/Claude/Gemini packages.
+  Canonical skill stays under deploy/skills; plugin version lives in the
+  marketplace config, not an unsupported SKILL.md frontmatter field.
+- README documents one-line installation and norandom/mmhmem as the skill
+  marketplace. Catalogs track main until a release actually includes plugins;
+  v0.2.2 has binaries but no plugin packages.
+- User clarification: **no Git Bash on Windows; no ad hoc script execution
+  in WSL.** Use native PowerShell on Windows and the canonical
+  `scripts/dagger-ci.ps1 -Call distribution` entrypoint for Linux CI. Shell
+  tests run in Debian and Alpine containers, not directly in WSL. This
+  supersedes the old WSL test commands below.
+- Native PowerShell dry-run/removal checks and Claude manifest validation
+  passed. The canonical Dagger distribution gate passed on Debian bookworm
+  and Alpine 3.22, including real-engine dry runs and marketplace parity.
+  See `validation.md` for evidence and limits. No native macOS runtime
+  installation or live marketplace installation was performed.
+- Existing unrelated `.openidea/` and root `mmhmem-linux-x86_64` are not part
+  of this change. Do not add them to a commit.
+
+## Historical handoff
 
 ## Objective (user directives, near-verbatim)
 

@@ -163,7 +163,9 @@ if [ "$REMOVE" -eq 0 ]; then
   else
     die "mmhmem binary not found — build it (cargo build --release) or pass --binary PATH"
   fi
-  BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    BIN="$(cd "$(dirname "$BIN")" && pwd)/$(basename "$BIN")"
+  fi
 else
   # Removal only needs the standard copy location (global installs).
   BIN="$HOME/.local/bin/mmhmem"
@@ -503,6 +505,11 @@ if want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then
     fi
     skill "$HOME/.claude/skills/unified-memory"
     registered="claude-code $registered"
+    if [ "$GLOBAL" -eq 1 ]; then
+      command_tmpl "$COMMAND_SRC_CLAUDE" "$HOME/.claude/commands/mmhmem-recap.md"
+    else
+      command_tmpl "$COMMAND_SRC_CLAUDE" "$PROJECT_DIR/.claude/commands/mmhmem-recap.md"
+    fi
   fi
 fi
 
@@ -560,8 +567,11 @@ if want_agent codex && [ "$HAS_CODEX" -eq 1 ]; then
   if [ "$REMOVE" -eq 1 ]; then
     remove_codex_registration
     remove_command "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
+    remove_skill "$HOME/.agents/skills/unified-memory"
+    registered="codex $registered"
   elif [ "$GLOBAL" -eq 1 ]; then
     set_codex_registration "$BIN"
+    install_skill "$HOME/.agents/skills/unified-memory"
     command_tmpl "$CODEX_COMMAND_SRC" "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
     registered="codex $registered"
   else

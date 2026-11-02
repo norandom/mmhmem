@@ -1,0 +1,23 @@
+{
+  "name": "mmhmem",
+  "owner": {
+    "name": "norandom",
+    "url": "https://github.com/norandom"
+  },
+  "metadata": {
+    "description": "Cross-agent memory playbook for mmhmem"
+  },
+  "plugins": [
+    {
+      "name": "unified-memory",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/norandom/mmhmem.git",
+        "path": "plugins/unified-memory",
+        "ref": "main"
+      },
+      "category": "Productivity",
+      "keywords": ["memory","handoff","mmhmem"]
+    }
+  ]
+}
