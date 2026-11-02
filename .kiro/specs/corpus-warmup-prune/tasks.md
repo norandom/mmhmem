@@ -132,3 +132,7 @@
   - Observable: the test passes deterministically; no change needed in the test itself
   - _Requirements: 1.2_
   - Verified: full gate green 219/219 (nextest aef79cb8, 2026-11-02)
+
+## Implementation Notes
+
+- 2026-11-02, task 6.1 fixture repair: static-release musl validation exposed `/tmp/.tmpAMZ0rq/big.rs` matching the existing case-insensitive `pam` security bypass. Non-sensitive warmup fixture roots now use unique numeric directory names, with a regression against the actual predicate. Full canonical GNU tests and independent formatting/review passed; dependent static-release validation must rerun. Production security behavior is unchanged.

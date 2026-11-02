@@ -15,7 +15,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, Command};
 
+use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN};
+use mmhmem::services::shunt::ShuntEngine;
 use mmhmem::services::shunt_cache::{cache_lookup, cache_store, query_fingerprint};
+use mmhmem::storage::audit::AuditWriter;
 use mmhmem::storage::audit::sha256_hex;
 use mmhmem::storage::db::Db;
 
@@ -216,6 +219,47 @@ async fn spawn_stub(response: &'static str, max: usize) -> (String, Arc<AtomicUs
 
 // ---------- helpers ----------
 
+fn fixture_engine(root: &Path) -> ShuntEngine {
+    let config = Config::from_env(&|key| match key {
+        ENV_TOKEN => Some("fixture".to_string()),
+        ENV_ALLOWED_ROOTS => Some(root.display().to_string()),
+        _ => None,
+    })
+    .expect("fixture config");
+    ShuntEngine::new(
+        Db::open(&root.join("store")).expect("fixture store"),
+        AuditWriter::new(root.join("audit.jsonl")),
+        config,
+        None,
+        None,
+    )
+}
+
+fn warmup_files() -> tempfile::TempDir {
+    // Random alphabetic suffixes can accidentally contain security keywords
+    // (for example `.tmpAM` contains `pam`). Numeric names cannot do that.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let prefix = format!(
+        "{}-{timestamp}-{}-",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let files = tempfile::Builder::new()
+        .prefix(&prefix)
+        .rand_bytes(0)
+        .tempdir()
+        .expect("unique numeric fixture directory");
+    assert!(
+        !fixture_engine(files.path()).is_security_critical(&files.path().canonicalize().unwrap()),
+        "the full fixture root must be non-security-sensitive"
+    );
+    files
+}
+
 fn write_lines(dir: &Path, name: &str, lines: usize) -> String {
     let path = dir.join(name);
     std::fs::write(
@@ -246,13 +290,33 @@ async fn delegated_stats_rows(db: &Db) -> i64 {
 
 // ---------- 6.1: warmup end to end ----------
 
+#[test]
+fn warmup_fixture_paths_cannot_trigger_security_bypass() {
+    // Req 1.2/1.3: fixture allocation must not randomly turn delegation
+    // and cache-hit checks into security-critical skips.
+    let files = warmup_files();
+    let engine = fixture_engine(files.path());
+    assert!(engine.is_security_critical(Path::new("/tmp/.tmpAMZ0rq/big.rs")));
+    assert!(!engine.is_security_critical(&files.path().canonicalize().unwrap().join("big.rs")));
+    assert!(
+        files
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '-')
+    );
+}
+
 #[tokio::test]
 async fn warmup_delegates_for_real_then_serves_cached() {
     // Req 1.2: a real delegation through the tool lands real cache rows
     // and real stats rows with honest worker token totals; the repeat
     // batch is a pure cache hit (Req 1.3).
     let data = tempfile::tempdir().unwrap();
-    let files = tempfile::tempdir().unwrap();
+    let files = warmup_files();
     let big = write_lines(files.path(), "big.rs", 200);
     let (url, calls) = spawn_stub(SUMMARY_CHAT, 4).await;
 
@@ -304,7 +368,7 @@ async fn warmup_mixed_batch_counts_every_outcome() {
     // Req 1.4/1.5: cached, below-threshold, security, missing, and denied
     // files are all counted in one response; nothing aborts.
     let data = tempfile::tempdir().unwrap();
-    let files = tempfile::tempdir().unwrap();
+    let files = warmup_files();
     let outside = tempfile::tempdir().unwrap();
 
     // Seed a cache row for the big file so it comes back "cached" without
@@ -362,7 +426,7 @@ async fn warmup_worker_unconfigured_error_matches_smart_read() {
     // Req 1.7: the batch aborts with the engine's own actionable error —
     // byte-identical to smart_read's wording.
     let data = tempfile::tempdir().unwrap();
-    let files = tempfile::tempdir().unwrap();
+    let files = warmup_files();
     let big = write_lines(files.path(), "big.rs", 200);
 
     let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
