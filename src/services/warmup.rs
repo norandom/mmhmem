@@ -124,66 +124,88 @@ pub async fn run_warmup(
             offset: None,
             limit: None,
         };
-        match engine.smart_read(&req).await {
-            // Not reachable in warmup (no offset/limit), counted defensively.
-            Ok(ReadOutcome::Targeted { .. }) => {
+        // Req 1.7: worker-unconfigured aborts the whole batch with the
+        // engine's own actionable error (smart_read parity).
+        if let Err(e @ ShuntError::WorkerNotConfigured) =
+            fold_outcome(&mut report, path, engine.smart_read(&req).await)
+        {
+            return Err(WarmupError::Engine(e));
+        }
+    }
+    write_batch_event(audit, ctx, paths.len(), &report);
+    Ok(report)
+}
+
+/// Folds one file's real smart_read outcome into the report (Req 1.4/1.5):
+/// every non-delegated, non-cached outcome also records a per-file note.
+/// Only `WorkerNotConfigured` is returned as an error (whole-batch abort);
+/// everything else is counted.
+fn fold_outcome(
+    report: &mut WarmupReport,
+    path: &str,
+    outcome: Result<ReadOutcome, ShuntError>,
+) -> Result<(), ShuntError> {
+    match outcome {
+        // Not reachable in warmup (no offset/limit), counted defensively.
+        Ok(ReadOutcome::Targeted { .. }) => {
+            report.skipped_below_threshold += 1;
+            report
+                .notes
+                .push(format!("{path}: targeted read (unexpected in warmup)"));
+        }
+        Ok(ReadOutcome::Direct {
+            reason,
+            total_lines,
+            ..
+        }) => match reason {
+            BypassReason::SecurityCritical => {
+                report.skipped_security += 1;
+                report
+                    .notes
+                    .push(format!("{path}: security-critical pattern (direct read)"));
+            }
+            BypassReason::BelowThreshold => {
                 report.skipped_below_threshold += 1;
                 report
                     .notes
-                    .push(format!("{path}: targeted read (unexpected in warmup)"));
+                    .push(format!("{path}: below threshold ({total_lines} lines)"));
             }
-            Ok(ReadOutcome::Direct {
-                reason,
-                total_lines,
-                ..
-            }) => match reason {
-                BypassReason::SecurityCritical => {
-                    report.skipped_security += 1;
-                    report
-                        .notes
-                        .push(format!("{path}: security-critical pattern (direct read)"));
-                }
-                BypassReason::BelowThreshold => {
-                    report.skipped_below_threshold += 1;
-                    report
-                        .notes
-                        .push(format!("{path}: below threshold ({total_lines} lines)"));
-                }
-            },
-            Ok(ReadOutcome::Cached { .. }) => report.cached += 1,
-            Ok(ReadOutcome::Shunted { usage, .. }) => {
-                report.delegated += 1;
-                report.worker_prompt_tokens += usage.prompt_tokens;
-                report.worker_completion_tokens += usage.completion_tokens;
-            }
-            Err(ShuntError::FileNotFound(_)) | Err(ShuntError::Io(_)) => {
-                report.missing += 1;
-                report.notes.push(format!("{path}: missing or unreadable"));
-            }
-            Err(ShuntError::OutsideAllowedRoots(_)) => {
-                report.denied += 1;
-                report.notes.push(format!("{path}: outside allowed roots"));
-            }
-            Err(ShuntError::Worker(e)) => {
-                report.failed += 1;
-                let reason: String = e.chars().take(120).collect();
-                report
-                    .notes
-                    .push(format!("{path}: worker call failed ({reason})"));
-            }
-            // Req 1.7: worker-unconfigured aborts the whole batch with the
-            // engine's own actionable error (smart_read parity).
-            Err(e @ ShuntError::WorkerNotConfigured) => return Err(WarmupError::Engine(e)),
+        },
+        Ok(ReadOutcome::Cached { .. }) => report.cached += 1,
+        Ok(ReadOutcome::Shunted { usage, .. }) => {
+            report.delegated += 1;
+            report.worker_prompt_tokens += usage.prompt_tokens;
+            report.worker_completion_tokens += usage.completion_tokens;
         }
+        Err(ShuntError::FileNotFound(_)) | Err(ShuntError::Io(_)) => {
+            report.missing += 1;
+            report.notes.push(format!("{path}: missing or unreadable"));
+        }
+        Err(ShuntError::OutsideAllowedRoots(_)) => {
+            report.denied += 1;
+            report.notes.push(format!("{path}: outside allowed roots"));
+        }
+        Err(ShuntError::Worker(e)) => {
+            report.failed += 1;
+            let reason: String = e.chars().take(120).collect();
+            report
+                .notes
+                .push(format!("{path}: worker call failed ({reason})"));
+        }
+        Err(e @ ShuntError::WorkerNotConfigured) => return Err(e),
     }
-    // Req 1.8: one batch summary event (per-file events came from the
-    // reused engine path). Best-effort, like every audit write.
+    Ok(())
+}
+
+/// Req 1.8: one batch summary event (per-file events came from the reused
+/// engine path). Best-effort, like every audit write.
+fn write_batch_event(audit: &AuditWriter, ctx: CallCtx<'_>, paths: usize, report: &WarmupReport) {
     let _ = audit.write_event(
         AuditEventType::Warmup,
         ctx.harness,
         ctx.project,
         serde_json::json!({
-            "paths": paths.len(),
+            "paths": paths,
             "delegated": report.delegated,
             "cached": report.cached,
             "skipped_below_threshold": report.skipped_below_threshold,
@@ -195,5 +217,4 @@ pub async fn run_warmup(
             "worker_completion_tokens": report.worker_completion_tokens,
         }),
     );
-    Ok(report)
 }
