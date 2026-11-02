@@ -12,7 +12,7 @@ marketplace packages remain outside the change boundary.
 
 ## Tasks
 
-- [ ] 1. Establish build and probe prerequisites
+- [x] 1. Establish build and probe prerequisites
 - [x] 1.1 Establish the isolated musl toolchain
   - Select the exact approved compiler, install the musl Rust target and native C compiler, and isolate target flags and build caches from GNU/OTel builds.
   - Retain bounded build jobs and disabled incremental compilation; record compiler, linker and image identity.
@@ -21,7 +21,7 @@ marketplace packages remain outside the change boundary.
   - _Boundary: Static builder_
   - _Requirements: 1.1, 3.1, 3.2, 3.6, 3.7_
 
-- [ ] 1.2 Establish runtime and evidence test infrastructure
+- [x] 1.2 Establish runtime and evidence test infrastructure
   - Prepare the approved Debian and Alpine images, pristine startup stages, a scratch startup stage, and instrumented probe stages.
   - Supply readelf, Python probe tooling, temporary certificate generation and CA-store setup inside CI; separate these from application runtime prerequisites.
   - Establish isolated writable stores, bounded child-process execution, captured diagnostics, report destinations and fresh validation IDs.
@@ -180,4 +180,5 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 1.2: Dagger caches whole function results; validation IDs must be explicit host-generated inputs, propagated through every startup/probe/certificate stage. Independent fresh `runtime-setup` passed after resolving this review finding. Shared synthetic bundle/case fixtures live in `ci/scripts/release_fixtures.py` and `release_support.py`.
 - Task 1.1: Debian musl-gcc injects a dynamic interpreter for static PIE; retain the musl-only `-Wl,--no-dynamic-linker` flag. Canonical `static-setup` and existing deterministic `test` passed independent review (logs under `tmp/static-setup-review*.log`).

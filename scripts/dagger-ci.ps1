@@ -26,6 +26,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Generate freshness on the native host: Dagger caches function results, so
+# randomness inside a function cannot invalidate a previous validation run.
+if ($Call -eq 'runtime-setup') {
+    if (($ExtraArgs -join ' ') -match '--validation-id(?:=|\s|$)') {
+        throw 'runtime-setup validation IDs are generated fresh by this wrapper'
+    }
+    $validationId = 'runtime-setup-' + [Guid]::NewGuid().ToString('N')
+    $ExtraArgs = @($ExtraArgs) + @('--validation-id', $validationId)
+}
 $wslRepo = (& wsl -d Debian -e wslpath -a -u $repo).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $wslRepo.StartsWith('/')) { throw "Cannot resolve repository path for CI sync" }
 if ($wslRepo -match "[^a-zA-Z0-9_./:-]") { throw "Repository path contains characters unsupported by CI sync" }
