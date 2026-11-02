@@ -23,6 +23,16 @@ service architecture or introduce a second Linux build pipeline.
 
 ## Boundary Commitments
 
+### User Scope Amendment (2026-11-02)
+
+TLS configuration/termination belongs to the administrator's external reverse
+proxy or load balancer and is outside this implementation. TLS-specific
+worker validation is omitted from the required release runtime matrix;
+`tls_trusted` and `tls_untrusted` are not required bundle cases. Existing
+application TLS policy remains unchanged. The previously built HTTPS fixture
+is an optional standalone CI utility, not a release-gate dependency. Original
+TLS-specific design text below records the superseded plan.
+
 ### This Spec Owns
 - The plain Linux musl build and its target-specific cache/configuration.
 - Binary inspection, black-box artifact probes and verified bundle metadata.

@@ -14,7 +14,7 @@ ARTIFACT_NAME = "mmhmem-linux-x86_64"
 RUNTIME_NAMES = ("debian-bookworm", "alpine-3.22")
 REQUIRED_CASES = (
     "pristine_startup", "version", "mcp_initialize", "tools_list", "persistence",
-    "stats_text", "stats_json", "server_health", "server_auth", "tls_trusted", "tls_untrusted",
+    "stats_text", "stats_json", "server_health", "server_auth",
 )
 
 

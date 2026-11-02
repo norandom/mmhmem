@@ -16,6 +16,13 @@ workflow, with its requirements, design and tasks approval gates.
 
 ## Boundary Context
 
+**User scope amendment (2026-11-02):** TLS is administrator-owned and
+terminated by an external reverse proxy/load balancer. TLS configuration
+and TLS-specific validation are excluded from this implementation. Criteria
+2.6 and 2.7 below are retained as historical scope, not release acceptance
+gates. Existing outbound HTTPS verification behavior remains unchanged;
+no TLS policy or application TLS code is modified.
+
 - **In scope:** the plain Linux x86_64 release binary, its build and runtime
   verification, release-asset delivery, and installer/documentation transition.
 - **Out of scope:** Linux ARM64 or other new architectures, changes to memory

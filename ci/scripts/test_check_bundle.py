@@ -83,8 +83,8 @@ class BundleTests(unittest.TestCase):
                    lambda m: m["runtimes"].append(m["runtimes"][0]),
                    lambda m: m["runtimes"][0].update(architecture="aarch64"),
                    lambda m: m["runtimes"][0].update(artifact_sha256="e" * 64),
-                   lambda m: m["runtimes"][0]["cases"].pop("tls_untrusted"),
-                   lambda m: m["runtimes"][0]["cases"]["tls_trusted"].update(status="failed"),
+            lambda m: m["runtimes"][0]["cases"].pop("server_auth"),
+            lambda m: m["runtimes"][0]["cases"]["server_health"].update(status="failed"),
                    lambda m: m["runtimes"][0]["cases"]["persistence"].update(error="lost state")]
         for change in changes:
             with self.subTest(change=change):
@@ -133,7 +133,7 @@ class BundleTests(unittest.TestCase):
             ("reports/target-suite.json", lambda r: r.update(optional_telemetry=True)),
             ("reports/target-suite.json", lambda r: r["checks"]["tests"].update(status="failed")),
             ("reports/target-suite.json", lambda r: r["artifact"].update(sha256="f" * 64)),
-            ("reports/alpine-3.22.json", lambda r: r["cases"]["tls_untrusted"].update(status="failed")),
+            ("reports/alpine-3.22.json", lambda r: r["cases"]["server_auth"].update(status="failed")),
         ]
         for name, change in changes:
             original = (self.root / name).read_text()

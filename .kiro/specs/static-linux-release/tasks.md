@@ -12,6 +12,12 @@ marketplace packages remain outside the change boundary.
 
 ## Tasks
 
+Scope amendment approved by user direction on 2026-11-02: TLS is managed by
+the server administrator through an external reverse proxy/load balancer.
+TLS configuration and TLS-specific acceptance tests are outside this release
+implementation. Task 3.3 is withdrawn; task 2.3 records already completed
+optional fixture work and is not a required release-gate dependency.
+
 - [x] 1. Establish build and probe prerequisites
 - [x] 1.1 Establish the isolated musl toolchain
   - Select the exact approved compiler, install the musl Rust target and native C compiler, and isolate target flags and build caches from GNU/OTel builds.
@@ -68,7 +74,7 @@ marketplace packages remain outside the change boundary.
   - _Depends: 1.2_
   - _Requirements: 3.4, 3.5, 4.1_
 
-- [ ] 3. Exercise the release file through public application interfaces
+- [x] 3. Exercise the release file through public application interfaces
 - [x] 3.1 Verify local MCP behavior and persistent state
   - Upstream local-mode task 2.1 repair approved, implemented and independently reviewed; fresh downstream local-probe verification is required before completion.
   - Accept an explicit candidate path and expected checksum; do not select Cargo's implicit test executable.
@@ -87,7 +93,7 @@ marketplace packages remain outside the change boundary.
   - _Boundary: Artifact verifier application probe_
   - _Requirements: 2.1, 2.5, 3.4_
 
-- [ ] 3.3 Verify hostname resolution and TLS trust through the candidate
+- [-] 3.3 Withdrawn: TLS-specific candidate verification (user scope amendment)
   - Connect the worker fixture by its Dagger service hostname and install only the intended test CA through normal runtime trust-store mechanisms.
   - Trigger actual worker-backed reads using fresh stores and non-security-sensitive files exceeding the shunt threshold.
   - Require the unique delegated response and matching receipt for the trusted case; prevent cache hits or raw-read fallback from satisfying success.
@@ -105,7 +111,7 @@ marketplace packages remain outside the change boundary.
   - Preserve failed diagnostics without creating a success or publishable bundle.
   - Done when the gate returns a complete verified bundle on success and fails closed after an injected verification error.
   - _Boundary: Integration — static builder, artifact verifier, bundle exporter_
-  - _Depends: 2.1, 2.2, 2.4, 3.1, 3.2, 3.3_
+  - _Depends: 2.1, 2.2, 2.4, 3.1, 3.2_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 3.3, 3.4, 3.5_
 
 - [ ] 4.2 Export verified Linux artifacts locally and from hosted CI
@@ -181,6 +187,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- User scope amendment: TLS-specific task 3.3 was withdrawn; partial work is preserved in ignored `tmp/retired-tls-task/`. Required bundle cases exclude TLS; the same missing/failed-case negative assertions now exercise server cases. Canonical bundle-check passed after this scope change (`tmp/bundle-check-scoped-final.log`). Existing standalone HTTPS fixture remains optional; production TLS behavior is untouched.
 - Task 3.2: Independent `server-probe` passed health/authentication/Streamable HTTP initialization and graceful SIGTERM shutdown on both userlands (`tmp/server-probe-review-deadline.log`). SSE includes an empty data/id/retry preamble; skip empty events. Socket inactivity timeouts are insufficient: the probe uses a Linux main-thread absolute HTTP deadline, verified with slow headers/body and cleanup regressions.
 - Task 3.1 resumed after approved upstream repair `8db5f54`: fresh independent `local-probe` passed component tests, musl build/ELF checks and explicit-candidate local cases on Debian/Alpine (`tmp/local-probe-review.log`). Current candidate SHA-256 is `fa3bffb60baf890e224a71371e969b513e742dca647d56d84b217e09867c96fc`. Statistics assert populated recorded-session rows and existing typed zero-valued aggregates, not invented nonzero savings. Final bundle inspection must use the release basename.
 - Task 3.1: Earlier explicit-candidate local probes passed Debian and Alpine; final verification exposed a genuine upstream concurrent-first-open storage failure. Independent debug reproduced child exit 1 (`database is locked: Error code 5`) within 0.5 seconds with a 5000 ms timeout. Debug returned `STOP_FOR_HUMAN`; no production workaround, test filtering or acceptance retry was applied. Partial probe changes remain uncommitted pending upstream repair and fresh review. Evidence: `tmp/local-probe-final.log`, `tmp/diagnose-fresh-open.log`; scope report: `implementation-blocker.md`.
