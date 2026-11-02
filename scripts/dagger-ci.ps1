@@ -42,7 +42,7 @@ function Invoke-MmhmemCi {
     }
     if ($ExportPath -and $Call -notin @('all', 'static-release')) { throw 'ExportPath requires all or static-release' }
     $destination = Get-CiExportPath $ExportPath
-    $provenanceCalls = @('all', 'release', 'deploy-artifacts', 'static-gate', 'static-release')
+    $provenanceCalls = @('all', 'release', 'deploy-artifacts', 'static-gate', 'static-release', 'static-installer')
     $freshCalls = @('runtime-setup', 'static-build', 'static-inspection', 'bundle-check', 'local-probe', 'server-probe', 'static-gate-tests') + $provenanceCalls
     $parameters = @($ExtraArgs)
     if ($Call -in $provenanceCalls) {

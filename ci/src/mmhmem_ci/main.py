@@ -62,6 +62,14 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def static_installer(self, src: dagger.Directory, revision: str, validation_id: str,
+                               source_clean: bool = False) -> str:
+        """Install/update the verified candidate in isolated supported userlands."""
+        from .static_release import installer_check
+
+        return await installer_check(src, revision, validation_id, source_clean)
+
+    @function
     async def static_release(self, src: dagger.Directory, revision: str, validation_id: str,
                              source_clean: bool = False) -> dagger.Directory:
         """Return only the same-artifact verified Linux bundle."""
@@ -338,6 +346,7 @@ class MmhmemCi:
         manifest = await bundle.file("verification.json").contents()
         results: dict[str, str] = {
             "static_release (musl + same-artifact runtime gate)": manifest,
+            "static_installer (verified candidate install + update)": await self.static_installer(src, revision, validation_id, source_clean),
             "distribution (Debian + Alpine)": await self.distribution(src),
             "fmt": await self.fmt(src),
             "clippy (default + otel)": await self.clippy(src),

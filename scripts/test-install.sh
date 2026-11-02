@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# Offline platform simulation; never executes an mmhmem binary.
+# Offline platform simulation; optional verified candidate runs inside CI only.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
+candidate=""; expected_sha256=""; report=""
+if [ "$#" -gt 0 ]; then
+  [ "$#" -eq 6 ] && [ "$1" = --candidate ] && [ "$3" = --expected-sha256 ] && [ "$5" = --report ] && [ -n "$2" ] && [ -n "$4" ] && [ -n "$6" ] || {
+    echo 'usage: test-install.sh [--candidate PATH --expected-sha256 HEX --report PATH]' >&2; exit 2;
+  }
+  candidate="$2"; expected_sha256="$4"; report="$6"
+fi
 mkdir -p "$root/tmp"
 scratch="$(mktemp -d "$root/tmp/install-shell-tests.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
@@ -85,3 +92,6 @@ env HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$root/deploy/install_lo
 grep -q 'local mode removed' "$scratch/engine.log"
 [ ! -d "$scratch/home/.agents" ]
 echo 'PASS: Bash syntax, dry run, global default, Linux/Apple assets, platform refusals, failed-download preservation, removal, cleanup'
+if [ -n "$candidate" ]; then
+  python3 "$root/ci/scripts/probe_install.py" --binary "$candidate" --expected-sha256 "$expected_sha256" --source "$root" --report "$report"
+fi

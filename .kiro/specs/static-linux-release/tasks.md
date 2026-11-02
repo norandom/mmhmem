@@ -143,7 +143,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Requirements: 4.1, 4.6_
 
 - [ ] 6. Validate installation compatibility and release guidance
-- [ ] 6.1 Preserve installer behavior with the static candidate
+- [x] 6.1 Preserve installer behavior with the static candidate
   - Exercise isolated first install and update with existing memory and worker-setting fixtures, using the candidate supplied by the verified bundle.
   - Check stable latest-release URL/asset selection, dry-run no-op behavior, failed-download preservation and unsupported-platform refusal.
   - Preserve existing native Windows tests and verify Windows/macOS names and marketplace paths are unaffected.
@@ -187,6 +187,7 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Task 6.1: Independent review accepted actual verified-candidate first install/update on Debian/Alpine, public-MCP memory recovery, worker/harness preservation, dry-run/failure/platform checks and compiler independence (`tmp/static-installer-final.log`). Native Windows installer/wrapper regressions passed. Production installers are unchanged. A test-only attempt to truncate an executed inode caused ETXTBSY; fixture construction now uses atomic replacement, matching installer behavior. Canonical `all` includes `static-installer`.
 - Task 5.2: Independent PS5.1 delivery tests passed (`tmp/publisher-delivery-review.log`), including exact three-file download equality, identical/partial/lost-ack retries, draft/tag races, local mutations and corrupt downloads. Default publisher delivers; `-ValidateOnly` is read-only. No real release upload/publication was invoked. Separately, real hosted run 41495286781 produced a clean publishable bundle validated read-only (`tmp/hosted-bundle-validation.log`).
 - Task 5.1: Native PS5.1 provenance and strict bundle validation passed independent offline review (two valid cases, 43 rejection cases; `tmp/publisher-provenance-review.log`). Actual exported report shape validated without modifying the dirty local bundle. `Invoke-LinuxReleaseValidation` returns delivery context/file hashes; task 5.2 must recheck draft state immediately before writes. Focused native helper avoids a Python prerequisite.
 - Task 4.2: Native guarded export and full canonical `all` plus same-ID follow-up export passed (`tmp/static-release-all-4.2.log`, bundle `tmp/static-release-all-4.2/`); independent native wrapper review passed. Hosted artifact convention is `linux-static-<revision>-<run_id>-<run_attempt>`, validation ID `ci-<run_id>-<run_attempt>`. Local wrapper captures provenance before fixed positional CI transport and only exports into fresh non-reparse repo tmp directories. File-returning release/deploy consumers now use verified bytes.

@@ -16,6 +16,27 @@ RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alp
 ARTIFACT_NAME = "mmhmem-linux-x86_64"
 
 
+async def installer_check(src: dagger.Directory, revision: str, validation_id: str,
+                          source_clean: bool = False) -> str:
+    tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
+                   .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_install.py", "-v"]).stderr())
+    bundle = await verified_bundle(src, revision, validation_id, source_clean)
+    manifest = json.loads(await bundle.file("verification.json").contents())
+    results = []
+    for name in RUNTIME_IMAGES:
+        runtime = instrumented_runtime(name, src, validation_id)
+        setup = (["apt-get", "install", "-y", "-qq", "bash", "jq"] if name == "debian-bookworm"
+                 else ["apk", "add", "--no-cache", "bash", "jq"])
+        checked = (runtime.with_exec(setup)
+                   .with_file("/verified-candidate", bundle.file(ARTIFACT_NAME), permissions=0o755)
+                   .with_exec(["bash", "scripts/test-install.sh", "--candidate", "/verified-candidate",
+                               "--expected-sha256", manifest["artifact"]["sha256"], "--report", "/reports/installer.json"]))
+        await checked.stdout()
+        results.append({"name": name, "installer": json.loads(await checked.file("/reports/installer.json").contents())})
+    return json.dumps({"status": "passed", "revision": revision, "validation_id": validation_id,
+                       "artifact": manifest["artifact"], "tests": tests, "runtimes": results}, indent=2)
+
+
 async def gate_tests(src: dagger.Directory, validation_id: str) -> str:
     return await (instrumented_runtime("debian-bookworm", src, validation_id)
                   .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_assemble_bundle.py", "-v"]).stderr())
