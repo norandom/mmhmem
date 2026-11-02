@@ -21,7 +21,7 @@ $stage = Join-Path $tempBase ('mmhmem-install-' + [Guid]::NewGuid().ToString('N'
 try {
     $files = @('install_local.ps1')
     if (-not $Remove) {
-        $files += 'skills/unified-memory/SKILL.md', 'commands/claude/mmhmem-recap.md',
+        $files += 'install_binary.ps1', 'skills/unified-memory/SKILL.md', 'commands/claude/mmhmem-recap.md',
             'commands/opencode/mmhmem-recap.md', 'commands/codex/mmhmem-recap.md'
     }
     foreach ($file in $files) {
@@ -35,9 +35,8 @@ try {
             $download = Join-Path $stage 'mmhmem.exe'
             Invoke-WebRequest -UseBasicParsing $release -OutFile $download
             if ((Get-Item -LiteralPath $download).Length -eq 0) { throw 'Empty binary download.' }
-            New-Item -ItemType Directory -Force -Path (Split-Path $binary) | Out-Null
-            try { Move-Item -LiteralPath $download -Destination $binary -Force }
-            catch { throw "Cannot replace $binary. Close mmhmem harnesses and re-run. $_" }
+            . (Join-Path $stage 'deploy/install_binary.ps1')
+            Install-MmhmemBinary -Source $download -Destination $binary
         }
     }
     $engineArgs = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $stage 'deploy/install_local.ps1'),

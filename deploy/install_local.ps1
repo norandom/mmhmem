@@ -479,8 +479,8 @@ if ($Global) {
     } elseif ($Bin -ne $UserBin) {
         if ($DryRun) { Info "[dry-run] copy $Bin -> $UserBin" }
         else {
-            New-Item -ItemType Directory -Path $UserBinDir -Force | Out-Null
-            Copy-Item -LiteralPath $Bin -Destination $UserBin -Force
+            . (Join-Path $PSScriptRoot 'install_binary.ps1')
+            Install-MmhmemBinary -Source $Bin -Destination $UserBin
         }
     }
 }

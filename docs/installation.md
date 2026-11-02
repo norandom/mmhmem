@@ -6,6 +6,12 @@ companions from the repository's default branch. Re-running updates the
 binary while preserving memory and worker settings unless you explicitly
 provide new settings.
 
+Windows updates can run while agents remain open. The installer renames the
+old executable and puts the new version at the registered path. Existing
+processes keep their current version until restarted; new processes use the
+updated version. Old executables still in use are retained and cleaned up by
+a later install after those processes exit.
+
 | Platform | Release asset | Binary location | Memory location |
 |---|---|---|---|
 | Linux x86_64 | `mmhmem-linux-x86_64` | `~/.local/bin/mmhmem` | `~/.local/share/mmhmem` |

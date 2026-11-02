@@ -1,7 +1,7 @@
 # Offline regression checks: bootstrap downloads are replaced with local fixtures.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$scratch = Join-Path $repo 'tmp/install-tests'
+$scratch = Join-Path $repo ('tmp/install-tests-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $scratch | Out-Null
 $originalTemp = $env:TEMP
 $originalTmp = $env:TMP
@@ -12,15 +12,19 @@ $env:PATH = $scratch + ';' + $env:PATH
 $env:TEMP = $scratch
 $env:TMP = $scratch
 $env:LOCALAPPDATA = Join-Path $scratch 'profile'
-$script:downloadBinary = $false
+$fixture = @{ DownloadBinary = $false; Install = $false }
 function Invoke-WebRequest {
     param([switch]$UseBasicParsing, [Parameter(Position=0)][string]$Uri, [string]$OutFile)
     if ($Uri -like '*/releases/latest/download/mmhmem.exe') {
-        $script:downloadBinary = $true
+        $fixture.DownloadBinary = $true
+        if ($fixture.Install) { [IO.File]::WriteAllText($OutFile, 'release fixture'); return }
         throw 'Dry run attempted to download a binary'
     }
     $relative = ($Uri -split '/HEAD/')[1]
     if (-not $relative) { throw "Unexpected URL: $Uri" }
+    if ($fixture.Install -and $relative -eq 'deploy/install_local.ps1') {
+        [IO.File]::WriteAllText($OutFile, 'exit 0'); return
+    }
     Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $OutFile
 }
 try {
@@ -28,16 +32,24 @@ try {
     if ($output -notmatch 'copy SKILL.md' -or $output -notmatch 'mmhmem-recap' -or $output -notmatch 'config.toml') {
         throw "Dry run missed registration, skill or recap: $output"
     }
-    if ($script:downloadBinary -or (Test-Path $env:LOCALAPPDATA)) { throw 'Dry run wrote installation state' }
+    if ($fixture.DownloadBinary -or (Test-Path $env:LOCALAPPDATA)) { throw 'Dry run wrote installation state' }
     $output = & (Join-Path $repo 'install.ps1') -Remove -DryRun -Agent codex 6>&1 | Out-String
     if ($output -notmatch 'local mode removed' -or $output -notmatch 'unified-memory') { throw "Removal failed: $output" }
+    # Actual bootstrap writes, isolated from the user's harness registrations.
+    $fixture.Install = $true
+    & (Join-Path $repo 'install.ps1') -Agent codex
+    $installed = Join-Path $env:LOCALAPPDATA 'Programs/mmhmem/mmhmem.exe'
+    [IO.File]::WriteAllText($installed, 'old version')
+    & (Join-Path $repo 'install.ps1') -Agent codex
+    if ([IO.File]::ReadAllText($installed) -ne 'release fixture') { throw 'Bootstrap did not replace existing binary' }
     if (@(Get-ChildItem $scratch -Directory -Filter 'mmhmem-install-*').Count -ne 0) { throw 'Bootstrap leaked staging files' }
     $tokens = $null; $errors = $null
-    foreach ($file in @('install.ps1','deploy/install_local.ps1','lib.ps1','build-marketplace.ps1')) {
+    foreach ($file in @('install.ps1','deploy/install_local.ps1','deploy/install_binary.ps1','lib.ps1','build-marketplace.ps1')) {
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file), [ref]$tokens, [ref]$errors) | Out-Null
         if ($errors.Count) { throw "$file parse errors: $errors" }
     }
     Write-Host 'PASS: PowerShell syntax, checkout-free dry run, Codex skill/recap, removal without companions, staging cleanup'
+    & (Join-Path $PSScriptRoot 'test-install-binary.ps1')
 } finally {
     $env:TEMP = $originalTemp
     $env:TMP = $originalTmp
