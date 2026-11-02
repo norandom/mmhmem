@@ -104,7 +104,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Requirements: 2.1, 2.6, 2.7, 3.4_
 
 - [ ] 4. Integrate verification with the canonical release pipeline
-- [ ] 4.1 Gate bundle creation on same-artifact verification
+- [x] 4.1 Gate bundle creation on same-artifact verification
   - Integrate the builder, ELF inspector, pristine/scratch startup checks and every application probe into the canonical Dagger gate.
   - Run both runtime images against the same candidate bytes and verify checksums before and after their probes.
   - Assemble the bundle only after target regression, linkage and all runtime cases pass; run the schema checker on the final result.
@@ -187,6 +187,7 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Task 4.1: `verified_bundle(src, revision, validation_id, source_clean=False)` awaits final schema verification before returning a Directory; public `static_release` delegates to it. Canonical `static-gate` passed actual candidate linkage, scratch/pristine startup, both non-TLS runtime matrices and six assembly tests including real-candidate failure injection (`tmp/static-gate-green.log`); independent review approved. Local dirty results are explicitly non-publishable.
 - User scope amendment: TLS-specific task 3.3 was withdrawn; partial work is preserved in ignored `tmp/retired-tls-task/`. Required bundle cases exclude TLS; the same missing/failed-case negative assertions now exercise server cases. Canonical bundle-check passed after this scope change (`tmp/bundle-check-scoped-final.log`). Existing standalone HTTPS fixture remains optional; production TLS behavior is untouched.
 - Task 3.2: Independent `server-probe` passed health/authentication/Streamable HTTP initialization and graceful SIGTERM shutdown on both userlands (`tmp/server-probe-review-deadline.log`). SSE includes an empty data/id/retry preamble; skip empty events. Socket inactivity timeouts are insufficient: the probe uses a Linux main-thread absolute HTTP deadline, verified with slow headers/body and cleanup regressions.
 - Task 3.1 resumed after approved upstream repair `8db5f54`: fresh independent `local-probe` passed component tests, musl build/ELF checks and explicit-candidate local cases on Debian/Alpine (`tmp/local-probe-review.log`). Current candidate SHA-256 is `fa3bffb60baf890e224a71371e969b513e742dca647d56d84b217e09867c96fc`. Statistics assert populated recorded-session rows and existing typed zero-valued aggregates, not invented nonzero savings. Final bundle inspection must use the release basename.

@@ -62,6 +62,29 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def static_release(self, src: dagger.Directory, revision: str, validation_id: str,
+                             source_clean: bool = False) -> dagger.Directory:
+        """Return only the same-artifact verified Linux bundle."""
+        from .static_release import verified_bundle
+
+        return await verified_bundle(src, revision, validation_id, source_clean)
+
+    @function
+    async def static_gate(self, src: dagger.Directory, revision: str, validation_id: str,
+                          source_clean: bool = False) -> str:
+        """Exercise successful bundle assembly and fail-closed error injection."""
+        from .static_release import static_gate_check
+
+        return await static_gate_check(src, revision, validation_id, source_clean)
+
+    @function
+    async def static_gate_tests(self, src: dagger.Directory, validation_id: str) -> str:
+        """Check fail-closed bundle assembly before invoking the integrated gate."""
+        from .static_release import gate_tests
+
+        return await gate_tests(src, validation_id)
+
+    @function
     async def server_probe(self, src: dagger.Directory, validation_id: str) -> str:
         """Check candidate server startup, health and bearer authentication."""
         from .static_release import server_probe_check

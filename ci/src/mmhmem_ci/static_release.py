@@ -1,5 +1,6 @@
 """Isolated static Linux build infrastructure, shared by release CI gates."""
 
+import asyncio
 import json
 import re
 
@@ -12,6 +13,77 @@ TARGET = "x86_64-unknown-linux-musl"
 
 
 RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alpine:3.22"}
+ARTIFACT_NAME = "mmhmem-linux-x86_64"
+
+
+async def gate_tests(src: dagger.Directory, validation_id: str) -> str:
+    return await (instrumented_runtime("debian-bookworm", src, validation_id)
+                  .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_assemble_bundle.py", "-v"]).stderr())
+
+
+async def verified_bundle(src: dagger.Directory, revision: str, validation_id: str,
+                          source_clean: bool = False) -> dagger.Directory:
+    """One candidate feeds every required check; only final checked bytes escape."""
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("revision must be a full lowercase Git commit ID")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    if type(source_clean) is not bool:
+        raise ValueError("source_clean must be an explicit boolean")
+    await gate_tests(src, validation_id)
+    binary, build_reports, build = await build_candidate(src, validation_id)
+    checksum, version = build["artifact"]["sha256"], build["package_version"]
+    # Linkage evidence must retain the release basename, not /candidate.
+    inspected = (instrumented_runtime("debian-bookworm", src, validation_id)
+                 .with_directory("/bundle/reports", build_reports)
+                 .with_file(f"/bundle/{ARTIFACT_NAME}", binary, permissions=0o755)
+                 .with_exec(["python3", "ci/scripts/inspect_static.py", "--binary", f"/bundle/{ARTIFACT_NAME}",
+                             "--expected-sha256", checksum, "--report", "/bundle/reports/linkage.json"]))
+    await inspected.stdout()
+    bundle = inspected.directory("/bundle")
+    startup = await asyncio.wait_for(startup_stage(binary).with_env_variable("VALIDATION_ID", validation_id).with_exec(["/candidate", "--version"]).stdout(), timeout=30)
+    if startup.strip() != f"mmhmem {version}":
+        raise ValueError(f"scratch startup version mismatch: {startup!r}")
+    scratch = {"status": "passed", "validation_id": validation_id, "artifact_sha256": checksum,
+               "reported_version": startup.strip()}
+    bundle = bundle.with_new_file("reports/scratch.json", json.dumps(scratch, indent=2) + "\n")
+    for name in RUNTIME_IMAGES:
+        pristine = await asyncio.wait_for(startup_stage(binary, name).with_env_variable("VALIDATION_ID", validation_id).with_exec(["/candidate", "--version"]).stdout(), timeout=30)
+        if pristine.strip() != startup.strip():
+            raise ValueError(f"{name} pristine startup version mismatch: {pristine!r}")
+        runtime = (instrumented_runtime(name, src, validation_id)
+                   .with_file(f"/usr/local/bin/{ARTIFACT_NAME}", binary, permissions=0o755)
+                   .with_exec(["python3", "ci/scripts/probe_release.py", "--binary", f"/usr/local/bin/{ARTIFACT_NAME}",
+                               "--expected-sha256", checksum, "--expected-version", version,
+                               "--validation-id", validation_id, "--mode", "all", "--report", "/reports/probe.json"]))
+        probe = json.loads(await runtime.stdout())
+        identity = json.loads(await runtime.with_exec(["python3", "-c", "import json,platform; print(json.dumps({'kernel':platform.release(),'architecture':platform.machine(),'cpu':open('/proc/cpuinfo').read().split('\\n\\n')[0]}))"]).stdout())
+        probe["cases"]["pristine_startup"] = {"status": "passed", "reported_version": pristine.strip(),
+                                                "artifact_sha256": checksum}
+        report = {**probe, **identity, "name": name, "image": await pristine_runtime(name).image_ref()}
+        bundle = bundle.with_new_file(f"reports/{name}.json", json.dumps(report, indent=2) + "\n")
+    command = ["python3", "ci/scripts/assemble_bundle.py", "--bundle", "/bundle", "--revision", revision,
+               "--validation-id", validation_id]
+    if source_clean:
+        command.append("--source-clean")
+    assembled = instrumented_runtime("debian-bookworm", src, validation_id).with_directory("/bundle", bundle).with_exec(command)
+    # Await execution before returning a Directory; lazy export cannot bypass checks.
+    await assembled.stdout()
+    checked = assembled.with_exec(["python3", "ci/scripts/check_bundle.py", "--bundle", "/bundle", "--expected-revision", revision])
+    await checked.stdout()
+    return checked.directory("/bundle")
+
+
+async def static_gate_check(src: dagger.Directory, revision: str, validation_id: str,
+                            source_clean: bool = False) -> str:
+    bundle = await verified_bundle(src, revision, validation_id, source_clean)
+    tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
+                   .with_directory("/verified", bundle).with_env_variable("ACTUAL_BUNDLE", "/verified")
+                   .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_assemble_bundle.py", "-v"]).stderr())
+    manifest = json.loads(await bundle.file("verification.json").contents())
+    return json.dumps({"status": "passed", "revision": revision, "validation_id": validation_id,
+                       "publishable": manifest["publishable"], "artifact": manifest["artifact"],
+                       "runtimes": manifest["runtimes"], "scratch": manifest["scratch"], "tests": tests}, indent=2)
 
 
 async def server_probe_check(src: dagger.Directory, validation_id: str) -> str:
