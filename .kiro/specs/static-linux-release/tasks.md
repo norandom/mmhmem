@@ -30,7 +30,7 @@ marketplace packages remain outside the change boundary.
   - _Boundary: Artifact verifier test infrastructure_
   - _Requirements: 1.3, 2.1, 2.6, 2.7, 3.5, 3.7_
 
-- [ ] 2. Implement candidate production and independent verification components
+- [x] 2. Implement candidate production and independent verification components
 - [x] 2.1 Produce the static application candidate and target regression results
   - Build the existing locked dependency graph using the musl C compiler and target-specific Rust linker; preserve the existing crypto provider.
   - Run musl-target default-feature lint and the deterministic regression suite, then produce the release candidate outside the build cache.
@@ -59,7 +59,7 @@ marketplace packages remain outside the change boundary.
   - _Depends: 1.2_
   - _Requirements: 2.6, 2.7, 3.4_
 
-- [ ] 2.4 (P) Validate release-bundle consistency
+- [x] 2.4 (P) Validate release-bundle consistency
   - Implement the approved schema and checksum checks against explicit bundle inputs.
   - Require the correct target, revision, required runtime records, linkage/regression status and artifact identity.
   - Reject unknown schema versions, missing or duplicate records, malformed hashes and contradictory passed states.
@@ -180,6 +180,7 @@ marketplace packages remain outside the change boundary.
 
 ## Implementation Notes
 
+- Task 2.4: `check_bundle.py --bundle DIR --expected-revision SHA [--require-publishable]` validates artifact and referenced report consistency. Runtime reports require passed status, validation ID and matching name/image/kernel/architecture/cpu/artifact_sha256/cases. Independent `bundle-check` passed ten checker and five support tests (`tmp/bundle-check-review.log`).
 - Task 2.3: Reusable `worker_service()` uses Dagger `as_service(args=...)`, explicitly starts/stops across probes, and exposes public roots plus HTTPS `/receipts`. Independent `worker-fixture` passed hostname/trust/rejection/receipt checks (`tmp/worker-fixture-review.log`). Health checks can produce initial TLS EOF diagnostics; compare later diagnostics against their baseline.
 - Task 2.2: `inspect_static.py` accepts explicit binary/checksum/report inputs and validates static PIE without rejecting all dynamic metadata. Six positive/negative component tests passed independent canonical `static-inspection` (`tmp/static-inspection-review.log`). Final candidate inspection remains an integration gate.
 - Task 2.1: Locked musl lint, full deterministic tests and release build passed independent review (`tmp/static-build-review.log`), producing version 0.2.2, SHA-256 `41ebf9c37f19a7385d039a5d87030205c1e5aee04efe1afb65ba3e2481511556`. The first suite exposed an upstream random-path fixture bug, repaired separately under corpus-warmup-prune in `c9b11a2` before revalidation. Candidate remains internal pending linkage/runtime gates.

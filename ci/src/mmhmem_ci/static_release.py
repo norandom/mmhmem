@@ -14,6 +14,17 @@ TARGET = "x86_64-unknown-linux-musl"
 RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alpine:3.22"}
 
 
+async def bundle_check_tests(src: dagger.Directory, validation_id: str) -> str:
+    """Run synthetic bundle rejection tests without exporting release evidence."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
+        raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
+    output = await (instrumented_runtime("debian-bookworm", src, validation_id)
+                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_release_support.py", "-v"])
+                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_check_bundle.py", "-v"])
+                    .stderr())
+    return json.dumps({"status": "passed", "validation_id": validation_id, "tests": output})
+
+
 async def worker_fixture_check(src: dagger.Directory, validation_id: str) -> str:
     """Prove DNS, trust success/rejection and matching worker request receipts."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):

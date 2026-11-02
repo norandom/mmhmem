@@ -62,6 +62,13 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 @object_type
 class MmhmemCi:
     @function
+    async def bundle_check(self, src: dagger.Directory, validation_id: str) -> str:
+        """Exercise bundle schema and evidence consistency rejection checks."""
+        from .static_release import bundle_check_tests
+
+        return await bundle_check_tests(src, validation_id)
+
+    @function
     async def worker_fixture(self, src: dagger.Directory, validation_id: str) -> str:
         """Check deterministic worker HTTPS behavior through service DNS."""
         from .static_release import worker_fixture_check
