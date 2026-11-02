@@ -105,6 +105,29 @@ cover a fresh machine; every variable is still honored when set.
 | `AGENT_MEM_AUDIT_MAX_BYTES` / `AGENT_MEM_AUDIT_ROTATE_KEEP` | `10485760` / `5` | local audit rotation threshold and retention (no logrotate needed on user machines) |
 | `SHUNT_MIN_LINES` / `WORKER_API_URL` / `WORKER_MODEL` / `WORKER_API_KEY` | `150` / unset | the shunt threshold and worker model |
 
+### Worker settings file: `.mmhmem.json` (local mode)
+
+Local mode also reads a small JSON config for the **worker settings only**:
+
+- `~/.mmhmem.json` — your global worker config (one place for all projects)
+- `./.mmhmem.json` — the project's own worker config (gitignored — it can hold your API key)
+
+```json
+{ "worker_model": "mistral-small-2603", "worker_api_url": "https://api.mistral.ai/v1/chat/completions", "worker_api_key": "…" }
+```
+
+- Every setting is optional; per setting the precedence is **environment
+  variable > project file > global file > built-in default** — so a project
+  can pin a model while the key stays in the global file.
+- Only `worker_model`, `worker_api_url`, `worker_api_key` are read; unknown
+  keys are ignored, other keys are preserved when the installer updates it.
+- Serve mode is untouched (env-only). A file that exists but is not valid
+  JSON fails fast at startup, naming the file.
+- The local installers write this file (`-WorkerModel` / `-WorkerUrl` /
+  `-WorkerApiKey`, or `--worker-*` in `install_local.sh`) instead of embedding
+  worker env into harness registrations; the key is never echoed.
+- The file is in `.gitignore`; keep the API key out of version control.
+
 **Serve mode is env-only and fails fast at startup.** Two variables are
 required:
 
