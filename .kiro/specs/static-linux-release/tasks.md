@@ -142,7 +142,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Boundary: Draft publisher_
   - _Requirements: 4.1, 4.6_
 
-- [ ] 6. Validate installation compatibility and release guidance
+- [x] 6. Validate installation compatibility and release guidance
 - [x] 6.1 Preserve installer behavior with the static candidate
   - Exercise isolated first install and update with existing memory and worker-setting fixtures, using the candidate supplied by the verified bundle.
   - Check stable latest-release URL/asset selection, dry-run no-op behavior, failed-download preservation and unsupported-platform refusal.
@@ -152,7 +152,7 @@ optional fixture work and is not a required release-gate dependency.
   - _Depends: 4.2_
   - _Requirements: 4.2, 4.3, 4.4, 4.5, 4.6_
 
-- [ ] 6.2 Prepare accurate support and transition guidance
+- [x] 6.2 Prepare accurate support and transition guidance
   - Document the approved support floor, baseline CPU, tested userlands, actual tested kernel distinction, download/shell prerequisites and CA trust behavior.
   - Provide the verified-bundle export, draft upload, final checksum confirmation and rollback procedure.
   - Keep the current glibc caveat while the latest release is dynamic; prepare the static claim as a clearly conditional post-publication update.
@@ -187,6 +187,7 @@ optional fixture work and is not a required release-gate dependency.
 
 ## Implementation Notes
 
+- Task 6.2: Independent documentation review approved after clarifying ELF/pristine-startup evidence versus instrumented functional tests. Current v0.2.2 dynamic asset/glibc caveat remains accurate; static wording is conditional on publication/latest checksum confirmation. Native example parsing and current release metadata checks passed (`tmp/support-docs-review.log`, `tmp/latest-linux-asset-inspection.json`). Linux 5.10/SSE2 is a policy floor, distinct from recorded tested kernels. TLS administration and TLS-specific tests remain out of scope.
 - Task 6.1: Independent review accepted actual verified-candidate first install/update on Debian/Alpine, public-MCP memory recovery, worker/harness preservation, dry-run/failure/platform checks and compiler independence (`tmp/static-installer-final.log`). Native Windows installer/wrapper regressions passed. Production installers are unchanged. A test-only attempt to truncate an executed inode caused ETXTBSY; fixture construction now uses atomic replacement, matching installer behavior. Canonical `all` includes `static-installer`.
 - Task 5.2: Independent PS5.1 delivery tests passed (`tmp/publisher-delivery-review.log`), including exact three-file download equality, identical/partial/lost-ack retries, draft/tag races, local mutations and corrupt downloads. Default publisher delivers; `-ValidateOnly` is read-only. No real release upload/publication was invoked. Separately, real hosted run 41495286781 produced a clean publishable bundle validated read-only (`tmp/hosted-bundle-validation.log`).
 - Task 5.1: Native PS5.1 provenance and strict bundle validation passed independent offline review (two valid cases, 43 rejection cases; `tmp/publisher-provenance-review.log`). Actual exported report shape validated without modifying the dirty local bundle. `Invoke-LinuxReleaseValidation` returns delivery context/file hashes; task 5.2 must recheck draft state immediately before writes. Focused native helper avoids a Python prerequisite.

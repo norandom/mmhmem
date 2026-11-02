@@ -49,10 +49,10 @@ your agents and their model providers.
 
 | Component | Required | Notes |
 |---|---|---|
-| mmhmem binary | yes | download the prebuilt asset from the latest release (Linux x86_64, macOS Apple Silicon and Intel, Windows x64) or build with Rust (pinned in `rust-toolchain.toml`, `cargo build --release`); SQLite (WAL + FTS5) is compiled in, there are no runtime dependencies |
+| mmhmem binary | yes | download the prebuilt asset from the latest release (Linux x86_64, macOS Apple Silicon and Intel, Windows x64) or build with Rust (`cargo build --release`); SQLite (WAL + FTS5) is compiled in; see Linux compatibility below |
 | Worker model endpoint | optional | any OpenAI-compatible chat-completions endpoint (Ollama, vLLM, or an API key). Without it, shunting is off; session memory, project memory, and targeted reads all still work |
 | Linux host or Docker | only for serve mode | the local layer needs nothing but the binary; the server adds systemd on a Linux host, or any Docker host for the compose route |
-| Reverse proxy | optional, recommended for serve-mode TLS | the daemon serves plain HTTP; terminate TLS in front of it |
+| Reverse proxy / load balancer | optional, administrator-managed | the daemon serves plain HTTP; TLS termination and proxy configuration are outside mmhmem's scope |
 | OpenObserve or any OTLP endpoint | optional | for OTel traces/metrics/logs and the logrotate batch ship of audit archives |
 
 ## Quickstart: local mode (no server)
@@ -83,6 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | b
 ```
 
 Requires Bash and curl or wget; Python 3 enables automatic JSON config merges.
+Standard Unix utilities are also needed; jq is not an installer prerequisite.
 The binary is installed at `~/.local/bin/mmhmem`. Linux ARM64 has no release
 asset; build from source for that architecture.
 The Linux release uses glibc; musl-only systems need a compatible build from
@@ -107,6 +108,28 @@ Worker settings remain unchanged unless supplied explicitly.
 The binary comes from this repository's **latest GitHub release**. Installer
 and playbook files come from `HEAD`, the repository's default branch, and are
 maintained independently of the binary.
+
+### Linux static-release transition
+
+As checked on 2026-11-02, the downloadable [v0.2.2 Linux asset](https://github.com/norandom/mmhmem/releases/tag/v0.2.2)
+still uses glibc. A static musl candidate is verified by CI, but its portability
+claim applies to the latest-release installer only after that exact candidate
+is published and its download checksum is confirmed.
+
+The pending static release targets **Linux x86_64**, baseline **x86-64/SSE2**,
+with a **Linux 5.10 support floor** and no mandatory AVX requirement. Strict
+ELF inspection and startup in scratch and pristine images verify that the
+executable requires no dynamic loader or shared libraries. The same file
+undergoes functional tests in instrumented **Debian 12 (bookworm)** and
+**Alpine 3.22** images; those images include test-tool dependencies. Containers
+share their host kernel: these checks establish userland portability, not a
+test of the oldest supported kernel or every CPU. Each bundle's
+`verification.json` records the actual kernel, CPU and image digests.
+
+Static linking does not remove kernel, filesystem-permission, DNS or installer
+tool prerequisites. It does not change the optional GNU/OTel Docker image.
+See the [verified Linux release procedure](deploy/README.md#4-verified-linux-release-transition)
+for the publication checkpoint and prepared post-publication wording.
 
 ### Skill marketplace
 
@@ -200,6 +223,12 @@ Local mode also reads a small JSON config for the **worker settings only**:
   `-WorkerApiKey`, or `--worker-*` in `install_local.sh`) instead of embedding
   worker env into harness registrations; the key is never echoed.
 - The file is in `.gitignore`; keep the API key out of version control.
+
+For HTTPS worker endpoints, the existing client uses the distribution's trust
+store; unavailable or untrusted roots leave the connection unsuccessful.
+Trust-store administration and reverse-proxy/load-balancer TLS termination
+are administrator responsibilities; TLS-specific validation is outside this
+release work.
 
 **Serve mode is env-only and fails fast at startup.** Two variables are
 required:

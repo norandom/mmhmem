@@ -6,10 +6,24 @@ Single self-hosted daemon on a Linux host, exposed to agent harnesses as a remot
 
 ## Core Technologies
 
-- **Language**: Rust — compiled, memory-safe, single static binary (confirmed by user 2026-11-01; Go documented as fallback in spec research)
+- **Language**: Rust — compiled, memory-safe, single binary (confirmed by user 2026-11-01; plain Linux static linking follows the distribution contract below; Go documented as fallback in spec research)
 - **Serving**: async HTTP server exposing the MCP Streamable HTTP transport
 - **Storage**: embedded SQL store with WAL journaling and FTS5 full-text search, plus Git-compatible plain-text state where useful
 - **Audit**: append-only single-line JSON records, SHA-256 self-verifying, redacted before write
+
+### Linux distribution contract
+
+- The plain Linux CI release targets `x86_64-unknown-linux-musl` with exact
+  Rust 1.98.1, baseline x86-64/SSE2 and a Linux 5.10 support floor. The canonical
+  Dagger gate verifies one candidate on Debian 12 and Alpine 3.22, recording
+  the actual shared host kernel and CPU separately from the support policy.
+- Release status checked 2026-11-02: latest downloadable v0.2.2 is still
+  glibc-dependent. Static CI candidates are verified, but public portability
+  wording changes only after publication and latest-endpoint checksum
+  confirmation. See `deploy/README.md` for the guarded draft transition.
+- The OTel-enabled Docker image remains a GNU build. Production TLS policy
+  is unchanged; reverse-proxy/load-balancer TLS belongs to the administrator,
+  and TLS-specific tests are excluded from static-release acceptance.
 
 ## Key Libraries (Rust path)
 
