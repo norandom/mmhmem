@@ -16,8 +16,22 @@ pub(super) fn initialize(conn: &mut Connection, timeout_ms: u64) -> Result<()> {
     restored.context("restoring SQLite busy timeout")
 }
 
-fn retry_initialization(timeout_ms: u64, mut operation: impl FnMut() -> Result<()>) -> Result<()> {
+fn retry_initialization(timeout_ms: u64, operation: impl FnMut() -> Result<()>) -> Result<()> {
     let started = Instant::now();
+    retry_with_timing(
+        timeout_ms,
+        operation,
+        || started.elapsed(),
+        std::thread::sleep,
+    )
+}
+
+fn retry_with_timing(
+    timeout_ms: u64,
+    mut operation: impl FnMut() -> Result<()>,
+    elapsed: impl Fn() -> Duration,
+    mut sleep: impl FnMut(Duration),
+) -> Result<()> {
     let budget = Duration::from_millis(timeout_ms);
     loop {
         match operation() {
@@ -28,10 +42,10 @@ fn retry_initialization(timeout_ms: u64, mut operation: impl FnMut() -> Result<(
                 if !busy {
                     return Err(error);
                 }
-                let remaining = budget.saturating_sub(started.elapsed());
+                let remaining = budget.saturating_sub(elapsed());
                 if !remaining.is_zero() {
-                    std::thread::sleep(remaining.min(Duration::from_millis(10)));
-                    if started.elapsed() < budget {
+                    sleep(remaining.min(Duration::from_millis(10)));
+                    if elapsed() < budget {
                         continue;
                     }
                 }
@@ -64,23 +78,51 @@ mod tests {
     #[test]
     fn immediate_busy_is_retried_even_without_sqlite_busy_handler() {
         let mut attempts = 0;
-        let result = retry_initialization(100, || {
-            attempts += 1;
-            if attempts < 3 {
-                Err(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    None,
-                )
-                .into())
-            } else {
-                Ok(())
-            }
-        });
+        let elapsed = std::cell::Cell::new(Duration::ZERO);
+        let result = retry_with_timing(
+            100,
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                        None,
+                    )
+                    .into())
+                } else {
+                    Ok(())
+                }
+            },
+            || elapsed.get(),
+            |delay| elapsed.set(elapsed.get() + delay),
+        );
         assert!(
             result.is_ok(),
             "immediate busy contention must retry: {result:?}"
         );
         assert_eq!(attempts, 3);
+        assert_eq!(elapsed.get(), Duration::from_millis(20));
+    }
+
+    #[test]
+    fn oversleep_exhausts_budget_without_an_extra_attempt() {
+        let elapsed = std::cell::Cell::new(Duration::ZERO);
+        let mut attempts = 0;
+        let result = retry_with_timing(
+            100,
+            || {
+                attempts += 1;
+                Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                )
+                .into())
+            },
+            || elapsed.get(),
+            |_| elapsed.set(Duration::from_millis(101)),
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("100 ms"));
+        assert_eq!(attempts, 1);
     }
 
     #[test]
