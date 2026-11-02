@@ -56,8 +56,10 @@ jobs:
         with:
           version: "0.21.11"
           workdir: ci
-          # A fresh checkout carries no target/.git — the --src contract.
-          args: call all --src ..
+          # v8.4.1 of the action prefixes `dagger call` itself — the args
+          # carry only the function invocation. A fresh checkout carries
+          # no target/.git — the --src contract.
+          args: all --src ..
 
   e2e-measurement:
     name: E2E measured token savings (E2E_LLM=1, real OpenCode)
