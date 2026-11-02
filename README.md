@@ -20,7 +20,7 @@ mmhmem runs in two modes from the same binary:
   works with nothing installed in between. `mmhmem stats` shows your
   savings any time.
 - **Serve mode (the optional upgrade).** One Linux daemon serves all the
-  same six tools over Streamable HTTP with bearer auth for cross-machine
+  same nine tools over Streamable HTTP with bearer auth for cross-machine
   access, central audit/compliance, central ops (logrotate, OTel), and
   multi-user deployments.
 
@@ -225,6 +225,12 @@ The playbook is under 200 tokens and works in every supported harness; see
 
 - Savings: `mmhmem stats` (human table) or `mmhmem stats --json`, from the
   per-user store — no server needed.
+- Warmup: on a new project, have the agent call `shunt_warmup` on its key
+  files (max 25 per batch) — real worker summaries cached up front, so the
+  first reads of those files are already cheap.
+- Prune: `mmhmem prune --dry-run` previews stale cache rows (file gone or
+  content changed), `mmhmem prune` removes exactly those — the same logic
+  the `shunt_prune` tool offers agents.
 - Liveness (serve mode): `GET /healthz` (no auth) or `mmhmem healthcheck`
   from the host.
 - Audit: serve mode writes `/var/log/agent-memory/audit.jsonl` (or your
@@ -233,9 +239,11 @@ The playbook is under 200 tokens and works in every supported harness; see
   action, every line self-verifying via its SHA-256 digest.
 - State: one SQLite file under the data dir (sessions, breadcrumbs, shunt
   cache, observations, token stats). Back it up with any file-level tool.
-- Six MCP tools do the work: `session_resume_or_handoff`, `smart_read`,
+- Nine MCP tools do the work: `session_resume_or_handoff`, `smart_read`,
   `boilerplate_write`, `mem_search`, `mem_get_observations`,
-  `mem_record_observation`.
+  `mem_record_observation`, `shunt_warmup`, `shunt_prune`,
+  `mem_search_breadcrumbs` (keyword search over the project's breadcrumb
+  history — what earlier sessions did beyond the last 15 crumbs).
 
 ## CI
 
