@@ -101,11 +101,12 @@ pub enum AuditEventType {
     Error,
     Warmup,
     Prune,
+    MemSearchBreadcrumbs,
 }
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 17] = [
+    pub const ALL: [AuditEventType; 18] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -123,11 +124,12 @@ impl AuditEventType {
         AuditEventType::Error,
         AuditEventType::Warmup,
         AuditEventType::Prune,
+        AuditEventType::MemSearchBreadcrumbs,
     ];
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 17] = [
+        const NAMES: [&str; 18] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -145,6 +147,7 @@ impl AuditEventType {
             "ERROR",
             "WARMUP",
             "PRUNE",
+            "MEM_SEARCH_BREADCRUMBS",
         ];
         NAMES[self as usize]
     }
