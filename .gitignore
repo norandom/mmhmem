@@ -2,3 +2,5 @@
 /.env
 *.env
 .mmhmem.json
+# Project-scope harness registrations carry machine-specific binary paths
+/opencode.json
