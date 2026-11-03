@@ -4,9 +4,12 @@ One Dagger module runs everywhere: locally via the WSL dagger CLI
 (`cd ci && dagger call all --src ..`) and in GitHub Actions
 (.github/workflows/ci.yml) — never two scripts (dev-environment steering).
 
-Blocking gates: fmt, clippy (default AND `--features otel` — the Windows
-lesson: gated code escapes plain clippy), the deterministic test suite
-(including tests/loc_caps.rs, which machine-enforces the Req 13.3 size caps).
+Blocking gates: fmt, glibc clippy `--features otel` (the Windows lesson:
+gated code escapes plain clippy); default-feature clippy and the
+deterministic test suite (including tests/loc_caps.rs, which
+machine-enforces the Req 13.3 size caps) run on musl inside static_release.
+The public `clippy` and `test` functions keep the glibc passes for local use
+(ci-build-time Decision 3).
 Informational: tokei per-file LOC report (dev tool only, Req 13.5).
 Validation: release build (plain, zero otel crates), Docker image built with
 `--features otel` (Req 11.2/8.6) whose payload runs, `docker compose config`
@@ -19,10 +22,69 @@ Python SDK the leaf getters are coroutines; a sync function returning one
 fails at runtime with FunctionError.
 """
 
+import time
+
 import dagger
 from dagger import dag, function, object_type
 
+from .stages import Stage, check_memory, run_stages, timings_line
+
 RUST_IMAGE = "rust:1.98-slim-bookworm"
+
+# The `all` stage list (design "`all` stage list" table): (name, heavy, needs),
+# in list order. Heavy stages count toward the memory guard. The glibc
+# default-feature clippy and test passes are deliberately absent (Decision 3).
+ALL_STAGE_PLAN = (
+    ("static_release", True, ()),
+    ("docker_build", True, ()),
+    ("clippy_otel", True, ()),
+    ("stage_runner_tests", False, ()),
+    ("distribution", False, ()),
+    ("fmt", False, ()),
+    ("compose_config", False, ()),
+    ("static_installer", False, ("static_release",)),
+    ("deploy_artifacts", False, ("static_release",)),
+    ("loc_report", False, ()),
+)
+
+# `== <label>: ok` summary lines; loc_report reports in its own tokei section.
+STAGE_LABELS = {
+    "static_release": "static_release (musl + same-artifact runtime gate)",
+    "docker_build": "docker_build (otel)",
+    "clippy_otel": "clippy_otel (glibc --features otel)",
+    "stage_runner_tests": "stage_runner_tests (ci stage runner unit tests)",
+    "distribution": "distribution (Debian + Alpine)",
+    "fmt": "fmt",
+    "compose_config": "compose_config (prod + e2e)",
+    "static_installer": "static_installer (verified candidate install + update)",
+    "deploy_artifacts": "deploy_artifacts (systemd + logrotate)",
+}
+
+# Reads the engine VM's memory (design "Memory guard").
+MEMORY_PROBE_IMAGE = "alpine:3.22"
+
+
+def validate_concurrency(concurrency) -> None:
+    """Reject a concurrency below one before any container is built."""
+    if type(concurrency) is not int or concurrency < 1:
+        raise ValueError(f"concurrency must be an integer of at least 1, got {concurrency!r}")
+
+
+def parse_mem_total_kib(meminfo: str) -> int:
+    """Return MemTotal in KiB from /proc/meminfo text."""
+    for line in meminfo.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "MemTotal:":
+            return int(fields[1])
+    raise ValueError("engine /proc/meminfo has no MemTotal line")
+
+
+def all_summary(results) -> str:
+    """Per-stage ok lines, the verified bundle manifest, the tokei report, then the timings line."""
+    outputs = {result.name: result.output for result in results}
+    summary = "\n".join(f"== {STAGE_LABELS[r.name]}: ok" for r in results if r.name in STAGE_LABELS)
+    return (f"{summary}\n== verified Linux bundle:\n{outputs['static_release']}\n"
+            f"== tokei (informational):\n{outputs['loc_report']}\n{timings_line(results)}")
 
 # The repo mount keeps the rustup toolchain pin out (its rust-analyzer
 # component is a dev-host concern; the image's 1.98 toolchain is used as-is).
@@ -61,6 +123,26 @@ def rust_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Contain
         .with_mounted_directory("/src", src.without_file(TOOLCHAIN_PIN))
         .with_workdir("/src")
     )
+
+
+async def _clippy_otel(src: dagger.Directory, cargo_jobs: int = 2) -> str:
+    """The glibc `--features otel` clippy pass: compiles the feature-gated code."""
+    return await rust_container(src, cargo_jobs=cargo_jobs).with_exec(
+        ["cargo", "clippy", "--all-targets", "--features", "otel", "--", "-D", "warnings"]
+    ).stdout()
+
+
+async def _stage_runner_tests(src: dagger.Directory, validation_id: str) -> str:
+    """Run the stage runner's unit tests in the Debian bookworm runtime (Python 3.11).
+
+    The full source mount keeps the ci/scripts and ci/src/mmhmem_ci layout
+    that test_stages.py resolves the module from.
+    """
+    from .static_release import instrumented_runtime
+
+    return await (instrumented_runtime("debian-bookworm", src, validation_id)
+                  .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_stages.py", "-v"])
+                  .stderr())
 
 
 @object_type
@@ -344,22 +426,73 @@ class MmhmemCi:
 
     @function
     async def all(self, src: dagger.Directory, revision: str, validation_id: str,
-                  source_clean: bool = False, cargo_jobs: int = 2) -> str:
+                  source_clean: bool = False, cargo_jobs: int = 2, concurrency: int = 1) -> str:
         """The full blocking pipeline (without the model-gated e2e suite,
-        which runs as a separate workflow job with credentials)."""
-        bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
-        manifest = await bundle.file("verification.json").contents()
-        results: dict[str, str] = {
-            "static_release (musl + same-artifact runtime gate)": manifest,
-            "static_installer (verified candidate install + update)": await self.static_installer(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
-            "distribution (Debian + Alpine)": await self.distribution(src),
-            "fmt": await self.fmt(src),
-            "clippy (default + otel)": await self.clippy(src),
-            "test": await self.test(src),
-            "docker_build (otel)": await self.docker_build(src),
-            "compose_config (prod + e2e)": await self.compose_config(src),
-            "deploy_artifacts (systemd + logrotate)": await self.deploy_artifacts(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
+        which runs as a separate workflow job with credentials).
+
+        Stages follow ALL_STAGE_PLAN on the dependency-aware runner, at most
+        `concurrency` at once (default 1: list order, the local memory
+        guard). A failed stage never cancels a sibling; one StageFailure at
+        the end names every failed and skipped stage. The engine memory is
+        checked against the heavy-stage budget before any build.
+        """
+        from .static_release import validate_cargo_jobs
+
+        validate_concurrency(concurrency)
+        validate_cargo_jobs(cargo_jobs)
+        # The probe must run every call: a cached /proc/meminfo would be stale.
+        meminfo = await (dag.container().from_(MEMORY_PROBE_IMAGE)
+                         .with_env_variable("MMHMEM_MEMORY_PROBE", str(time.time_ns()))
+                         .with_exec(["cat", "/proc/meminfo"]).stdout())
+        heavy_count = sum(1 for _, heavy, _ in ALL_STAGE_PLAN if heavy)
+        check_memory(parse_mem_total_kib(meminfo), concurrency, heavy_count)
+
+        async def static_release_stage() -> str:
+            # The verified bundle is produced here once; its manifest is the report.
+            bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+            return await bundle.file("verification.json").contents()
+
+        async def docker_build_stage() -> str:
+            return await self.docker_build(src)
+
+        async def clippy_otel_stage() -> str:
+            return await _clippy_otel(src, cargo_jobs=cargo_jobs)
+
+        async def stage_runner_tests_stage() -> str:
+            return await _stage_runner_tests(src, validation_id)
+
+        async def distribution_stage() -> str:
+            return await self.distribution(src)
+
+        async def fmt_stage() -> str:
+            return await self.fmt(src)
+
+        async def compose_config_stage() -> str:
+            return await self.compose_config(src)
+
+        async def static_installer_stage() -> str:
+            # Runs after static_release, so the bundle's operations are engine-cached.
+            return await self.static_installer(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+
+        async def deploy_artifacts_stage() -> str:
+            return await self.deploy_artifacts(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+
+        async def loc_report_stage() -> str:
+            # Informational content, but a failure still fails the run.
+            return await self.loc_report(src)
+
+        runs = {
+            "static_release": static_release_stage,
+            "docker_build": docker_build_stage,
+            "clippy_otel": clippy_otel_stage,
+            "stage_runner_tests": stage_runner_tests_stage,
+            "distribution": distribution_stage,
+            "fmt": fmt_stage,
+            "compose_config": compose_config_stage,
+            "static_installer": static_installer_stage,
+            "deploy_artifacts": deploy_artifacts_stage,
+            "loc_report": loc_report_stage,
         }
-        loc = await self.loc_report(src)
-        summary = "\n".join(f"== {name}: ok" for name in results)
-        return f"{summary}\n== verified Linux bundle:\n{manifest}\n== tokei (informational):\n{loc}"
+        stages = [Stage(name, runs[name], tuple(needs), heavy) for name, heavy, needs in ALL_STAGE_PLAN]
+        results = await run_stages(stages, concurrency)
+        return all_summary(results)

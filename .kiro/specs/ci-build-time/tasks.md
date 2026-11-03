@@ -25,7 +25,7 @@ the summary report.
   - Done when a default call yields two cargo jobs in both containers, an explicit option of four yields four in both, and the static setup check still passes unchanged.
   - _Requirements: 2.5, 3.1, 3.2, 3.3_
 
-- [ ] 2.2 Rebuild the full pipeline on the stage runner
+- [x] 2.2 Rebuild the full pipeline on the stage runner
   - Declare the design's stage list, order, heavy flags and dependencies, with the installer and deploy-artifact checks depending on the verified bundle.
   - Add the concurrency option with a default of one, probe engine memory before any build, and run the runner's own unit tests as a light stage.
   - Remove the glibc default-feature clippy and test passes from the full pipeline per approved Decision 3, keeping the glibc otel clippy pass and the standalone clippy and test functions.
@@ -102,3 +102,6 @@ the summary report.
 - Task 2.2 must wrap every stage `run` as an `async def` coroutine: a callable that raises synchronously, or a stage raising `CancelledError`, escapes the runner's failure aggregation (reviewer probe on 1.1).
 - `ci/scripts/test_stages.py` locates the module at `../src/mmhmem_ci` relative to itself, so any container that runs it must mount `ci/scripts` and `ci/src/mmhmem_ci` with the repository layout (the full source mount already does).
 - Task 2.2 must pass `cargo_jobs` into the glibc `rust_container` stages it schedules (the otel clippy pass and any other compile in `all`); task 2.1 threaded it only through the verified-bundle path, so those stages still default to 2 jobs (reviewer finding on 2.1).
+- The full stage plan lives in `ALL_STAGE_PLAN` and `STAGE_LABELS` (module literals in `main.py`) so stdlib tests can read it with `ast`; keep stage names there in sync with `ci/timing-baseline.json` (task 2.4).
+- If tokei stays a source build (2.3 fallback), decide there whether its compile gets `cargo_jobs`; `loc_report` currently compiles at the default 2 jobs as a light stage.
+- Task 4.1 must confirm the local WSL engine's MemTotal is at least 5 GiB, which the guard requires at concurrency 1; otherwise adjust `ENGINE_RESERVE_GIB` with evidence.

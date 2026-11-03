@@ -84,6 +84,8 @@ FORWARDING = [
     ("main.py", "all", "static_release"),
     ("main.py", "all", "static_installer"),
     ("main.py", "all", "deploy_artifacts"),
+    ("main.py", "all", "_clippy_otel"),
+    ("main.py", "_clippy_otel", "rust_container"),
     ("static_release.py", "installer_check", "verified_bundle"),
     ("static_release.py", "verified_bundle", "build_candidate"),
     ("static_release.py", "build_candidate", "musl_container"),
