@@ -88,6 +88,8 @@ mmhmem is a self-hosted, cross-agent memory and I/O optimization layer for AI co
 5. When the local store contains no statistics, `mmhmem stats` shall print a clear no-statistics message and exit successfully.
 6. The `mmhmem stats` command shall be read-only: it shall not mutate the store, the audit log, or session state.
 
+> **Amendment 2026-11-03 (client-usage-stats spec):** Criterion 2's client-reported values are frontier tokens the harness reported it *spent*, not tokens avoided. Each aggregate row shows estimated avoided input tokens, client-reported frontier prompt and completion tokens (latest cumulative report per workspace task and source), and worker tokens. For criterion 4, the JSON field `avoided_input_tokens_client_reported` is replaced by `frontier_prompt_tokens_client_reported`, `frontier_completion_tokens_client_reported` and, per day row, `client_reported_sources`. See `.kiro/specs/client-usage-stats/`.
+
 ### Requirement 9: No serve-mode regression
 **Objective:** As an operator of the validated server, I want local mode to change nothing about serve mode, so that existing deployments and the validated guarantees stay intact.
 

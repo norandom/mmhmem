@@ -114,6 +114,7 @@ mmhmem is a self-hosted, cross-agent memory and I/O optimization server for AI c
 2. The mmhmem server shall record worker-model token usage (prompt/completion tokens from the worker API's `usage` response field) for every delegated call.
 3. All statistics shall be stored keyed by (project, workspace_task_id, agent_harness, timestamp, kind) and emitted as OTel metrics when OTel is enabled (Req 11).
 4. `session_resume_or_handoff` shall accept an optional client-reported usage payload (harness-reported frontier prompt/completion tokens, stored with `kind=client_reported`); the server shall never require it and shall treat it as the only source of true frontier token counts.
+   > **Amendment 2026-11-03 (client-usage-stats spec):** a report is the harness's cumulative frontier usage for the identified workspace task at the time of the call. Every report is stored and audited; `mmhmem stats` counts only the latest report per project, harness, workspace task and source. See `.kiro/specs/client-usage-stats/`.
 5. Server-computed values shall be labelled as estimates (÷4 chars/token heuristic); client-reported values shall be labelled with their source. The server shall never invent frontier token counts.
 
 ### Requirement 11: Optional OTel observability and data-lifecycle documentation

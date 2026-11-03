@@ -3,7 +3,9 @@
 //!
 //! The server never sees the frontier API, so server-side numbers are
 //! ESTIMATES at ~4 chars/token (Req 10.5): avoided frontier input tokens.
-//! True frontier counts arrive only as client_reported deltas (Req 10.4).
+//! True frontier counts arrive only as client_reported rows (Req 10.4): each
+//! report is the harness's cumulative usage for one workspace task, and
+//! `mmhmem stats` counts the latest report per task and source.
 //! OTel counters go through the injected [`OtelSink`] (no-op by default; the
 //! real exporter is task 9.1 behind the `otel` cargo feature, wired in 10.4).
 

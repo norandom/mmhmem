@@ -77,7 +77,7 @@ where
 #[tool_router]
 impl McpServer {
     #[tool(
-        description = "Cross-agent session bus: resume at session start or after clearing without updated_working_state_md; supply it to replace the saved checkpoint for handoff. Returns checkpoint state and recent breadcrumbs, not imported chat history. Use mem_search_breadcrumbs for older activity. Optional client_usage accepts only actual harness-reported frontier totals.",
+        description = "Cross-agent session bus: resume at session start or after clearing without updated_working_state_md; supply it to replace the saved checkpoint for handoff. Returns checkpoint state and recent breadcrumbs, not imported chat history. Use mem_search_breadcrumbs for older activity. Optional client_usage accepts only actual harness-reported frontier totals, cumulative for the workspace task; stats count the latest report per task and source.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,

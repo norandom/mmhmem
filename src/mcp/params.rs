@@ -17,12 +17,14 @@ impl From<ClientUsageParam> for ClientUsage {
     }
 }
 
-/// Optional harness-reported frontier token totals (Req 10.4).
+/// Optional harness-reported frontier token totals, cumulative for the
+/// workspace task so far (Req 10.4; client-usage-stats Req 3.1). Stats count
+/// only the latest report per task and source.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ClientUsageParam {
-    /// Frontier prompt tokens reported by the harness.
+    /// Cumulative frontier prompt tokens for the task, reported by the harness.
     pub prompt_tokens: u64,
-    /// Frontier completion tokens reported by the harness.
+    /// Cumulative frontier completion tokens for the task, reported by the harness.
     pub completion_tokens: u64,
     /// Source label, e.g. "opencode /status".
     pub source: String,
@@ -44,7 +46,8 @@ pub struct ResumeParams {
     /// Workspace task ID (optional; inherited or newly initialized).
     #[serde(default)]
     pub workspace_task_id: Option<String>,
-    /// Optional harness-reported frontier usage for stats (Req 10.4).
+    /// Optional harness-reported frontier usage, cumulative for this
+    /// workspace task, for stats (Req 10.4).
     #[serde(default)]
     pub client_usage: Option<ClientUsageParam>,
 }

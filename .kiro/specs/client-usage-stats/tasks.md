@@ -24,7 +24,7 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
   - _Depends: 1.1_
   - _Requirements: 1.1, 1.4, 2.1, 2.2, 2.3, 4.1, 4.2, 4.3_
 
-- [ ] 2.2 (P) State the cumulative report contract wherever harnesses read it
+- [x] 2.2 (P) State the cumulative report contract wherever harnesses read it
   - Describe a client usage report as the harness's cumulative frontier usage for the identified workspace task in the session tool description, its parameter documentation and the stats service documentation.
   - Add the cumulative-task-total wording to the unified-memory skill within its token budget, and regenerate the packaged plugin copy with the marketplace build script.
   - Add dated amendment notes pointing to this spec under cross-agent-memory-server Requirement 10.4 and local-mode Requirements 8.2 and 8.4.
