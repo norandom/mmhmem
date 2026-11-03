@@ -110,7 +110,7 @@ pub struct Counters {
     pub worker_completion: i64,
     pub hits: i64,
 }
-fn counters(store: &Path) -> Result<Counters, &'static str> {
+pub fn counters(store: &Path) -> Result<Counters, &'static str> {
     let path = store.join("memory.db");
     if !path.exists() {
         return Ok(Counters::default());
@@ -131,14 +131,18 @@ pub struct Report {
     pub repeat_outcome: String,
 }
 
-async fn install(fixture: &Fixture, binary: &Path) -> Result<(), &'static str> {
+pub async fn install_agent(
+    fixture: &Fixture,
+    binary: &Path,
+    agent: &str,
+) -> Result<(), &'static str> {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let home = fixture.root.path().join("install-home");
     std::fs::create_dir_all(&home).map_err(|_| "installer home unavailable")?;
     #[cfg(windows)]
     let (program, args) = {
         let script = fixture.root.path().join("install.ps1");
-        std::fs::write(&script,"param($TaskHome,$Engine,$Project,$Binary)\nSet-Variable HOME $TaskHome -Force\n$env:USERPROFILE=$TaskHome\n$env:HOME=$TaskHome\n& $Engine -ProjectDir $Project -Binary $Binary -Agent claude -NonInteractive\nexit $LASTEXITCODE\n").map_err(|_| "installer wrapper unavailable")?;
+        std::fs::write(&script,"param($TaskHome,$Engine,$Project,$Binary,$Agent)\nSet-Variable HOME $TaskHome -Force\n$env:USERPROFILE=$TaskHome\n$env:HOME=$TaskHome\n& $Engine -ProjectDir $Project -Binary $Binary -Agent $Agent -NonInteractive\nexit $LASTEXITCODE\n").map_err(|_| "installer wrapper unavailable")?;
         (
             "powershell",
             vec![
@@ -149,6 +153,7 @@ async fn install(fixture: &Fixture, binary: &Path) -> Result<(), &'static str> {
                 repo.join("deploy/install_local.ps1").display().to_string(),
                 fixture.repository.display().to_string(),
                 binary.display().to_string(),
+                agent.into(),
             ],
         )
     };
@@ -165,7 +170,7 @@ async fn install(fixture: &Fixture, binary: &Path) -> Result<(), &'static str> {
             "--binary".into(),
             binary.display().to_string(),
             "--agent".into(),
-            "claude".into(),
+            agent.into(),
         ],
     );
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
@@ -175,7 +180,12 @@ async fn install(fixture: &Fixture, binary: &Path) -> Result<(), &'static str> {
     if !output.status.success() {
         return Err("installer failed; output suppressed to protect configuration");
     }
-    if !fixture.repository.join(".claude/rules/mmhmem.md").exists() {
+    let instruction = if agent == "claude" {
+        ".claude/rules/mmhmem.md"
+    } else {
+        "AGENTS.md"
+    };
+    if !fixture.repository.join(instruction).exists() {
         return Err("installed rules missing");
     }
     Ok(())
@@ -226,7 +236,7 @@ pub async fn run() -> Report {
         instruction_sha256: String::new(),
         repeat_outcome: "NOT_VERIFIED".into(),
     };
-    if let Err(reason) = install(&fixture, binary).await {
+    if let Err(reason) = install_agent(&fixture, binary, "claude").await {
         report.evidence.reason = reason.into();
         return report;
     }

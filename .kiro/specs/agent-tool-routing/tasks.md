@@ -79,7 +79,7 @@ verification task rather than forming standalone work.
   - _Depends: 2.2, 2.4, 3.1_
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 4. Integrate behavioral acceptance and honest accounting evidence
+- [x] 4. Integrate behavioral acceptance and honest accounting evidence
 - [x] 4.1 Verify cache accounting and non-saving read paths
   - Exercise a cold summary and same-identity repeat with unchanged content and a counting worker.
   - Confirm the repeat hits cache, adds no worker request, and updates existing stats with expected attribution.
@@ -98,7 +98,7 @@ verification task rather than forming standalone work.
   - _Depends: 1.2, 2.1, 3.1, 3.2_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 4.3 Integrate real OpenCode instruction loading and tool-selection evidence
+- [x] 4.3 Integrate real OpenCode instruction loading and tool-selection evidence
   - Add fresh standalone JSON runs against actual installer-produced instructions and the shared synthetic environment.
   - Verify normal tool availability and effective global/project instruction sources without an injected-instructions shortcut.
   - Extend sanitized event extraction for ordinary reads, repeat identity, exact evidence, and bounded fallback.
@@ -142,3 +142,4 @@ verification task rather than forming standalone work.
 - Preserve LF when rewriting canonical SKILL.md; shell builder rejects CRLF frontmatter. Native routing/checkpoint and Dagger Debian/Alpine distribution parity verified.
 - Owned instruction commits recheck source bytes before replacement; this detects changes but does not provide cross-process locking.
 - Claude adoption requires completed error-free non-targeted intended-fixture reads; failure reports retain only allowlisted trace/counter evidence. Installer runs with disposable HOME/USERPROFILE separate from authenticated live CLI.
+- OpenCode V2 test server uses codemode=false for observable individual MCP calls; normal native tools remain available. Live CLI/schema compatibility remains final acceptance.

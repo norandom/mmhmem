@@ -165,3 +165,67 @@ fn claude_partial_failure_retains_only_allowlisted_trace() {
     assert!(!serialized.contains("PRIVATE"));
     assert!(!serialized.contains("SECRET"));
 }
+
+#[path = "routing_adoption/opencode.rs"]
+mod opencode;
+#[test]
+fn opencode_events_require_successful_fixture_inspection() {
+    let good = r#"{"type":"tool_use","part":{"tool":"mmhmem_smart_read","state":{"status":"completed","input":{"file_path":"transform.rs","question":"explain"},"output":"PRIVATE"}}}
+{"type":"step_finish","part":{"reason":"stop"}}"#;
+    let trace = opencode::parse_partial(good).0;
+    assert!(claude::adopted(&trace));
+    assert!(!serde_json::to_string(&trace).unwrap().contains("PRIVATE"));
+    for bad in [
+        good.replace("completed", "error"),
+        good.replace("transform.rs", "other.rs"),
+        good.replace("mmhmem_smart_read", "read"),
+    ] {
+        assert!(!claude::adopted(&opencode::parse_partial(&bad).0));
+    }
+    assert!(opencode::parse_partial("{}").1.is_err());
+    assert!(
+        opencode::parse_partial(good.lines().next().unwrap())
+            .1
+            .is_err()
+    );
+}
+#[test]
+fn live_opencode_adoption_requires_explicit_opt_in() {
+    if std::env::var("E2E_LLM").ok().as_deref() != Some("1") {
+        return;
+    }
+    let report = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(opencode::run());
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    assert!(
+        matches!(report.evidence.outcome, foundation::Outcome::Pass),
+        "OpenCode adoption FAIL or NOT_VERIFIED"
+    );
+    assert_eq!(
+        report.repeat_outcome, "PASS",
+        "OpenCode cache repeat NOT_VERIFIED"
+    );
+}
+
+#[test]
+fn opencode_partial_errors_targeted_and_identity_are_honest() {
+    let good = r#"{"type":"tool_use","part":{"tool":"mmhmem_smart_read","state":{"status":"completed","input":{"file_path":"transform.rs","question":"one"}}}}
+{"type":"step_finish","part":{"reason":"stop"}}"#;
+    let first = opencode::parse_partial(good).0;
+    let second = opencode::parse_partial(&good.replace("one", "two")).0;
+    assert!(!claude::same_identity(&first, &second));
+    let targeted = good.replace("\"question\":\"one\"", "\"offset\":1,\"limit\":2");
+    assert!(!claude::adopted(&opencode::parse_partial(&targeted).0));
+    let partial =
+        good.lines().next().unwrap().to_owned() + "\n{\"type\":\"error\",\"secret\":\"PRIVATE\"}";
+    let (trace, result) = opencode::parse_partial(&partial);
+    assert!(result.is_err());
+    assert_eq!(trace.tools.len(), 1);
+    assert!(!serde_json::to_string(&trace).unwrap().contains("PRIVATE"));
+    let native =
+        r#"{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","input":{}}}}"#;
+    assert!(!claude::adopted(
+        &opencode::parse_partial(&(native.to_owned() + "\n" + good)).0
+    ));
+}
