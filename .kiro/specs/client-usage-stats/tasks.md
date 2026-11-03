@@ -15,7 +15,7 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 3.2, 3.3, 3.4_
 
 - [ ] 2. Report client usage and state the contract
-- [ ] 2.1 Rework the stats aggregation, table and JSON output around the new client totals
+- [x] 2.1 Rework the stats aggregation, table and JSON output around the new client totals
   - Exclude client-reported rows from the estimate aggregation, merge estimates with the client totals by day, project and harness, and fill zeros on the side a key lacks.
   - Replace the former client-reported avoided value with frontier prompt and frontier completion values plus the source list, keeping every other JSON field and the row ordering unchanged.
   - Widen the table to the two client-reported frontier columns with spent-token labels, and include both in the TOTAL row.
@@ -45,3 +45,4 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
 ## Implementation Notes
 
 - Task 1.1: `ClientReport` also carries `day`, computed by SQLite's `date(ts_epoch_ms / 1000, 'unixepoch')` so client days match the estimate query exactly (the crate has no date library); per-day summing is the public `client_days` function. Reviewed inline by the parent.
+- Task 2.1: the stats unit tests moved to `src/cli/stats_tests.rs` (`#[path]` module, as `session_bus_tests.rs`) to keep `stats.rs` under the 500-line cap. The two `tests/stats_cli.rs` assertions on the old JSON field and table label were updated in the same commit so the suite stays green; task 3.1 rewrites that file on production-written rows. Reviewed inline by the parent.

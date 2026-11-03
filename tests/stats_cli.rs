@@ -115,12 +115,13 @@ async fn stats_table_shows_seeded_savings() {
     assert!(stdout.contains("2025-01-02"), "both days: {stdout}");
     assert!(stdout.contains("opencode") && stdout.contains("claude-code"));
     assert!(
-        stdout.contains("AVOIDED (EST.)") && stdout.contains("CLIENT-REPORTED"),
-        "labels (Req 8.3): {stdout}"
+        stdout.contains("AVOIDED (EST.)")
+            && stdout.contains("FRONTIER PROMPT (CLIENT-REPORTED)")
+            && !stdout.contains("AVOIDED (CLIENT-REPORTED)"),
+        "labels (Req 8.3; client-usage-stats Req 2.1): {stdout}"
     );
     assert!(stdout.contains("TOTAL"), "totals row: {stdout}");
     assert!(stdout.contains("1,400"), "estimates total: {stdout}");
-    assert!(stdout.contains("700"), "client-reported total: {stdout}");
 }
 
 #[tokio::test]
@@ -137,7 +138,14 @@ async fn stats_json_matches_the_data_contract() {
     assert_eq!(days[0]["day"], "2025-01-02");
     assert_eq!(days[0]["project"], "mmhmem");
     assert_eq!(days[0]["avoided_input_tokens_est"], 100);
-    assert_eq!(days[2]["avoided_input_tokens_client_reported"], 700);
+    // The seeded client row has no details, so it reports nothing and its
+    // estimate-column value is never counted (client-usage-stats Req 1.3, 1.4).
+    assert_eq!(days[2]["frontier_prompt_tokens_client_reported"], 0);
+    assert!(
+        days[2]
+            .get("avoided_input_tokens_client_reported")
+            .is_none()
+    );
     assert_eq!(v["totals"]["avoided_input_tokens_est"], 1_400);
     assert_eq!(v["totals"]["worker_prompt_tokens"], 70);
     assert_eq!(v["totals"]["worker_completion_tokens"], 40);
