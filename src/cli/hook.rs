@@ -90,7 +90,7 @@ fn respond(harness: Option<&str>) -> String {
     let window = RepeatWindow::with_default_window(&config.data_dir);
     let decision = decide_call(&call, req, &settings_from(&config), &window, now_ms());
     record(&AuditWriter::from_config(&config), &call, req, &decision);
-    adapters::render(harness, &decision, &req.path)
+    adapters::render(harness, &decision, &req.path, project_name(&call.cwd))
 }
 
 /// Reads at most `cap` bytes; `None` on a read error or more than `cap`.

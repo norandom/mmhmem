@@ -48,9 +48,9 @@ pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
 }
 
 /// Renders a decision as the harness's stdout; a pass is the empty string.
-pub fn render(harness: Harness, decision: &Decision, path: &Path) -> String {
+pub fn render(harness: Harness, decision: &Decision, path: &Path, project: &str) -> String {
     match harness {
-        Harness::Claude => render_claude(decision, path),
+        Harness::Claude => render_claude(decision, path, project),
     }
 }
 
@@ -122,15 +122,17 @@ fn claude_shell(input: &Value, cwd: &str, tool: &str) -> Option<ReadRequest> {
 
 /// Redirect: the documented `PreToolUse` deny with a one-line reason and no
 /// file content; pass: no output.
-fn render_claude(decision: &Decision, path: &Path) -> String {
+fn render_claude(decision: &Decision, path: &Path, project: &str) -> String {
     let Decision::Redirect { lines } = decision else {
         return String::new();
     };
     let reason = format!(
-        "mmhmem: {} has at least {lines} lines. Call smart_read for a summary, or read an \
-         exact line range with offset and limit. Repeat this read within 2 minutes to \
-         read the whole file anyway.",
-        path.display()
+        "mmhmem: {path} has at least {lines} lines. Read it through the mmhmem MCP tool \
+         instead: call smart_read with project \"{project}\", agent_harness \"claude-code\" \
+         and file_path \"{path}\" for a summary with exact line ranges. For exact text, for \
+         example before an edit, use Read with offset and limit. Only if the summary is not \
+         enough, repeat this full read within 2 minutes.",
+        path = path.display()
     );
     json!({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
@@ -256,25 +258,39 @@ mod tests {
     #[test]
     fn redirect_renders_the_documented_deny_json() {
         let path = Path::new(r#"C:\Users\a "b"\x.rs"#);
-        let out = render(Harness::Claude, &Decision::Redirect { lines: 150 }, path);
+        let out = render(
+            Harness::Claude,
+            &Decision::Redirect { lines: 150 },
+            path,
+            "proj",
+        );
         assert!(!out.contains('\n'));
         let v: Value = serde_json::from_str(&out).expect("valid json");
         let h = &v["hookSpecificOutput"];
         assert_eq!(v.as_object().unwrap().len(), 1);
         assert_eq!(h["hookEventName"], "PreToolUse");
         assert_eq!(h["permissionDecision"], "deny");
-        let want = format!(
-            "mmhmem: {} has at least 150 lines. Call smart_read for a summary, or read an \
-             exact line range with offset and limit. Repeat this read within 2 minutes to \
-             read the whole file anyway.",
+        let reason = h["permissionDecisionReason"].as_str().unwrap();
+        // Live check 2.3: agents need every required smart_read argument, and a
+        // "repeat to read anyway" hint must come last, as a last resort.
+        let call = format!(
+            "smart_read with project \"proj\", agent_harness \"claude-code\" and file_path \"{}\"",
             path.display()
         );
-        assert_eq!(h["permissionDecisionReason"], want.as_str());
+        assert!(reason.starts_with(&format!(
+            "mmhmem: {} has at least 150 lines.",
+            path.display()
+        )));
+        assert!(reason.contains(&call), "{reason}");
+        assert!(reason.contains("Read with offset and limit"), "{reason}");
+        let smart = reason.find("smart_read").unwrap();
+        let repeat = reason.find("Only if the summary is not enough").unwrap();
+        assert!(smart < repeat, "{reason}");
     }
 
     #[test]
     fn pass_renders_nothing() {
         let d = Decision::Pass(PassReason::Short);
-        assert_eq!(render(Harness::Claude, &d, Path::new("/x")), "");
+        assert_eq!(render(Harness::Claude, &d, Path::new("/x"), "proj"), "");
     }
 }
