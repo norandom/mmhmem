@@ -71,7 +71,7 @@ the summary report.
   - _Requirements: 2.5, 3.1, 3.3, 5.1_
 
 - [ ] 4. Validate locally and on hosted runners
-- [ ] 4.1 Run the local regression gates and memory-guard checks
+- [x] 4.1 Run the local regression gates and memory-guard checks
   - Run the project's pre-commit gates, the CI Python unit tests, and the PowerShell workflow contract test.
   - Run the full pipeline through the local wrapper with default options on the WSL engine and record peak engine memory at concurrency one.
   - Run it again with concurrency two to confirm the guard refusal message.
