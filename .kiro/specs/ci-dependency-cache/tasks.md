@@ -47,7 +47,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Depends: 2.1_
   - _Requirements: 5.1, 5.2_
 
-- [ ] 2.4 (P) Document the TLS stack and the compile cache in the development guide
+- [x] 2.4 (P) Document the TLS stack and the compile cache in the development guide
   - State that the TLS stack is rustls with aws-lc-rs and serves only outbound HTTPS: worker-model API calls and the OTLP exporter in the otel image; the mmhmem server terminates no TLS.
   - State that its C build is cached rather than replaced and how to confirm C cache hits in the job summary; describe the cache modes, the pull-request read-only mode and how to purge the cache.
   - Done when the guide contains both sections and the guidance checks still pass.

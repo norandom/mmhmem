@@ -90,3 +90,59 @@ per-stage table of status, start, duration and baseline to the job summary.
 A stage over 1.5 x its baseline in `ci/timing-baseline.json` is marked `slow`;
 the table never changes the job verdict. Update the baseline when stage
 costs change on purpose.
+
+### Compile cache (sccache)
+
+Every hosted gate run starts a fresh Dagger engine, so Dagger cache volumes
+are empty each time. The gate therefore runs every Rust build (musl clippy,
+tests and release, glibc otel clippy, the otel Docker builder stage) under
+sccache v0.18.0 with the GitHub Actions cache. Unchanged crates come back
+from the cache instead of being recompiled.
+
+- **Modes:** `--cache-mode=read-write` on pushes to `main`,
+  `--cache-mode=read-only` on pull requests, so pull requests reuse `main`'s
+  cache without writing to it. `off`, or no cache options, builds exactly as
+  before; local runs through `scripts/dagger-ci.ps1` pass none and need no
+  credential.
+- **Credentials:** the workflow exports `ACTIONS_RESULTS_URL` and
+  `ACTIONS_RUNTIME_TOKEN` and passes them as Dagger secrets
+  (`--cache-url`, `--cache-token`). They reach containers only as secret
+  variables or the Dockerfile's `sccache_env` BuildKit secret, never as
+  build arguments, logs or image layers.
+- **Fallback:** if sccache cannot start or the cache service fails, the
+  build runs uncached with the same verdict, and the summary says why.
+- **Results:** the job summary's "Compile cache (sccache)" table lists hits
+  and misses per stage, with C/C++ hits separately.
+- **Purge:** bump `GHA_CACHE_VERSION` in `ci/src/mmhmem_ci/sccache.py`.
+  Toolchain and target changes produce new cache keys on their own.
+- **Dockerfile:** the builder stage uses sccache only when CI passes the
+  `SCCACHE_URL`/`SCCACHE_SHA256` build arguments and the secret; a plain
+  `docker build` is unchanged.
+
+### TLS stack
+
+mmhmem uses rustls with the aws-lc-rs crypto provider, the default of
+`reqwest`'s `rustls` feature. It serves only outbound HTTPS:
+
+- worker-model API calls from the summary worker client, and
+- in the otel Docker image, the OTLP exporter.
+
+The mmhmem server terminates no TLS itself; a reverse proxy does. The local
+health probe and local workers such as Ollama over `http://` do not use it.
+
+`aws-lc-sys` compiles C code in its build script. That build is cached, not
+replaced: on both CI targets it builds through the `cc` crate, which wraps
+the C compiler with sccache whenever `RUSTC_WRAPPER` names it. A warm run
+shows non-zero "C hits" for the musl and Docker stages in the compile-cache
+table; aws-lc-sys and the bundled SQLite are the main C sources.
+
+### LOC report
+
+The informational per-file LOC report (`tokei --files`, Requirement 13.5 of
+the cross-agent-memory-server spec) runs in its own `loc-report` workflow
+job, alongside the gate. It never affects the verdict or a release, and it
+reuses a cached tokei binary of the pinned version. Locally:
+
+```powershell
+powershell -NoProfile -File scripts\dagger-ci.ps1 -Call loc-report
+```
