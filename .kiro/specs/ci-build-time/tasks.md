@@ -42,7 +42,7 @@ the summary report.
   - _Depends: 2.2_
   - _Requirements: 4.4_
 
-- [ ] 2.4 (P) Write the job-summary timing report and its baseline
+- [x] 2.4 (P) Write the job-summary timing report and its baseline
   - Parse the timings line, compare each stage with the recorded baseline, and render a table with a slow marker above 150 percent of baseline.
   - Take baseline keys from the design's stage-list table. Seed values from research for stages measured today, and mark the new stages without history (the otel clippy pass and the runner tests) as unbaselined until task 4.2 records their first hosted values.
   - Report a missing timings line or an unbaselined stage as such, and never change the job verdict.
@@ -106,3 +106,4 @@ the summary report.
 - If tokei stays a source build (2.3 fallback), decide there whether its compile gets `cargo_jobs`; `loc_report` currently compiles at the default 2 jobs as a light stage.
 - Task 4.1 must confirm the local WSL engine's MemTotal is at least 5 GiB, which the guard requires at concurrency 1; otherwise adjust `ENGINE_RESERVE_GIB` with evidence.
 - Task 2.3 was reviewed inline by the parent (the reviewer subagent was stopped by the user); evidence: diff inspection plus 43 CI unit tests passing on 3.12 and 3.11.
+- Task 3.1 must pass the gate step output to `ci/scripts/timing_summary.py` through the `GATE_OUTPUT` environment variable; the script always exits 0 and appends to `$GITHUB_STEP_SUMMARY`. Task 2.4 was reviewed inline by the parent.
