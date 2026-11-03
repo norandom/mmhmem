@@ -1,0 +1,22 @@
+{
+  "feature_name": "proactive-session-checkpoints",
+  "created_at": "2026-11-02T21:03:31.0273918+01:00",
+  "updated_at": "2026-11-03T07:52:11.5692380+01:00",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
