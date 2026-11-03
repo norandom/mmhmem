@@ -10,6 +10,7 @@
 pub mod hook;
 pub mod prune;
 pub mod stats;
+pub mod stats_activity;
 pub mod stats_client;
 
 use std::process::ExitCode;
@@ -48,14 +49,16 @@ pub fn run_stats(json: bool) -> ExitCode {
 fn build_report(json: bool) -> anyhow::Result<String> {
     let config = Config::load_local()?;
     let store_path = config.data_dir.join(DB_FILE_NAME);
-    let Some(db) = Db::open_read_only(&store_path)? else {
+    let db = Db::open_read_only(&store_path)?;
+    let activity = stats_activity::collect(&config.log_file, config.audit_rotate_keep)?;
+    if db.is_none() && activity.is_empty() {
         return Ok(NO_STATS_MESSAGE.to_string());
-    };
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("starting the stats runtime")?;
-    let rows = rt.block_on(stats::aggregate(&db))?;
+    let rows = rt.block_on(stats::aggregate_with_activity(db.as_ref(), activity))?;
     if rows.is_empty() {
         return Ok(NO_STATS_MESSAGE.to_string());
     }

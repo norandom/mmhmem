@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use rusqlite::params;
 use serde::Serialize;
 
+use super::stats_activity::{ActivityCounts, ActivityMap};
 use super::stats_client::{ClientDay, client_totals};
 use crate::storage::db::Db;
 
@@ -43,6 +44,9 @@ pub struct DayAggregate {
     pub worker_prompt: i64,
     #[serde(rename = "worker_completion_tokens")]
     pub worker_completion: i64,
+    /// Read-activity counts (read-routing-hooks Req 1.1-1.3).
+    #[serde(flatten)]
+    pub activity: ActivityCounts,
 }
 
 /// Totals across all rows (same field names as [`DayAggregate`]).
@@ -58,6 +62,8 @@ pub struct Totals {
     pub worker_prompt: i64,
     #[serde(rename = "worker_completion_tokens")]
     pub worker_completion: i64,
+    #[serde(flatten)]
+    pub activity: ActivityCounts,
 }
 
 const AGGREGATE_SQL: &str = "\
@@ -85,12 +91,26 @@ fn empty_row((day, project, harness): RowKey) -> DayAggregate {
         client_sources: Vec::new(),
         worker_prompt: 0,
         worker_completion: 0,
+        activity: ActivityCounts::default(),
     }
 }
 
 /// Aggregates all token-stats rows (Req 8.1/8.2). Read-only by contract:
 /// the caller opens the store with [`Db::open_read_only`] (Req 8.6).
 pub async fn aggregate(db: &Db) -> anyhow::Result<Vec<DayAggregate>> {
+    aggregate_with_activity(Some(db), ActivityMap::new()).await
+}
+
+/// Like [`aggregate`], also merging the audit-log read activity by key: a
+/// day x project x harness with activity but no savings row still gets a
+/// row (read-routing-hooks Req 1.2).
+pub async fn aggregate_with_activity(
+    db: Option<&Db>,
+    activity: ActivityMap,
+) -> anyhow::Result<Vec<DayAggregate>> {
+    let Some(db) = db else {
+        return Ok(merge(Vec::new(), Vec::new(), activity));
+    };
     let estimates = db
         .with_conn(|conn| {
             let mut stmt = conn.prepare(AGGREGATE_SQL)?;
@@ -106,12 +126,16 @@ pub async fn aggregate(db: &Db) -> anyhow::Result<Vec<DayAggregate>> {
             Ok(rows)
         })
         .await?;
-    Ok(merge(estimates, client_totals(db).await?))
+    Ok(merge(estimates, client_totals(db).await?, activity))
 }
 
 /// Merges estimate rows with client totals by key; a side a key lacks
 /// contributes zeros. Ordered day DESC, then project, then harness.
-fn merge(estimates: Vec<DayAggregate>, clients: Vec<ClientDay>) -> Vec<DayAggregate> {
+fn merge(
+    estimates: Vec<DayAggregate>,
+    clients: Vec<ClientDay>,
+    activity: ActivityMap,
+) -> Vec<DayAggregate> {
     let mut rows: BTreeMap<RowKey, DayAggregate> = estimates
         .into_iter()
         .map(|r| ((r.day.clone(), r.project.clone(), r.harness.clone()), r))
@@ -122,6 +146,11 @@ fn merge(estimates: Vec<DayAggregate>, clients: Vec<ClientDay>) -> Vec<DayAggreg
         row.client_prompt = c.prompt_tokens;
         row.client_completion = c.completion_tokens;
         row.client_sources = c.sources;
+    }
+    for (key, counts) in activity {
+        rows.entry(key.clone())
+            .or_insert_with(|| empty_row(key))
+            .activity = counts;
     }
     let mut merged: Vec<DayAggregate> = rows.into_values().collect();
     merged.sort_by(|a, b| {
@@ -142,6 +171,7 @@ pub fn totals(rows: &[DayAggregate]) -> Totals {
             client_completion: 0,
             worker_prompt: 0,
             worker_completion: 0,
+            activity: ActivityCounts::default(),
         },
         |acc, r| Totals {
             avoided_est: acc.avoided_est + r.avoided_est,
@@ -149,12 +179,13 @@ pub fn totals(rows: &[DayAggregate]) -> Totals {
             client_completion: acc.client_completion + r.client_completion,
             worker_prompt: acc.worker_prompt + r.worker_prompt,
             worker_completion: acc.worker_completion + r.worker_completion,
+            activity: acc.activity.plus(&r.activity),
         },
     )
 }
 
 /// Number of table columns.
-const COLUMNS: usize = 8;
+const COLUMNS: usize = 13;
 
 /// Human-readable fixed-width table (Req 8.1) with an estimates-labeled
 /// column, two client-reported spent-token columns, and a TOTAL row (Req 8.3).
@@ -196,32 +227,58 @@ const TABLE_HEADERS: [&str; COLUMNS] = [
     "FRONTIER COMPLETION (CLIENT-REPORTED)",
     "WORKER PROMPT",
     "WORKER COMPLETION",
+    "SUMMARY READS",
+    "CACHE HITS",
+    "SLICE READS",
+    "DIRECT READS",
+    "HOOK REDIRECTS",
 ];
 
 fn row_cells(r: &DayAggregate) -> [String; COLUMNS] {
-    [
-        r.day.clone(),
-        r.project.clone(),
-        r.harness.clone(),
-        thousands(r.avoided_est),
-        thousands(r.client_prompt),
-        thousands(r.client_completion),
-        thousands(r.worker_prompt),
-        thousands(r.worker_completion),
-    ]
+    with_activity(
+        vec![
+            r.day.clone(),
+            r.project.clone(),
+            r.harness.clone(),
+            thousands(r.avoided_est),
+            thousands(r.client_prompt),
+            thousands(r.client_completion),
+            thousands(r.worker_prompt),
+            thousands(r.worker_completion),
+        ],
+        &r.activity,
+    )
 }
 
 fn total_cells(t: &Totals) -> [String; COLUMNS] {
-    [
-        "TOTAL".to_string(),
-        String::new(),
-        String::new(),
-        thousands(t.avoided_est),
-        thousands(t.client_prompt),
-        thousands(t.client_completion),
-        thousands(t.worker_prompt),
-        thousands(t.worker_completion),
-    ]
+    with_activity(
+        vec![
+            "TOTAL".to_string(),
+            String::new(),
+            String::new(),
+            thousands(t.avoided_est),
+            thousands(t.client_prompt),
+            thousands(t.client_completion),
+            thousands(t.worker_prompt),
+            thousands(t.worker_completion),
+        ],
+        &t.activity,
+    )
+}
+
+/// Appends the five read-activity cells to the savings cells.
+fn with_activity(mut cells: Vec<String>, a: &ActivityCounts) -> [String; COLUMNS] {
+    cells.extend(
+        [
+            a.summary_reads,
+            a.cache_hits,
+            a.slice_reads,
+            a.direct_reads,
+            a.hook_redirects,
+        ]
+        .map(|n| n.to_string()),
+    );
+    cells.try_into().expect("one cell per column")
 }
 
 fn column_widths(table: &[[String; COLUMNS]]) -> [usize; COLUMNS] {

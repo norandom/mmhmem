@@ -305,3 +305,133 @@ async fn stats_never_mutates_the_store() {
     let after = std::fs::read(&store).unwrap();
     assert_eq!(before, after, "stats must not mutate the store (Req 8.6)");
 }
+
+/// One audit line shaped like the writer's records (only the fields stats reads).
+fn audit_line(kind: &str, ms: i64, project: &str, harness: &str) -> String {
+    format!(
+        "{{\"epoch_ms\":{ms},\"event_type\":\"{kind}\",\"agent_harness\":\"{harness}\",\
+         \"project\":\"{project}\",\"details\":{{}}}}\n"
+    )
+}
+
+/// Active log plus one rotated file in the data dir (the local default
+/// location). DAY1 mmhmem/opencode has savings; DAY2 act/claude-code has
+/// activity only.
+fn seed_audit(dir: &Path) {
+    let active = [
+        audit_line("IO_SHUNT_DELEGATED", DAY1 + 10, "mmhmem", "opencode"),
+        audit_line("IO_SHUNT_CACHE_HIT", DAY1 + 11, "mmhmem", "opencode"),
+        audit_line("HOOK_REDIRECT", DAY2 + 10, "act", "claude-code"),
+        audit_line("HOOK_PASS", DAY2 + 11, "act", "claude-code"),
+    ];
+    std::fs::write(dir.join("audit.jsonl"), active.concat()).unwrap();
+    let rotated = [
+        audit_line("IO_TARGETED_READ", DAY1 + 1, "mmhmem", "opencode"),
+        audit_line("IO_DIRECT_READ", DAY2 + 1, "act", "claude-code"),
+        audit_line("HOOK_REDIRECT", DAY2 + 2, "act", "claude-code"),
+    ];
+    std::fs::write(dir.join("audit.jsonl.1"), rotated.concat()).unwrap();
+}
+
+#[tokio::test]
+async fn stats_json_adds_read_counts_and_keeps_the_savings_fields() {
+    let (dir, logs) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    seed(dir.path(), &logs.path().join("audit.jsonl")).await;
+    seed_audit(dir.path());
+    let v = json_report(dir.path());
+    let days = v["days"].as_array().unwrap();
+    assert_eq!(
+        days.len(),
+        4,
+        "3 savings rows plus the activity-only one: {v}"
+    );
+    let find = |day: &str, project: &str| {
+        days.iter()
+            .find(|d| d["day"] == day && d["project"] == project)
+            .unwrap_or_else(|| panic!("row {day} {project}: {v}"))
+    };
+    let d1 = find("2025-01-01", "mmhmem");
+    assert_eq!(d1["avoided_input_tokens_est"], 400);
+    assert_eq!(d1["frontier_prompt_tokens_client_reported"], 490);
+    let counts = [("summary_reads", 1), ("cache_hits", 1), ("slice_reads", 1)];
+    for (field, n) in counts {
+        assert_eq!(d1[field], n, "{field}");
+    }
+    assert_eq!(
+        (d1["direct_reads"].as_u64(), d1["hook_redirects"].as_u64()),
+        (Some(0), Some(0))
+    );
+    let d2 = find("2025-01-02", "other");
+    assert_eq!(d2["hook_redirects"], 0, "no activity is an explicit zero");
+    assert_eq!(d2["avoided_input_tokens_est"], 900);
+    assert_eq!(v["totals"]["hook_redirects"], 2);
+    assert_eq!(v["totals"]["direct_reads"], 1);
+    assert_eq!(v["totals"]["avoided_input_tokens_est"], 1_400);
+}
+
+#[tokio::test]
+async fn stats_shows_a_day_with_activity_but_no_savings_rows() {
+    let (dir, logs) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    seed(dir.path(), &logs.path().join("audit.jsonl")).await;
+    seed_audit(dir.path());
+    let v = json_report(dir.path());
+    let act = v["days"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["project"] == "act")
+        .unwrap_or_else(|| panic!("activity-only row: {v}"))
+        .clone();
+    assert_eq!(act["harness"], "claude-code");
+    assert_eq!(act["day"], "2025-01-02");
+    assert_eq!(act["hook_redirects"], 2, "active and rotated file");
+    assert_eq!(act["direct_reads"], 1, "rotated file");
+    assert_eq!(act["avoided_input_tokens_est"], 0);
+    let table = String::from_utf8(run_stats(dir.path(), false).stdout).unwrap();
+    let header = table.lines().next().unwrap();
+    for label in [
+        "SUMMARY READS",
+        "CACHE HITS",
+        "SLICE READS",
+        "DIRECT READS",
+        "HOOK REDIRECTS",
+    ] {
+        assert!(header.contains(label), "{label}: {header}");
+    }
+    assert!(
+        table
+            .lines()
+            .any(|l| l.contains("act") && l.contains("claude-code")),
+        "{table}"
+    );
+}
+
+#[test]
+fn stats_shows_activity_even_without_a_store_and_never_creates_one() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_audit(dir.path());
+    let v = json_report(dir.path());
+    assert_eq!(v["days"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(v["totals"]["hook_redirects"], 2);
+    assert!(!dir.path().join("memory.db").exists());
+}
+
+#[test]
+fn stats_never_modifies_the_audit_files() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_audit(dir.path());
+    let files = [
+        dir.path().join("audit.jsonl"),
+        dir.path().join("audit.jsonl.1"),
+    ];
+    let before: Vec<_> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
+    assert!(run_stats(dir.path(), false).status.success());
+    assert!(run_stats(dir.path(), true).status.success());
+    let after: Vec<_> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
+    assert_eq!(before, after);
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        2,
+        "no new files"
+    );
+}

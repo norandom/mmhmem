@@ -139,6 +139,7 @@ fn day(day: &str, project: &str, harness: &str, est: i64, wp: i64, wc: i64) -> D
         client_sources: Vec::new(),
         worker_prompt: wp,
         worker_completion: wc,
+        activity: ActivityCounts::default(),
     }
 }
 

@@ -93,7 +93,7 @@ fn cleanup_at_or_beyond(path: &Path, keep: usize) -> io::Result<()> {
 }
 
 /// The Nth rotated sibling of `path` (`audit.jsonl.1`, …).
-fn rotated_path(path: &Path, n: usize) -> PathBuf {
+pub(crate) fn rotated_path(path: &Path, n: usize) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(format!(".{n}"));
     PathBuf::from(name)
