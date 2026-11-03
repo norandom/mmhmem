@@ -3,6 +3,7 @@
 set -euo pipefail
 bash "$(dirname "$0")/test-codex-registration.sh"
 bash "$(dirname "$0")/test-routing-onboarding.sh"
+bash "$(dirname "$0")/test-hooks-onboarding.sh"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 candidate=""; expected_sha256=""; report=""
 if [ "$#" -gt 0 ]; then
@@ -98,7 +99,8 @@ if run_bootstrap --agent codex; then echo 'Unsupported Linux architecture accept
 export TEST_ARCH=x86_64
 : > "$TEST_LOG"
 run_bootstrap --remove --agent codex
-[ "$(wc -l < "$TEST_LOG")" -eq 3 ]
+[ "$(wc -l < "$TEST_LOG")" -eq 4 ]
+grep -q manage_hooks.py "$TEST_LOG"
 grep -q manage_routing.py "$TEST_LOG"
 grep -q routing_onboarding.py "$TEST_LOG"
 [ -z "$(ls -A "$scratch/temp")" ]

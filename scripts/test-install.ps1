@@ -44,6 +44,17 @@ try {
     if ($fixture.DownloadBinary -or (Test-Path $env:LOCALAPPDATA)) { throw 'Dry run wrote installation state' }
     $output = & (Join-Path $repo 'install.ps1') -Remove -DryRun -Agent codex 6>&1 | Out-String
     if ($output -notmatch 'local mode removed' -or $output -notmatch 'unified-memory') { throw "Removal failed: $output" }
+    # One-line installer passes the hook options through (scratch Claude config; nothing is written).
+    $originalClaudeDir = $env:CLAUDE_CONFIG_DIR
+    $env:CLAUDE_CONFIG_DIR = Join-Path $scratch 'claude-config'
+    try {
+        $fixture.DownloadBinary = $false
+        $output = & (Join-Path $repo 'install.ps1') -RemoveHooks -DryRun 6>&1 | Out-String
+        if ($output -notmatch 'no Claude Code read-routing hook' -or $fixture.DownloadBinary -or (Test-Path $env:CLAUDE_CONFIG_DIR)) { throw "-RemoveHooks bootstrap: $output" }
+        $refused = $false
+        try { & (Join-Path $repo 'install.ps1') -Hooks codex -Agent codex -DryRun 6>&1 | Out-Null } catch { $refused = $_ -match 'Installer failed' }
+        if (-not $refused) { throw '-Hooks codex was not passed through to the engine' }
+    } finally { $env:CLAUDE_CONFIG_DIR = $originalClaudeDir }
     # Actual bootstrap writes, isolated from the user's harness registrations.
     $fixture.Install = $true
     & (Join-Path $repo 'install.ps1') -Agent codex
@@ -53,7 +64,7 @@ try {
     if ([IO.File]::ReadAllText($installed) -ne 'release fixture') { throw 'Bootstrap did not replace existing binary' }
     if (@(Get-ChildItem $scratch -Directory -Filter 'mmhmem-install-*').Count -ne 0) { throw 'Bootstrap leaked staging files' }
     $tokens = $null; $errors = $null
-    foreach ($file in @('install.ps1','deploy/install_local.ps1','deploy/install_binary.ps1','lib.ps1','build-marketplace.ps1')) {
+    foreach ($file in @('install.ps1','deploy/install_local.ps1','deploy/install_binary.ps1','deploy/hooks_onboarding.ps1','lib.ps1','build-marketplace.ps1')) {
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file), [ref]$tokens, [ref]$errors) | Out-Null
         if ($errors.Count) { throw "$file parse errors: $errors" }
     }
@@ -67,6 +78,7 @@ try {
     & (Join-Path $PSScriptRoot 'test-install-menus.ps1')
     & (Join-Path $PSScriptRoot 'test-worker-check.ps1')
     & (Join-Path $PSScriptRoot 'test-manage-hooks.ps1')
+    & (Join-Path $PSScriptRoot 'test-hooks-onboarding.ps1')
 } finally {
     $env:TEMP = $originalTemp
     $env:TMP = $originalTmp

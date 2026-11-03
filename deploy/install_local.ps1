@@ -29,6 +29,12 @@
 #                 playbook copies and the copied binary. Store and audit
 #                 files stay untouched.
 #   -DryRun       print actions, change nothing.
+#   -Hooks LIST   opt in to the read-routing hook (claude, or all; global
+#                 scope only). Shows the exact entry first, adds it to the
+#                 user settings file, and leaves Claude Code's own review
+#                 (/hooks) to you. A default install adds no hook.
+#   -RemoveHooks  remove only the hook entry (everything else stays as it was);
+#                 -Remove removes it too.
 #
 # Behavior:
 #   - Global installs copy the binary to a per-user programs dir and
@@ -58,6 +64,8 @@ param(
     [string]$WorkerModel,
     [string]$WorkerUrl,
     [string]$WorkerApiKey,
+    [string]$Hooks,
+    [switch]$RemoveHooks,
     [switch]$Remove,
     [switch]$DryRun,
     [switch]$NonInteractive
@@ -78,6 +86,26 @@ function Remove-ClaudeServer([string[]]$ClaudeArgs) {
     $old = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try { & claude @ClaudeArgs 2>$null | Out-Null } catch {} finally { $ErrorActionPreference = $old }
+}
+
+# --- read-routing hook (opt-in; hooks_onboarding.ps1) ------------------------------
+$Exe = if ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'mmhmem.exe' } else { 'mmhmem' }
+# Per-user programs dir: inside the Windows apps convention, else ~/.local/bin.
+$UserBinDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\mmhmem' } else { Join-Path $HOME '.local\bin' }
+$UserBin = Join-Path $UserBinDir $Exe
+. (Join-Path $PSScriptRoot 'hooks_onboarding.ps1')
+$HookSource = Join-Path $PSScriptRoot 'manage_hooks.ps1'
+$HookDestination = Join-Path $UserBinDir 'manage_hooks.ps1'
+try { $HookHarnesses = @(Get-HookHarnesses $Hooks) } catch { Die $_.Exception.Message }
+if ($HookHarnesses.Count -gt 0 -and $RemoveHooks) { Die '-Hooks and -RemoveHooks are mutually exclusive' }
+if ($RemoveHooks -and $Remove) { Die '-Remove already removes the hook entry; use -RemoveHooks alone for hook-only removal' }
+if ($HookHarnesses.Count -gt 0 -and $Remove) { Die '-Hooks cannot be combined with -Remove' }
+$HookProblem = $false
+if ($RemoveHooks -and -not $Remove) {
+    # Hook-only removal: nothing else is read, installed or removed.
+    $code = Remove-ReadRoutingHook $HookSource $HookDestination -DryRun:$DryRun
+    if ($DryRun) { Info 'dry run - nothing was written; re-run without -DryRun to apply' }
+    exit $code
 }
 
 # --- agent selection ---------------------------------------------------------
@@ -155,10 +183,6 @@ function Write-WorkerConfig {
 
 # --- binary -------------------------------------------------------------------
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$Exe = if ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'mmhmem.exe' } else { 'mmhmem' }
-# Per-user programs dir: inside the Windows apps convention, else ~/.local/bin.
-$UserBinDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\mmhmem' } else { Join-Path $HOME '.local\bin' }
-$UserBin = Join-Path $UserBinDir $Exe
 if ($Remove) {
     # Removal only needs the standard copy location (global installs).
     $Bin = $UserBin
@@ -413,6 +437,24 @@ foreach ($harness in @('claude','opencode')) {
     }
 }
 
+# --- read-routing hook opt-in (before any write; nothing is added by default) ---------
+$HookClaude = $HookHarnesses -contains 'claude'
+$HookCandidate = (-not $Remove) -and $Global -and (Want-Agent 'claude') -and $HasClaude
+if ($HookClaude -and -not $HookCandidate) {
+    Die '-Hooks claude needs a global install (-Global) with the claude agent selected and detected; no hook was added'
+}
+if ($HookCandidate -and ($HookClaude -or ($Interactive -and -not $Hooks))) {
+    Write-Host "`n  Optional: Claude Code read-routing hook`n  ----------------------------------------"
+    if ((Show-ReadRoutingHook $HookSource $UserBin $HookDestination) -ne 0) { Die 'cannot show the read-routing hook; no hook was added' }
+    if (-not $HookClaude) {
+        $addHook = Read-Host '  Add this hook to Claude Code? [y/N]'
+        $HookClaude = $addHook -match '^(?i)y(es)?$'
+    }
+    if ($HookClaude -and -not (Test-ReadRoutingHookAllowed $HookSource $UserBin)) {
+        Die 'the read-routing hook was not added and nothing was changed'
+    }
+}
+
 # --- optional worker setup -------------------------------------------------
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
@@ -592,6 +634,19 @@ if ($Global) {
     }
 }
 
+# --- read-routing hook (after the binary copy it points to) -----------------------------------
+if ($Remove -and $Global -and (Want-Agent 'claude')) {
+    if ((Remove-ReadRoutingHook $HookSource $HookDestination -DryRun:$DryRun) -ne 0) {
+        $HookProblem = $true
+        Info 'the read-routing hook entry could not be removed; see the message above and remove it by hand'
+    }
+} elseif ($HookClaude) {
+    if ((Add-ReadRoutingHook $HookSource $HookDestination $UserBin -DryRun:$DryRun) -eq 0) { Write-HookAdvisory }
+    else { $HookProblem = $true; Info 'the read-routing hook was not added; see the message above' }
+} elseif ($HookCandidate) {
+    Info 'read-routing hook not added (opt-in): re-run with -Hooks claude to review and add it'
+}
+
 # --- summary ---------------------------------------------------------------------------------
 if ($Global -and -not $Remove) {
     if ($DryRun) { Info "[dry-run] add $UserBinDir to user PATH" }
@@ -625,6 +680,7 @@ if ($Remove) {
     Info "check your savings any time: $Bin stats"
 }
 if ($DryRun) { Info 'dry run - nothing was written; re-run without -DryRun to apply' }
+if ($HookProblem) { exit 1 }
 if (-not $Remove -and $Interactive) {
     Write-Host "`n  Optional: explore and prebuild your project cache"
     $warmup = Read-Host '  Show the prompt to run in your agent? [y/N]'

@@ -31,6 +31,12 @@
 #                  playbook copies and the copied binary. Store and audit
 #                  files stay untouched.
 #   --dry-run      print actions, change nothing.
+#   --hooks LIST   opt in to the read-routing hook (claude, or all; global
+#                  scope only; python3 required). Shows the exact entry first,
+#                  adds it to the user settings file, and leaves Claude Code's
+#                  own review (/hooks) to you. A default install adds no hook.
+#   --remove-hooks remove only the hook entry (everything else stays as it
+#                  was); --remove removes it too.
 #
 # Behavior:
 #   - Global installs copy the binary to ~/.local/bin (creating it) and
@@ -54,7 +60,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,59p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "install_local.sh: $*" >&2; exit 1; }
 info() { echo "[mmhmem] $*"; }
 
@@ -68,6 +74,8 @@ AGENTS=""
 WORKER_MODEL=""
 WORKER_URL=""
 WORKER_KEY=""
+HOOKS_LIST=""
+REMOVE_HOOKS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --global) GLOBAL=1 ;;
@@ -106,6 +114,12 @@ while [ $# -gt 0 ]; do
       [ $# -ge 1 ] || die "--worker-api-key needs a key"
       WORKER_KEY="$1"
       ;;
+    --hooks)
+      shift
+      [ $# -ge 1 ] || die "--hooks needs a list (claude, all)"
+      HOOKS_LIST="$(printf '%s' "$1" | tr 'A-Z,' 'a-z,' | tr -d ' ')"
+      ;;
+    --remove-hooks) REMOVE_HOOKS=1 ;;
     --remove) REMOVE=1 ;;
     --dry-run) DRY_RUN=1 ;;
     -h|--help) usage ;;
@@ -113,6 +127,81 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --- read-routing hook (opt-in) ---------------------------------------------
+# Only manage_hooks.py edits harness settings; this script never writes a
+# harness trust/approval record and never passes --managed-settings-path
+# (that would skip the OS policy checks).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK_SOURCE="$SCRIPT_DIR/manage_hooks.py"
+HOOK_DEST="$HOME/.local/bin/mmhmem-manage-hooks.py" # persistent: the printed removal command names it
+HOOK_BIN="$HOME/.local/bin/mmhmem"
+HOOK_CLAUDE=0
+HOOK_PROBLEM=0
+for h in ${HOOKS_LIST//,/ }; do
+  case "$h" in
+    claude|all) HOOK_CLAUDE=1 ;;
+    codex|opencode) die "--hooks $h is not available yet; $h currently gets advisory guidance only" ;;
+    *) die "unknown hooks harness '$h' (valid: claude, all)" ;;
+  esac
+done
+[ "$HOOK_CLAUDE" -eq 0 ] || [ "$REMOVE_HOOKS" -eq 0 ] || die '--hooks and --remove-hooks are mutually exclusive'
+[ "$HOOK_CLAUDE" -eq 0 ] || [ "$REMOVE" -eq 0 ] || die '--hooks cannot be combined with --remove'
+[ "$REMOVE_HOOKS" -eq 0 ] || [ "$REMOVE" -eq 0 ] || die '--remove already removes the hook entry; use --remove-hooks alone for hook-only removal'
+dry_flag() { [ "$DRY_RUN" -eq 0 ] || printf '%s' --dry-run; }
+# The helper names its own path in "Remove it with:"; from the staging copy that path is deleted after
+# install, so show the removal that will exist (the persistent helper, or the installer).
+persistent_removal() { # stdin: helper output; $1 = line prefix
+  while IFS= read -r line; do
+    case "$line" in
+      *"Remove it with:"*)
+        printf '%sAfter install, remove it with: python3 %s remove --harness claude\n' "$1" "'$HOOK_DEST'"
+        printf '%sOr re-run the installer with --remove-hooks (a full --remove removes it too).\n' "$1" ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done
+}
+show_hook() {
+  hook_text="$(python3 "$HOOK_SOURCE" show --harness claude --binary "$HOOK_BIN")" || return 1
+  printf '%s\n' "$hook_text" | persistent_removal ''
+}
+hook_refused() { info 'Claude Code gets advisory guidance only (the mmhmem routing rule): its hooks are disabled or restricted by the policy named above.'; }
+hook_allowed() { # refuse before any write when policy disables hooks
+  if hook_out="$(python3 "$HOOK_SOURCE" install --harness claude --binary "$HOOK_BIN" --dry-run 2>&1)"; then return 0; fi
+  printf '%s\n' "$hook_out"
+  hook_refused
+  return 1
+}
+add_hook() {
+  hook_script="$HOOK_SOURCE"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    info "[dry-run] copy manage_hooks.py -> $HOOK_DEST"
+    python3 "$hook_script" install --harness claude --binary "$HOOK_BIN" --dry-run | persistent_removal '[mmhmem] '
+    return "${PIPESTATUS[0]}"
+  else
+    mkdir -p "$(dirname "$HOOK_DEST")"
+    cp "$HOOK_SOURCE" "$HOOK_DEST"
+    hook_script="$HOOK_DEST"
+  fi
+  python3 "$hook_script" install --harness claude --binary "$HOOK_BIN" $(dry_flag)
+}
+remove_hook() {
+  python3 "$HOOK_SOURCE" remove --harness claude $(dry_flag) || return 1
+  if [ -f "$HOOK_DEST" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] rm $HOOK_DEST"; else rm -f "$HOOK_DEST"; fi
+  fi
+}
+hook_advisory() {
+  info 'Start a new Claude Code session: hooks are read at startup. Accept the workspace trust dialog if asked and review the hook in /hooks.'
+  info 'Codex and OpenCode currently get advisory guidance only (their hooks are not available yet).'
+}
+if [ "$REMOVE_HOOKS" -eq 1 ] && [ "$REMOVE" -eq 0 ]; then
+  # Hook-only removal: nothing else is read, installed or removed.
+  command -v python3 >/dev/null 2>&1 || die 'Python 3 is required to manage hooks'
+  remove_hook || exit 1
+  [ "$DRY_RUN" -eq 0 ] || info 'dry run — nothing was written; re-run without --dry-run to apply'
+  exit 0
+fi
 for a in ${AGENTS//,/ }; do
   case "$a" in
     claude|opencode|desktop|antigravity|codex|all) ;;
@@ -155,7 +244,6 @@ if [ "$REMOVE" -eq 0 ]; then
 fi
 
 # --- binary ----------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 worker_check() {
   MMHMEM_CHECK_MODEL="$WORKER_MODEL" MMHMEM_CHECK_API_URL="$WORKER_URL" MMHMEM_CHECK_API_KEY="$WORKER_KEY" \
@@ -495,6 +583,29 @@ if [ "${#ROUTING_AGENTS[@]}" -gt 0 ]; then
   ROUTING_PLANS="$(python3 "$SCRIPT_DIR/routing_onboarding.py" prepare "${routing_args[@]}")" || die 'Routing preflight failed; no integrations were changed'
 fi
 
+# --- read-routing hook opt-in (before any write; nothing is added by default) --
+HOOK_CANDIDATE=0
+if [ "$REMOVE" -eq 0 ] && [ "$GLOBAL" -eq 1 ] && want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then HOOK_CANDIDATE=1; fi
+if [ "$HOOK_CLAUDE" -eq 1 ] && [ "$HOOK_CANDIDATE" -eq 0 ]; then
+  die '--hooks claude needs a global install (--global) with the claude agent selected and detected; no hook was added'
+fi
+if [ "$HOOK_CLAUDE" -eq 1 ] && ! command -v python3 >/dev/null 2>&1; then
+  die 'Python 3 is required to manage hooks; no hook was added'
+fi
+if [ "$HOOK_CANDIDATE" -eq 1 ] && [ "$HOOK_CLAUDE" -eq 0 ] && [ -z "$HOOKS_LIST" ] && [ -t 0 ] && command -v python3 >/dev/null 2>&1; then
+  printf '\n  Optional: Claude Code read-routing hook\n  ----------------------------------------\n'
+  show_hook || die 'cannot show the read-routing hook; no hook was added'
+  printf '  Add this hook to Claude Code? [y/N]: '
+  read -r add_hook_answer || die 'no answer given'
+  case "$add_hook_answer" in y|Y|yes|YES) HOOK_CLAUDE=1 ;; esac
+elif [ "$HOOK_CLAUDE" -eq 1 ]; then
+  printf '\n  Optional: Claude Code read-routing hook\n  ----------------------------------------\n'
+  show_hook || die 'cannot show the read-routing hook; no hook was added'
+fi
+if [ "$HOOK_CLAUDE" -eq 1 ]; then
+  hook_allowed || die 'the read-routing hook was not added and nothing was changed'
+fi
+
 # --- optional worker setup -------------------------------------------------
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   printf '\n  Optional: summary cache\n  ----------------------------------------\n'
@@ -751,6 +862,23 @@ if [ "$GLOBAL" -eq 1 ]; then
   fi
 fi
 
+# --- read-routing hook (after the binary copy it points to) -----------------------
+if [ "$REMOVE" -eq 1 ] && [ "$GLOBAL" -eq 1 ] && want_agent claude; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    info 'Python 3 not found: this installer cannot have added a read-routing hook; skipped hook removal'
+  elif remove_hook; then :; else
+    HOOK_PROBLEM=1
+    info 'the read-routing hook entry could not be removed; see the message above and remove it by hand'
+  fi
+elif [ "$HOOK_CLAUDE" -eq 1 ]; then
+  if add_hook; then hook_advisory; else
+    HOOK_PROBLEM=1
+    info 'the read-routing hook was not added; see the message above'
+  fi
+elif [ "$HOOK_CANDIDATE" -eq 1 ]; then
+  info 'read-routing hook not added (opt-in): re-run with --hooks claude to review and add it'
+fi
+
 # --- summary ----------------------------------------------------------------------
 [ -n "$registered" ] || [ "$WORKER_CONFIG_WRITTEN" -eq 1 ] || die "nothing to do: no harness selected/detected"
 MODE="project: $PROJECT_DIR"
@@ -780,6 +908,7 @@ fi
 if [ "$DRY_RUN" -eq 1 ]; then
   info "dry run — nothing was written; re-run without --dry-run to apply"
 fi
+[ "$HOOK_PROBLEM" -eq 0 ] || exit 1
 if [ "$REMOVE" -eq 0 ] && [ -t 0 ]; then
   printf '\n  Optional: explore and prebuild your project cache\n'
   printf '  Show the prompt to run in your agent? [y/N]: '

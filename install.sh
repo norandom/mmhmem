@@ -33,9 +33,13 @@ All arguments pass through to deploy/install_local.sh, e.g.:
   ... | bash -s -- --global --agent claude      # one harness, user-wide
   ... | bash -s -- --global --agent codex      # codex via ~/.codex/config.toml
   ... | bash -s -- --remove --global          # uninstall (the store is kept)
+  ... | bash -s -- --global --agent claude --hooks claude   # opt in to the read-routing hook
+  ... | bash -s -- --remove-hooks             # remove only that hook entry
 
 With no arguments, menus select install/update or removal and which agents
 to configure globally. Use --agent LIST for unattended runs.
+The read-routing hook is never added by default: --hooks claude shows the exact
+entry, then adds it to your user Claude Code settings (python3 required).
 A worker model stays unconfigured (shunting off) until you pass
 --worker-model NAME or edit .mmhmem.json.
 EOF
@@ -44,6 +48,7 @@ EOF
 
 # --- flags (parsed first so --help needs no platform) -------------------------
 REMOVE=0
+REMOVE_HOOKS=0
 DRY_RUN=0
 HAS_SCOPE=0
 HAS_AGENT=0
@@ -52,6 +57,7 @@ for a in "$@"; do
     -h|--help) usage ;;
     --remove)  REMOVE=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --remove-hooks) REMOVE_HOOKS=1; HAS_AGENT=1 ;;
     --global|--project) HAS_SCOPE=1 ;;
     --agent) HAS_AGENT=1 ;;
   esac
@@ -84,6 +90,10 @@ if [ "$HAS_AGENT" -eq 0 ]; then
     done
   fi
 fi
+
+# Hook-only removal needs the helper alone: no binary, no companion files.
+SKIP_INSTALL=0
+if [ "$REMOVE" -eq 1 ] || [ "$REMOVE_HOOKS" -eq 1 ]; then SKIP_INSTALL=1; fi
 
 # --- platform -----------------------------------------------------------------
 os="$(uname -s)"
@@ -124,12 +134,12 @@ fetch() { # $1 = url, $2 = output path
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 BIN="$HOME/.local/bin/mmhmem"
-if [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+if [ "$SKIP_INSTALL" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   info "downloading the latest release binary ($asset)"
   fetch "$REL/$asset" "$tmp/mmhmem"
   [ -s "$tmp/mmhmem" ] || die "empty binary download"
   chmod +x "$tmp/mmhmem"
-elif [ "$REMOVE" -eq 0 ]; then
+elif [ "$SKIP_INSTALL" -eq 0 ]; then
   info "[dry-run] download $REL/$asset -> $BIN"
 fi
 
@@ -140,7 +150,8 @@ mkdir -p "$tree/codex/skills/mmhmem-recap" "$tree/skills/unified-memory" "$tree/
 fetch "$RAW/deploy/install_local.sh" "$tree/install_local.sh"
 fetch "$RAW/deploy/manage_routing.py" "$tree/manage_routing.py"
 fetch "$RAW/deploy/routing_onboarding.py" "$tree/routing_onboarding.py"
-if [ "$REMOVE" -eq 0 ]; then
+fetch "$RAW/deploy/manage_hooks.py" "$tree/manage_hooks.py"
+if [ "$SKIP_INSTALL" -eq 0 ]; then
   mkdir -p "$tree/instructions"
   fetch "$RAW/deploy/instructions/mmhmem-routing.md" "$tree/instructions/mmhmem-routing.md"
   fetch "$RAW/deploy/check_worker.py" "$tree/check_worker.py"
@@ -152,7 +163,7 @@ if [ "$REMOVE" -eq 0 ]; then
 fi
 
 # --- run the engine -------------------------------------------------------------
-if [ "$REMOVE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+if [ "$SKIP_INSTALL" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
   set -- "$@" --install-source "$tmp/mmhmem"
 fi
 info "running the installer"

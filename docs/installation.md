@@ -92,6 +92,46 @@ summary cache using `shunt_warmup`, up to 25 files per batch. Run this in your
 agent after restarting its mmhmem connection. The installer itself does not
 scan the project or call the worker. Hosted providers may charge for summaries.
 
+### Read-routing hook (opt-in)
+
+An optional Claude Code `PreToolUse` hook declines whole-file `Read` calls on
+large files and points the agent to `smart_read`. A default install never adds
+it. Opt in with `--hooks claude` (Linux/macOS, needs Python 3) or `-Hooks claude`
+(Windows), or answer `y` to the interactive prompt (default `N`; unattended runs
+never prompt). Hooks are global and user scope only: `--global` is required, and
+nothing is written to a project's `.claude/settings.json`.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --agent claude --hooks claude
+.\install.ps1 -Agent claude -Hooks claude
+```
+
+Before adding it, the installer prints the exact entry, the settings file
+(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), what the
+hook sees and decides, and the command that removes it. It refuses, before
+changing anything, when user or managed settings disable hooks, and names the
+setting. The entry is spliced into the file in place and a `.mmhmem.bak`
+backup is made; every other key and hook stays as it was, and a repeated opt-in
+keeps one entry.
+
+Claude Code decides whether the hook runs, not mmhmem, and the installer never
+writes any trust or approval record. After installing, start a new Claude Code
+session, accept the workspace trust dialog for the folder, and review the hook
+with `/hooks`. Codex and OpenCode currently get advisory guidance only; their
+hooks are not available yet.
+
+Remove only the hook with `--remove-hooks` / `-RemoveHooks` (the settings file
+returns to its previous bytes), or with the removal command the installer printed
+(the helper is kept next to the mmhmem binary: `%LOCALAPPDATA%\Programs\mmhmem\manage_hooks.ps1`
+on Windows, `~/.local/bin/mmhmem-manage-hooks.py` elsewhere). A global `--remove`
+removes it too (`--remove` with `--remove-hooks` is refused as redundant). The
+display before consent names that persistent removal command. Removal has two
+exceptions to byte-identical restore: a pre-existing empty `hooks` or
+`hooks.PreToolUse` container is dropped, and a settings file that the install
+created is left in place (not deleted). If user or managed policy disables
+hooks, the installer says so and Claude Code gets advisory guidance only (the
+routing rule). `--dry-run` shows everything and writes nothing.
+
 Removal keeps the memory store and worker settings. Removing selected agents
 also keeps the shared binary for other integrations; selecting `all` removes it
 when possible. Dry runs leave installed binaries and configuration
