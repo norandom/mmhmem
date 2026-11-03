@@ -1,6 +1,6 @@
 ---
 name: unified-memory
-description: Resume, remember, and checkpoint work with mmhmem.
+description: Read files, optimize tokens, and resume/checkpoint work with mmhmem.
 compatibility: Connected mmhmem MCP server.
 ---
 

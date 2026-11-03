@@ -1,7 +1,7 @@
 {
   "name": "unified-memory",
   "version": "0.1.0",
-  "description": "Resume, remember, and checkpoint work with mmhmem.",
+  "description": "Read files, optimize tokens, and resume/checkpoint work with mmhmem.",
   "author": {
     "name": "norandom",
     "url": "https://github.com/norandom"
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "mmhmem Memory",
     "shortDescription": "Resume work and share project memory across agents",
-    "longDescription": "Resume, remember, and checkpoint work with mmhmem.",
+    "longDescription": "Read files, optimize tokens, and resume/checkpoint work with mmhmem.",
     "developerName": "norandom",
     "category": "Productivity",
     "capabilities": [],

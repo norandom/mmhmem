@@ -15,6 +15,9 @@ GENERATED = ["plugins", ".agents/plugins", ".claude-plugin", ".gemini-plugin"]
 subprocess.run([sys.executable, str(ROOT / "scripts/check-checkpoint-guidance.py"),
                 "--self-test"], cwd=ROOT, check=True)
 
+subprocess.run([sys.executable, str(ROOT / "scripts/check-routing-guidance.py"),
+                "--self-test"], cwd=ROOT, check=True)
+
 
 def snapshot():
     # JSON escaping/whitespace differs between jq and Windows PowerShell 5.1.

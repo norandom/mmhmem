@@ -32,7 +32,7 @@ verification task rather than forming standalone work.
   - _Depends: 1.1, 1.2_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 2.2 (P) Package concise reading guidance and improve skill discoverability
+- [x] 2.2 (P) Package concise reading guidance and improve skill discoverability
   - Produce canonical ordinary-inspection guidance with targeted exact reads, explicit user preferences, native workflow preservation, and bounded failure fallback.
   - Improve the portable skill's reading/token-optimization discovery while retaining checkpoint behavior and its estimated 200-token budget.
   - Regenerate marketplace artifacts and connect routing checks alongside existing checkpoint/distribution checks.
@@ -139,3 +139,4 @@ verification task rather than forming standalone work.
 ## Implementation Notes
 - Adoption subprocesses must drain stdout/stderr concurrently while enforcing timeout and kill/reap; flood-output and delayed-write regressions cover both.
 - Shared server instructions now live in src/mcp/instructions.rs; checkpoint checker follows that constant and retains scenario mutation tests.
+- Preserve LF when rewriting canonical SKILL.md; shell builder rejects CRLF frontmatter. Native routing/checkpoint and Dagger Debian/Alpine distribution parity verified.
