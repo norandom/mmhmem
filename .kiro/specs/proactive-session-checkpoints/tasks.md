@@ -15,7 +15,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Checkpoint service_
   - _Requirements: 2.4, 3.4, 4.1, 4.2, 4.4, 4.5_
 
-- [ ] 2. Integrate truthful recovery presentation into MCP responses
+- [x] 2. Integrate truthful recovery presentation into MCP responses
   - Introduce the private pure formatter and wire it into the existing tool handler while retaining worker notices for every recovery case.
   - Render saved checkpoint, history without checkpoint, and neither state nor history as distinct cases; expose recorded activity without synthesizing working state.
   - Show UTC save time and epoch milliseconds separately from timestamped breadcrumbs; handle timestamp ties, checkpoint-event labels, and formatting failure honestly.
@@ -64,5 +64,6 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Runtime verification, Guidance verification (explicit final integration)_
   - _Depends: 1, 2, 3, 4, 5_
   - _Requirements: 2.3, 4.3, 4.4, 4.5, 4.6_
+
 
 

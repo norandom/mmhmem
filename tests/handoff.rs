@@ -33,7 +33,19 @@ async fn full_cross_agent_handoff_flow_over_mcp() {
         text.contains("No active cross-agent session"),
         "text={text}"
     );
-    let task_id = text.split("task ID: ").nth(1).unwrap().trim().to_string();
+    let task_id = text
+        .split("task ID: ")
+        .nth(1)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+
+    assert!(text.contains("no saved state or recorded prior activity"));
+    assert!(text.contains("does not save a checkpoint"));
 
     // Harness A works: record an observation + read a file.
     let args = serde_json::json!({
@@ -85,6 +97,8 @@ async fn full_cross_agent_handoff_flow_over_mcp() {
     .await;
     assert!(tool_text(&body).contains("Checkpoint saved"), "body={body}");
 
+    assert!(tool_text(&body).contains("Saved at:"));
+
     // Harness B resumes: inherits state + breadcrumbs.
     let args = serde_json::json!({"project": "proj", "agent_harness": "opencode"});
     let (_s, body) = mcp_tool(
@@ -100,6 +114,9 @@ async fn full_cross_agent_handoff_flow_over_mcp() {
     let text = tool_text(&body);
     assert!(text.contains(&task_id), "task id inherited: {text}");
     assert!(text.contains("claude-code"), "last harness: {text}");
+    assert!(text.contains("Checkpoint saved at:"));
+    assert!(text.contains("epoch ms:"));
+    assert!(text.contains("Recorded Activity"));
     assert!(text.contains("ship it"), "objective: {text}");
     assert!(text.contains("halfway there"), "working state: {text}");
     assert!(text.contains("smart_read"), "breadcrumbs: {text}");
@@ -119,4 +136,45 @@ async fn full_cross_agent_handoff_flow_over_mcp() {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
         assert!(v["record_sha256"].is_string());
     }
+}
+
+#[tokio::test]
+async fn history_without_checkpoint_is_exposed_over_http() {
+    let (_roots, _data, _logs, state) = test_state("secret-token");
+    let (port, _handle) = spawn_server(state).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut session = mcp_init(&client, &base, "secret-token").await;
+    let args = serde_json::json!({"project":"history", "agent_harness":"opencode"});
+    // First resume records activity but creates no working-state checkpoint.
+    mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        10,
+        "session_resume_or_handoff",
+        &args.to_string(),
+    )
+    .await;
+    let (status, body) = mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        11,
+        "session_resume_or_handoff",
+        &args.to_string(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let text = tool_text(&body);
+    assert!(
+        text.contains("No working-state checkpoint was saved"),
+        "{text}"
+    );
+    assert!(text.contains("session_resume_or_handoff"), "{text}");
+    assert!(text.contains("original harness conversation"), "{text}");
+    assert!(text.contains("No worker model configured"), "{text}");
+    assert!(!text.contains("Checkpoint saved"), "{text}");
 }

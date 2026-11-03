@@ -422,36 +422,9 @@ impl McpServer {
                     tracing::warn!("client_usage stats failed: {e}");
                 }
             }
-            return ok_text(format!(
-                "Checkpoint saved for project '{}' (task: {}). {} chars stored. Ready for cross-agent pickup.",
-                p.project, ack.task_id, ack.stored_chars
-            ));
+            return ok_text(super::session_response::checkpoint(&p.project, &ack));
         }
-        if !view.found_prior_session {
-            return ok_text(format!(
-                "No active cross-agent session found for '{}'. Initialized new task ID: {}.{}",
-                p.project,
-                view.task_id,
-                self.worker_notice()
-            ));
-        }
-        let mut md = format!(
-            "### Active Cross-Agent Session (Task: {})\n**Last Active Agent:** {} | **Objective:** {}\n\n#### Live Working Context\n{}\n\n#### Recent Cross-Agent Tool Breadcrumbs (Newest First)\n",
-            view.task_id, view.last_harness, view.objective, view.working_state_md
-        );
-        if view.breadcrumbs.is_empty() {
-            md.push_str("(none)\n");
-        } else {
-            for b in &view.breadcrumbs {
-                md.push_str(&format!(
-                    "- [{}] {}({}): {}\n",
-                    b.harness,
-                    b.tool,
-                    b.resource.clone().unwrap_or_default(),
-                    b.summary
-                ));
-            }
-        }
+        let mut md = super::session_response::resume(&p.project, &view);
         md.push_str(&self.worker_notice());
         ok_text(md)
     }

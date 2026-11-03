@@ -233,7 +233,11 @@ async fn two_processes_share_handoff_cache_memory_and_stats() {
         .split("task ID: ")
         .nth(1)
         .unwrap()
+        .lines()
+        .next()
+        .unwrap()
         .trim()
+        .trim_end_matches('.')
         .to_string();
 
     let obs = a
