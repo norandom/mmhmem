@@ -123,3 +123,8 @@ The plugin contains the skill, not a binary. Remove only the standalone
 `unified-memory` directory from `~/.claude/skills` or `~/.agents/skills` to
 avoid duplicate discovery, then restart the agent. See the
 [marketplace guide](../.marketplace/README.md) for other supported manifests.
+
+Codex installs `$mmhmem-recap` at `~/.agents/skills/mmhmem-recap/SKILL.md`.
+Use it to recover the latest checkpoint and recorded activity. Start a fresh
+Codex session after installation if the skill picker has not refreshed. The
+legacy `~/.codex/prompts/mmhmem-recap.md` remains available for compatibility.

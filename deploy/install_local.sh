@@ -43,7 +43,8 @@
 #     merge; without it the script prints the manual steps instead).
 #   - Codex registers through ~/.codex/config.toml as a managed
 #     [mcp_servers.mmhmem] block (global only; a project install skips it
-#     with a note) and gets the /mmhmem-recap prompt in ~/.codex/prompts.
+#     with a note), installs $mmhmem-recap in ~/.agents/skills, and keeps
+#     the legacy recap prompt in ~/.codex/prompts for compatibility.
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
 #   - Claude Code and OpenCode additionally get the /mmhmem-recap command
@@ -191,7 +192,7 @@ install_skill() {
     info "[dry-run] copy SKILL.md -> $1/SKILL.md"
   else
     mkdir -p "$1"
-    cp "$SKILL_SRC" "$1/SKILL.md"
+    cp "${2:-$SKILL_SRC}" "$1/SKILL.md"
   fi
   info "playbook installed: $1/SKILL.md"
 }
@@ -682,10 +683,12 @@ if want_agent codex && [ "$HAS_CODEX" -eq 1 ]; then
     remove_codex_registration
     remove_command "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
     remove_skill "$HOME/.agents/skills/unified-memory"
+    remove_skill "$HOME/.agents/skills/mmhmem-recap"
     registered="codex $registered"
   elif [ "$GLOBAL" -eq 1 ]; then
     set_codex_registration "$BIN"
     install_skill "$HOME/.agents/skills/unified-memory"
+    install_skill "$HOME/.agents/skills/mmhmem-recap" "$REPO_ROOT/deploy/skills/mmhmem-recap/SKILL.md"
     command_tmpl "$CODEX_COMMAND_SRC" "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
     registered="codex $registered"
   else

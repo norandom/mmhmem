@@ -15,7 +15,7 @@ CANONICAL = 'deploy/skills/unified-memory/SKILL.md'
 PACKAGE = 'plugins/unified-memory/skills/unified-memory/SKILL.md'
 SERVER = 'src/mcp/instructions.rs'
 RECAPS = [f'deploy/commands/{agent}/mmhmem-recap.md'
-          for agent in ('claude', 'codex', 'opencode')]
+          for agent in ('claude', 'codex', 'opencode')] + ['deploy/skills/mmhmem-recap/SKILL.md']
 INPUTS = [CANONICAL, PACKAGE, SERVER, *RECAPS]
 
 # These named scenarios are intentionally checked per entry point, not across
@@ -71,6 +71,8 @@ def validate(root):
         return errors
     if (root / CANONICAL).read_bytes() != (root / PACKAGE).read_bytes():
         errors.append('packaged skill differs from canonical bytes')
+    if texts['deploy/skills/mmhmem-recap/SKILL.md'].replace('name: mmhmem-recap\n', '', 1) != texts['deploy/commands/codex/mmhmem-recap.md']:
+        errors.append('Codex recap skill differs from legacy prompt guidance')
     if len(texts[CANONICAL].split()) * 1.3 > 200:
         errors.append('canonical skill exceeds 200-token estimate')
     for path in [CANONICAL, SERVER, *RECAPS]:

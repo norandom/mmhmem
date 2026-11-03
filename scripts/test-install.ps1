@@ -38,7 +38,7 @@ try {
         if (-not $refused) { throw 'Unattended bootstrap silently selected agents' }
     }
     $output = & (Join-Path $repo 'install.ps1') -DryRun -Agent codex 6>&1 | Out-String
-    if ($output -notmatch 'copy SKILL.md' -or $output -notmatch 'mmhmem-recap' -or $output -notmatch 'config.toml') {
+    if ($output -notmatch 'copy SKILL.md' -or $output -notmatch '\.agents[\\/]skills[\\/]mmhmem-recap[\\/]SKILL.md' -or $output -notmatch 'config.toml') {
         throw "Dry run missed registration, skill or recap: $output"
     }
     if ($fixture.DownloadBinary -or (Test-Path $env:LOCALAPPDATA)) { throw 'Dry run wrote installation state' }
@@ -62,6 +62,7 @@ try {
     & (Join-Path $PSScriptRoot 'test-routing-instructions.ps1')
     & (Join-Path $PSScriptRoot 'test-routing-cross.ps1')
     & (Join-Path $PSScriptRoot 'test-codex-registration.ps1')
+    & (Join-Path $PSScriptRoot 'test-recap-skill.ps1')
     & (Join-Path $PSScriptRoot 'test-install-binary.ps1')
     & (Join-Path $PSScriptRoot 'test-install-menus.ps1')
     & (Join-Path $PSScriptRoot 'test-worker-check.ps1')

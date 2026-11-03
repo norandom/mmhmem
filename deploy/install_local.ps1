@@ -40,7 +40,8 @@
 #     Desktop configs are JSON-merged in place, preserving existing keys.
 #   - Codex registers through ~/.codex/config.toml as a managed
 #     [mcp_servers.mmhmem] block (global only; a project install skips it
-#     with a note) and gets the /mmhmem-recap prompt in ~/.codex/prompts.
+#     with a note), installs $mmhmem-recap in ~/.agents/skills, and keeps
+#     the legacy recap prompt in ~/.codex/prompts for compatibility.
 #   - Antigravity imports MCP servers through its settings UI: the script
 #     prints the ready-to-import snippet (and the removal step to undo it).
 #   - Claude Code and OpenCode additionally get the /mmhmem-recap command
@@ -173,10 +174,10 @@ if ($Remove) {
 
 $SkillSrc = Join-Path $RepoRoot 'deploy\skills\unified-memory\SKILL.md'
 if (-not $Remove -and -not (Test-Path -LiteralPath $SkillSrc)) { Die "SKILL.md not found at $SkillSrc" }
-function Install-Skill([string]$dir) {
+function Install-Skill([string]$dir, [string]$src = $SkillSrc) {
     if ($DryRun) { Info "[dry-run] copy SKILL.md -> $dir\SKILL.md"; return }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    Copy-Item -LiteralPath $SkillSrc -Destination (Join-Path $dir 'SKILL.md') -Force
+    Copy-Item -LiteralPath $src -Destination (Join-Path $dir 'SKILL.md') -Force
     Info "playbook installed: $dir\SKILL.md"
 }
 function Remove-Skill([string]$dir) {
@@ -554,10 +555,12 @@ if ((Want-Agent 'codex') -and $HasCodex) {
         Remove-CodexRegistration
         Remove-Command (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
         Remove-Skill (Join-Path $HOME '.agents\skills\unified-memory')
+        Remove-Skill (Join-Path $HOME '.agents\skills\mmhmem-recap')
         $Registered.Add('codex') | Out-Null
     } elseif ($Global) {
         Set-CodexRegistration $Bin
         Install-Skill (Join-Path $HOME '.agents\skills\unified-memory')
+        Install-Skill (Join-Path $HOME '.agents\skills\mmhmem-recap') (Join-Path $RepoRoot 'deploy\skills\mmhmem-recap\SKILL.md')
         Set-Command $CodexCommandSrc (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
         $Registered.Add('codex') | Out-Null
     } else {

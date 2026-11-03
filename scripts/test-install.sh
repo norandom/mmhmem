@@ -110,7 +110,7 @@ env HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$root/deploy/install_lo
   --global --agent codex --binary "$scratch/missing/mmhmem" --dry-run > "$scratch/engine.log"
 grep -q 'config.toml' "$scratch/engine.log"
 grep -q '.agents/skills/unified-memory' "$scratch/engine.log"
-grep -q 'mmhmem-recap' "$scratch/engine.log"
+grep -q '.agents/skills/mmhmem-recap/SKILL.md' "$scratch/engine.log"
 env HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$root/deploy/install_local.sh" \
   --global --agent codex --remove --dry-run > "$scratch/engine.log"
 grep -q 'local mode removed' "$scratch/engine.log"
