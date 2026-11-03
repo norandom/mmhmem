@@ -34,7 +34,10 @@ $script:RemoteContent='expected asset bytes'
 $script:Published=$false
 $script:HasAsset=$false
 function Get-ReleaseApi([string]$Endpoint) {
-    return [pscustomobject]@{draft=(-not $script:Published);assets=$(if($script:HasAsset){@([pscustomobject]@{name='native.bin'})}else{@()})}
+    if ($Endpoint -like 'releases/tags/*') {throw 'HTTP 404: tag endpoint excludes drafts'}
+    if ($Endpoint -like 'releases?per_page=*') {return @([pscustomobject]@{id=456;tag_name='v0.3.0'})}
+    if ($Endpoint -cne 'releases/456') {throw 'Unexpected release endpoint'}
+    return [pscustomobject]@{id=456;tag_name='v0.3.0';draft=(-not $script:Published);assets=$(if($script:HasAsset){@([pscustomobject]@{name='native.bin'})}else{@()})}
 }
 function Invoke-ReleaseGh([string[]]$Arguments) {
     if ($Arguments[0] -ne 'release') {throw 'Unexpected mocked command'}

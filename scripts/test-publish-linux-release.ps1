@@ -140,7 +140,13 @@ function global:gh {
             if ($script:Mode -eq 'duplicate-artifact') {$items+=@($items[0])}
             return (@{total_count=$items.Count;artifacts=$items} | ConvertTo-Json -Depth 5 -Compress)
         }
-        if ($endpoint -like '*/releases/tags/*') {
+        if ($endpoint -like '*/releases/tags/*') {$global:LASTEXITCODE=1;return 'HTTP 404: tag endpoint excludes drafts'}
+        if ($endpoint -like '*/releases?per_page=*') {
+            if ($script:Mode -eq 'missing-release') {return '[]'}
+            $id=if ($script:Mode -eq 'release-changed') {999} else {456}
+            return ('[{"id":'+$id+',"tag_name":"v-test"}]')
+        }
+        if ($endpoint -match '/releases/(456|999)$') {
             if ($script:Mode -eq 'missing-release') {$global:LASTEXITCODE=1;return 'release missing'}
             $release=@{id=456;tag_name='v-test';draft=$true;assets=@(@{name='mmhmem.exe';id=77;state='uploaded'})}
             if ($script:Mode -eq 'published') {$release.draft=$false}
@@ -204,7 +210,7 @@ try {
         if (@($script:Calls | Where-Object {$_ -match 'upload|create|edit|delete|clobber'}).Count) {throw 'Validation performed a write'}
     }
     $negative=@{
-        'wrong-repo'='repository';'fork'='repository';'wrong-workflow'='workflow';'wrong-workflow-id'='workflow';'failed-run'='successful';'running'='successful';'wrong-commit'='commit';'untrusted-event'='trusted';'failed-job'='job';'skipped-job'='job';'missing-job'='job';'missing-artifact'='artifact';'missing-tag'='gh';'missing-release'='gh';'published'='draft';'conflict'='conflict';'dirty'='publishable';'not-publishable'='publishable';'schema'='schema';'bool-string'='boolean';'hash'='checksum';'target'='target';'revision'='revision';'validation'='validation';'runtime'='pass';'duplicate-runtime'='runtime';'path'='path';'missing-field'='lockfile';'bytes'='checksum';'sums'='SHA256SUMS';'evidence'='match|pass';'dynamic'='linkage';'empty-log'='empty';'duplicate-json'='duplicate'
+        'wrong-repo'='repository';'fork'='repository';'wrong-workflow'='workflow';'wrong-workflow-id'='workflow';'failed-run'='successful';'running'='successful';'wrong-commit'='commit';'untrusted-event'='trusted';'failed-job'='job';'skipped-job'='job';'missing-job'='job';'missing-artifact'='artifact';'missing-tag'='gh';'missing-release'='release not found';'published'='draft';'conflict'='conflict';'dirty'='publishable';'not-publishable'='publishable';'schema'='schema';'bool-string'='boolean';'hash'='checksum';'target'='target';'revision'='revision';'validation'='validation';'runtime'='pass';'duplicate-runtime'='runtime';'path'='path';'missing-field'='lockfile';'bytes'='checksum';'sums'='SHA256SUMS';'evidence'='match|pass';'dynamic'='linkage';'empty-log'='empty';'duplicate-json'='duplicate'
     }
     $negative['missing-workflow-id']='workflow'; $negative['string-workflow-id']='workflow'; $negative['string-attempt']='trusted'
     $negative['duplicate-job']='job'; $negative['expired-artifact']='artifact'; $negative['duplicate-artifact']='artifact'

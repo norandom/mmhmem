@@ -27,6 +27,24 @@ function Get-ReleaseApi([string]$Endpoint) {
     $raw=Invoke-ReleaseGh @('api','--method','GET',"repos/$($script:ReleaseRepository)/$Endpoint")
     return ($raw | ConvertFrom-Json)
 }
+function Get-ReleaseByTag([string]$ReleaseTag) {
+    # The tag endpoint only returns published releases. Drafts are discoverable
+    # through authenticated listings and must be refreshed by numeric ID.
+    for ($page=1;$page -le 100;$page++) {
+        $releases=@(Get-ReleaseApi "releases?per_page=100&page=$page")
+        $matches=@($releases | Where-Object {$_.tag_name -ceq $ReleaseTag})
+        if ($matches.Count -gt 1) {throw 'Duplicate release records for requested tag'}
+        if ($matches.Count -eq 1) {
+            $id=Get-ReleaseField $matches[0] 'id' integer
+            if ($id -lt 1) {throw 'Invalid release ID'}
+            $release=Get-ReleaseApi "releases/$id"
+            if ($release.tag_name -cne $ReleaseTag -or (Get-ReleaseField $release 'id' integer) -ne $id) {throw 'Release identity changed during lookup'}
+            return $release
+        }
+        if ($releases.Count -lt 100) {break}
+    }
+    throw 'Requested release not found in authenticated release listing'
+}
 function Resolve-ReleaseTag([string]$Tag) {
     $reference=Get-ReleaseApi ('git/ref/tags/'+[uri]::EscapeDataString($Tag))
     if ($reference.ref -cne ('refs/tags/'+$Tag)) {throw 'Requested tag reference mismatch'}
@@ -82,7 +100,7 @@ function Invoke-LinuxReleaseValidation {
     New-Item -ItemType Directory -Path $bundle -Force | Out-Null
     $null=Invoke-ReleaseGh @('run','download',$RunId,'--repo',$script:ReleaseRepository,'--name',$artifactName,'--dir',$bundle)
     $manifest=Assert-LinuxReleaseBundle $bundle $revision "ci-$RunId-$attempt"
-    $release=Get-ReleaseApi ('releases/tags/'+[uri]::EscapeDataString($Tag))
+    $release=Get-ReleaseByTag $Tag
     if ($release.draft -isnot [bool] -or -not $release.draft -or $release.tag_name -cne $Tag -or ($release.id -isnot [int] -and $release.id -isnot [long]) -or $release.id -lt 1) {throw 'Destination must be the existing requested draft release'}
     $hashes=@{}; $existing=@{}
     foreach ($name in @($script:LinuxAssetName,'SHA256SUMS','verification.json')) {
@@ -110,7 +128,7 @@ function Assert-LinuxDeliveryFiles($Context) {
 }
 function Get-LinuxDeliveryDraft($Context) {
     if ((Resolve-ReleaseTag $Context.Tag) -cne $Context.Revision) {throw 'Tag commit changed after validation'}
-    $release=Get-ReleaseApi ('releases/tags/'+[uri]::EscapeDataString($Context.Tag))
+    $release=Get-ReleaseByTag $Context.Tag
     if ($release.draft -isnot [bool] -or -not $release.draft -or $release.tag_name -cne $Context.Tag -or
         (Get-ReleaseField $release 'id' integer) -ne $Context.ReleaseId) {throw 'Validated draft release state changed; refusing delivery'}
     return $release

@@ -48,7 +48,7 @@ function Get-CiNativeAssets([string]$Root) {
 function Send-CiReleaseAsset([string]$ReleaseTag,[string]$Path,[string]$Scratch) {
     $name=Split-Path -Leaf $Path
     $expected=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
-    $release=Get-ReleaseApi ('releases/tags/'+$ReleaseTag)
+    $release=Get-ReleaseByTag $ReleaseTag
     if (-not $release.draft) {throw 'Refusing to modify a published release'}
     $assets=@($release.assets | Where-Object {$_.name -ceq $name})
     if ($assets.Count -gt 1) {throw 'Duplicate release asset'}
