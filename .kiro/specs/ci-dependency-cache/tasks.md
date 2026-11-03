@@ -64,7 +64,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Requirements: 1.1, 2.2, 2.3, 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 4. Validate locally and on hosted runners
-- [ ] 4.1 Run the local regression gates
+- [x] 4.1 Run the local regression gates
   - Run the pre-commit gate, the CI unit tests and the workflow contract test.
   - Run the full local pipeline with default options and confirm it passes with no cache options, no credential and no cache-service traffic, and that the bundle manifest schema is unchanged.
   - Build the Docker image without build arguments or secret.
