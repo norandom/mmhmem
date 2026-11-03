@@ -14,7 +14,7 @@ publication. Every commit must pass the project pre-commit gate.
   - Done when unit tests show the configuration rules, the environment mapping per mode, and that an off configuration adds nothing, and the module compiles alongside the existing Dagger module.
   - _Requirements: 1.3, 1.4, 2.3, 2.5_
 
-- [ ] 1.2 (P) Write the in-container wrapper that runs a build under sccache and records its statistics
+- [x] 1.2 (P) Write the in-container wrapper that runs a build under sccache and records its statistics
   - Start the cache server before the build, and on failure run the build uncached and record the reason without printing any environment value.
   - Run the build command, keep its exit code, and write hit and miss counts, split into Rust and C where sccache reports them, to the requested statistics file.
   - Record a not-configured result when no wrapper is set.
@@ -82,3 +82,4 @@ publication. Every commit must pass the project pre-commit gate.
 ## Implementation Notes
 
 - Task 1.1: pinned sccache v0.18.0 (published 2026-09-14; v0.19.0 was 10 days old) with the release's published SHA-256 for the musl tarball, matching a local download. Real `--show-stats --stats-format json` output (v0.18.0) has `stats.cache_hits.counts` and `stats.cache_misses.counts` keyed by language (`Rust`, `C/C++`). `sccache.py` imports no dagger symbols at load time, so it is unit tested on the host. Reviewed inline by the parent.
+- Task 1.2: a live run with the real sccache v0.18.0 Windows binary found that output capture keyed on a path ending in `sccache` missed `sccache.exe`; `is_sccache` now compares the file stem and has a regression test. The live run then recorded a Rust cache hit. Reviewed inline by the parent.
