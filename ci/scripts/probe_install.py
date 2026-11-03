@@ -1,17 +1,50 @@
 """Offline bootstrap/update of an explicit, already verified release file."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import sys
+import threading
 import traceback
 
 from probe_release import McpProcess
 from release_support import ProbeWorkspace, run
+
+
+@contextmanager
+def worker_fixture():
+    """Exercise the real installer validator against an isolated local worker."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            valid = (self.path == "/v1/chat/completions"
+                     and request.get("model") == "preserved-model"
+                     and request.get("messages", [])[-1:] == [{"role": "user", "content": "Reply OK."}])
+            self.server.requests += int(valid)
+            self.send_response(200 if valid else 400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"choices": [{"message": {"content": "OK"}}]}).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = 0
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def validate_candidate(binary, expected_sha256):
@@ -97,7 +130,7 @@ def probe(binary, expected_sha256, source):
     version = run([str(binary), "--version"], timeout=20)
     if not version.startswith("mmhmem "):
         raise ValueError(f"candidate returned invalid version: {version}")
-    with ProbeWorkspace() as workspace:
+    with ProbeWorkspace() as workspace, worker_fixture() as worker_server:
         home, environment = setup_fixture(workspace, binary, source)
         bootstrap = ["bash", str(workspace.root / "bootstrap.sh"), "--agent", "codex"]
         installed = home / ".local/bin/mmhmem"
@@ -109,7 +142,9 @@ def probe(binary, expected_sha256, source):
         marker = "installmemory" + expected_sha256[:20]
         memory(installed, environment, version.removeprefix("mmhmem "), marker, record=True)
         worker = home / ".mmhmem.json"
-        worker.write_text('{"worker_model":"preserved-model","worker_api_url":"http://127.0.0.1:9/v1/chat/completions","custom":"preserved"}\n')
+        worker.write_text(json.dumps({"worker_model": "preserved-model",
+                                     "worker_api_url": f"http://127.0.0.1:{worker_server.server_port}/v1/chat/completions",
+                                     "custom": "preserved"}) + "\n")
         registration = home / ".codex/config.toml"
         registration.write_text('model = "preserved-codex-model"\n' + registration.read_text())
         store = home / ".local/share/mmhmem/memory.db"
@@ -120,6 +155,8 @@ def probe(binary, expected_sha256, source):
         previous.write_bytes(b"previous installation fixture\n")
         previous.replace(installed)
         run(bootstrap, env=environment, cwd=home, timeout=30)
+        if worker_server.requests != 1:
+            raise ValueError("installer update did not validate the preserved worker")
         validate_candidate(installed, expected_sha256)
         if run([str(installed), "--version"], env=environment, cwd=home, timeout=20) != version:
             raise ValueError("update changed executable version")
