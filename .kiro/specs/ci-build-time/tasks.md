@@ -19,7 +19,7 @@ the summary report.
   - _Requirements: 2.3, 2.4, 3.2, 3.4, 5.1_
 
 - [ ] 2. Implement pipeline, reporting and cache changes
-- [ ] 2.1 Make cargo parallelism an explicit option of every Rust-compiling Dagger function
+- [x] 2.1 Make cargo parallelism an explicit option of every Rust-compiling Dagger function
   - Thread a cargo job count through the glibc and musl build containers and through the static release, release, installer and deploy-artifact functions.
   - Keep the default at two jobs so every standalone and local call behaves exactly as today, including the static setup check's existing assertion.
   - Done when a default call yields two cargo jobs in both containers, an explicit option of four yields four in both, and the static setup check still passes unchanged.
@@ -101,3 +101,4 @@ the summary report.
 - The stage runner must stay pure standard library and Python 3.11-compatible: its unit tests run on the host with `py -3.12` and inside the Debian bookworm runtime (Python 3.11). The Dagger module itself requires Python 3.14 and cannot be imported on the host.
 - Task 2.2 must wrap every stage `run` as an `async def` coroutine: a callable that raises synchronously, or a stage raising `CancelledError`, escapes the runner's failure aggregation (reviewer probe on 1.1).
 - `ci/scripts/test_stages.py` locates the module at `../src/mmhmem_ci` relative to itself, so any container that runs it must mount `ci/scripts` and `ci/src/mmhmem_ci` with the repository layout (the full source mount already does).
+- Task 2.2 must pass `cargo_jobs` into the glibc `rust_container` stages it schedules (the otel clippy pass and any other compile in `all`); task 2.1 threaded it only through the verified-bundle path, so those stages still default to 2 jobs (reviewer finding on 2.1).

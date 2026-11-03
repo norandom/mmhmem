@@ -29,13 +29,17 @@ RUST_IMAGE = "rust:1.98-slim-bookworm"
 TOOLCHAIN_PIN = "rust-toolchain.toml"
 
 
-def rust_container(src: dagger.Directory) -> dagger.Container:
+def rust_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Container:
     """Rust 1.98 container with the repo mounted and persistent cargo caches.
 
     Caches mount the registry/git/target dirs, NOT all of CARGO_HOME: env
     vars are container-global in dagger, so overriding CARGO_HOME would also
     hide the rustup proxies (cargo-fmt/clippy-driver) from PATH.
+    cargo_jobs bounds rustc parallelism (default 2: the local memory guard).
     """
+    from .static_release import validate_cargo_jobs
+
+    validate_cargo_jobs(cargo_jobs)
     return (
         dag.container()
         .from_(RUST_IMAGE)
@@ -53,7 +57,7 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
         # (the dev-host WSL engine VM has ~6 GB RAM; unbounded cargo builds
         # OOM-kill the dagger engine mid-run — observed twice).
         .with_env_variable("CARGO_INCREMENTAL", "0")
-        .with_env_variable("CARGO_BUILD_JOBS", "2")
+        .with_env_variable("CARGO_BUILD_JOBS", str(cargo_jobs))
         .with_mounted_directory("/src", src.without_file(TOOLCHAIN_PIN))
         .with_workdir("/src")
     )
@@ -63,19 +67,19 @@ def rust_container(src: dagger.Directory) -> dagger.Container:
 class MmhmemCi:
     @function
     async def static_installer(self, src: dagger.Directory, revision: str, validation_id: str,
-                               source_clean: bool = False) -> str:
+                               source_clean: bool = False, cargo_jobs: int = 2) -> str:
         """Install/update the verified candidate in isolated supported userlands."""
         from .static_release import installer_check
 
-        return await installer_check(src, revision, validation_id, source_clean)
+        return await installer_check(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
 
     @function
     async def static_release(self, src: dagger.Directory, revision: str, validation_id: str,
-                             source_clean: bool = False) -> dagger.Directory:
+                             source_clean: bool = False, cargo_jobs: int = 2) -> dagger.Directory:
         """Return only the same-artifact verified Linux bundle."""
         from .static_release import verified_bundle
 
-        return await verified_bundle(src, revision, validation_id, source_clean)
+        return await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
 
     @function
     async def static_gate(self, src: dagger.Directory, revision: str, validation_id: str,
@@ -224,9 +228,9 @@ class MmhmemCi:
 
     @function
     async def release(self, src: dagger.Directory, revision: str, validation_id: str,
-                      source_clean: bool = False) -> dagger.File:
+                      source_clean: bool = False, cargo_jobs: int = 2) -> dagger.File:
         """File-compatible entrypoint selecting only the verified Linux bytes."""
-        bundle = await self.static_release(src, revision, validation_id, source_clean)
+        bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
         return bundle.file("mmhmem-linux-x86_64")
 
     @function
@@ -292,7 +296,7 @@ class MmhmemCi:
 
     @function
     async def deploy_artifacts(self, src: dagger.Directory, revision: str, validation_id: str,
-                               source_clean: bool = False) -> str:
+                               source_clean: bool = False, cargo_jobs: int = 2) -> str:
         """Blocking: pristine Linux validation of the deploy artifacts
         (Req 8.1/8.2) — systemd-analyze verify against the REAL release
         binary and logrotate --debug as root with the REAL agent-memory
@@ -319,7 +323,7 @@ class MmhmemCi:
             )
             .with_file(
                 "/usr/local/bin/mmhmem",
-                await self.release(src, revision, validation_id, source_clean),
+                await self.release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
                 permissions=0o755,
             )
             .with_exec(["install", "-d", "-m", "0750", "/var/log/agent-memory"])
@@ -340,21 +344,21 @@ class MmhmemCi:
 
     @function
     async def all(self, src: dagger.Directory, revision: str, validation_id: str,
-                  source_clean: bool = False) -> str:
+                  source_clean: bool = False, cargo_jobs: int = 2) -> str:
         """The full blocking pipeline (without the model-gated e2e suite,
         which runs as a separate workflow job with credentials)."""
-        bundle = await self.static_release(src, revision, validation_id, source_clean)
+        bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
         manifest = await bundle.file("verification.json").contents()
         results: dict[str, str] = {
             "static_release (musl + same-artifact runtime gate)": manifest,
-            "static_installer (verified candidate install + update)": await self.static_installer(src, revision, validation_id, source_clean),
+            "static_installer (verified candidate install + update)": await self.static_installer(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
             "distribution (Debian + Alpine)": await self.distribution(src),
             "fmt": await self.fmt(src),
             "clippy (default + otel)": await self.clippy(src),
             "test": await self.test(src),
             "docker_build (otel)": await self.docker_build(src),
             "compose_config (prod + e2e)": await self.compose_config(src),
-            "deploy_artifacts (systemd + logrotate)": await self.deploy_artifacts(src, revision, validation_id, source_clean),
+            "deploy_artifacts (systemd + logrotate)": await self.deploy_artifacts(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
         }
         loc = await self.loc_report(src)
         summary = "\n".join(f"== {name}: ok" for name in results)

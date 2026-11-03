@@ -16,11 +16,18 @@ RUNTIME_IMAGES = {"debian-bookworm": "debian:bookworm-slim", "alpine-3.22": "alp
 ARTIFACT_NAME = "mmhmem-linux-x86_64"
 
 
+def validate_cargo_jobs(cargo_jobs) -> None:
+    """Reject a cargo job count below one before any container is built."""
+    if type(cargo_jobs) is not int or cargo_jobs < 1:
+        raise ValueError(f"cargo_jobs must be an integer of at least 1, got {cargo_jobs!r}")
+
+
 async def installer_check(src: dagger.Directory, revision: str, validation_id: str,
-                          source_clean: bool = False) -> str:
+                          source_clean: bool = False, cargo_jobs: int = 2) -> str:
+    validate_cargo_jobs(cargo_jobs)
     tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_install.py", "-v"]).stderr())
-    bundle = await verified_bundle(src, revision, validation_id, source_clean)
+    bundle = await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
     manifest = json.loads(await bundle.file("verification.json").contents())
     results = []
     for name in RUNTIME_IMAGES:
@@ -43,7 +50,7 @@ async def gate_tests(src: dagger.Directory, validation_id: str) -> str:
 
 
 async def verified_bundle(src: dagger.Directory, revision: str, validation_id: str,
-                          source_clean: bool = False) -> dagger.Directory:
+                          source_clean: bool = False, cargo_jobs: int = 2) -> dagger.Directory:
     """One candidate feeds every required check; only final checked bytes escape."""
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase Git commit ID")
@@ -51,8 +58,9 @@ async def verified_bundle(src: dagger.Directory, revision: str, validation_id: s
         raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
     if type(source_clean) is not bool:
         raise ValueError("source_clean must be an explicit boolean")
+    validate_cargo_jobs(cargo_jobs)
     await gate_tests(src, validation_id)
-    binary, build_reports, build = await build_candidate(src, validation_id)
+    binary, build_reports, build = await build_candidate(src, validation_id, cargo_jobs=cargo_jobs)
     checksum, version = build["artifact"]["sha256"], build["package_version"]
     # Linkage evidence must retain the release basename, not /candidate.
     inspected = (instrumented_runtime("debian-bookworm", src, validation_id)
@@ -267,8 +275,13 @@ async def runtime_setup_check(src: dagger.Directory, validation_id: str) -> str:
     return json.dumps({"status": "passed", "validation_id": validation_id, "scratch_startup": "passed", "runtimes": results}, indent=2)
 
 
-def musl_container(src: dagger.Directory) -> dagger.Container:
-    """Keep native build scripts and GNU/OTel caches independent of musl."""
+def musl_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Container:
+    """Keep native build scripts and GNU/OTel caches independent of musl.
+
+    cargo_jobs bounds rustc parallelism; the default of 2 keeps the local WSL
+    engine within memory (and check_static_setup.py asserts it).
+    """
+    validate_cargo_jobs(cargo_jobs)
     return (
         dag.container(platform=dagger.Platform("linux/amd64"))
         .from_(BUILD_IMAGE)
@@ -283,7 +296,7 @@ def musl_container(src: dagger.Directory) -> dagger.Container:
         # Keep PIE, but explicitly suppress that loader declaration.
         .with_env_variable("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS", "-C target-feature=+crt-static -C target-cpu=x86-64 -C link-arg=-Wl,--no-dynamic-linker")
         .with_env_variable("CARGO_INCREMENTAL", "0")
-        .with_env_variable("CARGO_BUILD_JOBS", "2")
+        .with_env_variable("CARGO_BUILD_JOBS", str(cargo_jobs))
         .with_env_variable("CARGO_TARGET_DIR", "/cargo-target-musl")
         .with_mounted_cache("/usr/local/cargo/registry", dag.cache_volume("mmhmem-cargo-registry"))
         .with_mounted_cache("/usr/local/cargo/git", dag.cache_volume("mmhmem-cargo-git"))
@@ -309,11 +322,12 @@ async def candidate_build_check(src: dagger.Directory, validation_id: str) -> st
     return json.dumps(report, indent=2)
 
 
-async def build_candidate(src: dagger.Directory, validation_id: str) -> tuple[dagger.File, dagger.Directory, dict]:
+async def build_candidate(src: dagger.Directory, validation_id: str,
+                          cargo_jobs: int = 2) -> tuple[dagger.File, dagger.Directory, dict]:
     """Internal candidate and regression evidence; not a verified release export."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
         raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
-    ctr = musl_container(src).with_env_variable("VALIDATION_ID", validation_id)
+    ctr = musl_container(src, cargo_jobs=cargo_jobs).with_env_variable("VALIDATION_ID", validation_id)
     tested = ctr.with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_build_candidate.py", "-v"])
     candidate = tested.with_exec(["python3", "ci/scripts/build_candidate.py"])
     report = json.loads(await candidate.stdout())
