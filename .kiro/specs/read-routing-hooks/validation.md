@@ -127,3 +127,75 @@ content.
   `Bash|PowerShell`, but no session ran a `cat` or `Get-Content` read, and
   Bash was not in `--allowedTools`. Live shell-read routing is still
   unverified; the unit tests from task 1.3 cover it.
+
+### Re-run after reason change
+
+Run on 2026-11-03 against commit `329f429` ("make the redirect reason lead
+to smart_read"), with the release binary rebuilt (`CARGO_INCREMENTAL=0`).
+The setup matches the first run, except that each session had its own new
+`AGENT_MEM_DATA_DIR` (`tmp\hook-live-53145\data-rerun-*`), so no state from
+the repeat window carried over. Logs are in
+`tmp\hook-live-53145\logs\rerun-*.jsonl`.
+
+The new reason reads in full (from a direct invocation):
+`mmhmem: <path> has at least 150 lines. Read it through the mmhmem MCP tool
+instead: call smart_read with project "project", agent_harness
+"claude-code" and file_path "<path>" for a summary with exact line ranges.
+For exact text, for example before an edit, use Read with offset and limit.
+Only if the summary is not enough, repeat this full read within 2 minutes.`
+
+**Series A: the neutral prompts as given.** In all four sessions the agent
+went straight to `smart_read` and never called the native Read on the whole
+file, so the hook never denied anything and the new reason was not shown.
+This is the user's global `~/.claude/rules/mmhmem.md` rule and the mmhmem
+MCP server instructions at work, not the hook. Series B was run to exercise
+the reason.
+
+| Run | Prompt | Deny? | Tool sequence | smart_read with project? | smart_read ok? | Full Read repeated? | Answer (one line) |
+|---|---|---|---|---|---|---|---|
+| A1 | "Read big.rs and tell me the first function name" | no | smart_read `{}` (error: missing `project`, schema not loaded yet), then ToolSearch, then smart_read(project = cwd path, question), then smart_read(offset 1, limit 12) | yes, on the 2nd call (full path used as project) | yes, worker summary in 1791 ms: `compute_step_0 [L5-L9]` | no | Correct: `compute_step_0`, line 5, confirmed against exact lines |
+| A2 | same | no | smart_read `{}` (error), then ToolSearch, then smart_read(project, question), then Read(limit 10), which passed as `range` | yes, on the 2nd call | yes, 1124 ms | no | Correct, confirmed with a 10-line read |
+| A3 | same | no | smart_read `{}` (error), then ToolSearch, then smart_read(project "project", question), then smart_read(offset 1, limit 12) | yes, on the 2nd call | yes, 971 ms | no | Correct |
+| A4 | "Read big.rs and summarise what it does" | no | ToolSearch, then smart_read(project, summary question), then smart_read(offset 1, limit 30) | yes | yes, 12880 ms, a full outline | no | Good: a generated fixture module of 85 `compute_step_*` functions; the agent said it had read only lines 1-30 exactly |
+
+**Series B: the agent sent to the native tool.** The prompt names the Read
+tool but says nothing about what to do if it is blocked.
+
+| Run | Prompt | Deny? | Tool sequence after the deny | smart_read with project? | smart_read ok? | Full Read repeated? | Answer (one line) | Audit |
+|---|---|---|---|---|---|---|---|---|
+| B1 | "Use the Read tool to read big.rs and tell me the first function name" | yes, new reason | smart_read(project "project", agent_harness "claude-code", file_path), then Read(offset 1, limit 12) | yes, first try, exactly as the reason gives it | yes, worker summary in 6639 ms, est. 5654 tokens avoided | no | Correct: `compute_step_0`, lines 5-9 | HOOK_REDIRECT large_file, IO_SHUNT_DELEGATED, HOOK_PASS range |
+| B2 | same | yes | same sequence | yes, first try | yes, 6529 ms, est. 5654 avoided | no | Correct | same |
+| B3 | same | yes | same sequence | yes, first try | yes, 7743 ms, est. 5654 avoided | no | Correct | same |
+| B4 | "Use the Read tool to read big.rs and summarise what it does" | yes | repeated the full Read ("you asked for the Read tool and the hook allows a repeat"), which passed | no | n/a | **yes** | Good summary (85 functions), but read from the full 600-line file, so nothing was saved | HOOK_REDIRECT large_file, HOOK_PASS repeat |
+
+**What changed.** In the first run, case 1 repeated the full read and case
+1b's `smart_read` failed for lack of `project`. Now, in B1-B3, every first
+`smart_read` call after a deny carried the right arguments and succeeded,
+and no full read was repeated. The repeat route is now taken only when the
+prompt itself names the Read tool and asks for a broad summary (B4).
+
+### Re-run concerns
+
+- **R1. A broad question still leads to the repeat when the user named the
+  Read tool.** In B4 the agent read the user's "use the Read tool" as
+  overriding the redirect and used the repeat route. Without that wording
+  (A4) it used `smart_read`. Savings are lost whenever the user explicitly
+  asks for a native full read.
+- **R2. With the global rule installed, the hook rarely fires.** In real
+  use with `~/.claude/rules/mmhmem.md` and the MCP instructions, the agent
+  used `smart_read` without being redirected in 4 of 4 neutral sessions. The
+  hook's value there is as a backstop, and its own savings will look small
+  in the statistics.
+- **R3. The first `smart_read` call fails while the tool is deferred.** In
+  A1-A3, the agent's first `smart_read` call had empty arguments (`{}`)
+  because the deferred tool's schema had not been loaded yet. It failed with
+  `missing field 'project'` until the agent ran ToolSearch. This is a Claude
+  Code deferred-tool effect, outside the hook, but it costs a turn. B1-B3
+  did not show it.
+- **R4. Agents use different project identities.** The reason gives the
+  cwd basename (`"project"`), but in A1, A2 and A4 the agent chose the full
+  cwd path. A different identity means a different cache key, so a summary
+  cached under one identity is not reused under the other.
+- **R5. The worker adds latency.** A full-outline summary took 6.5-12.9 s,
+  against a native read that is near-instant. Token savings are real
+  (est. 5654-6279 per read), but turn time goes up.
