@@ -9,7 +9,7 @@ artifact names, or the manifest schema. Stage names are fixed by the design's
 the summary report.
 
 - [ ] 1. Establish the stage-runner foundation
-- [ ] 1.1 Build the dependency-aware stage runner, timing record and memory guard
+- [x] 1.1 Build the dependency-aware stage runner, timing record and memory guard
   - Run an ordered list of named stages under a concurrency limit, starting each only after its prerequisites passed, and never cancelling a sibling because another failed.
   - Mark dependents of a failed or skipped stage as skipped, then raise one aggregated failure naming every failed and skipped stage with its duration and error tail.
   - Emit one machine-readable timings line with name, status, start offset and duration per stage.
@@ -99,3 +99,5 @@ the summary report.
 ## Implementation Notes
 
 - The stage runner must stay pure standard library and Python 3.11-compatible: its unit tests run on the host with `py -3.12` and inside the Debian bookworm runtime (Python 3.11). The Dagger module itself requires Python 3.14 and cannot be imported on the host.
+- Task 2.2 must wrap every stage `run` as an `async def` coroutine: a callable that raises synchronously, or a stage raising `CancelledError`, escapes the runner's failure aggregation (reviewer probe on 1.1).
+- `ci/scripts/test_stages.py` locates the module at `../src/mmhmem_ci` relative to itself, so any container that runs it must mount `ci/scripts` and `ci/src/mmhmem_ci` with the repository layout (the full source mount already does).
