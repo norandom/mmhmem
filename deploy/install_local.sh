@@ -688,7 +688,7 @@ if want_agent codex && [ "$HAS_CODEX" -eq 1 ]; then
   elif [ "$GLOBAL" -eq 1 ]; then
     set_codex_registration "$BIN"
     install_skill "$HOME/.agents/skills/unified-memory"
-    install_skill "$HOME/.agents/skills/mmhmem-recap" "$REPO_ROOT/deploy/skills/mmhmem-recap/SKILL.md"
+    install_skill "$HOME/.agents/skills/mmhmem-recap" "$REPO_ROOT/deploy/codex/skills/mmhmem-recap/SKILL.md"
     command_tmpl "$CODEX_COMMAND_SRC" "$CODEX_CFG_DIR/prompts/mmhmem-recap.md"
     registered="codex $registered"
   else

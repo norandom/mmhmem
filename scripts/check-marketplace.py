@@ -2,6 +2,7 @@
 import hashlib
 import difflib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -57,7 +58,10 @@ for plugin in config["plugins"]:
 
 before = snapshot()
 before_text = {name: (ROOT / name).read_text() for name in before}
-subprocess.run(["bash", "build-marketplace.sh"], cwd=ROOT, check=True)
+builder = (["powershell", "-NoProfile", "-File", "build-marketplace.ps1"]
+           if os.name == "nt" else ["bash", "build-marketplace.sh"])
+builder_env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+subprocess.run(builder, cwd=ROOT, env=builder_env, check=True)
 after = snapshot()
 for name in sorted(set(before) | set(after)):
     if before.get(name) != after.get(name):

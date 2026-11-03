@@ -20,7 +20,7 @@ $start = $engine.IndexOf("if ((Want-Agent 'codex') -and `$HasCodex)")
 $end = $engine.IndexOf('# --- copied binary', $start)
 $block = [scriptblock]::Create($engine.Substring($start, $end - $start).Replace('$HOME', '$testProfile'))
 $destination = Join-Path $testProfile '.agents/skills/mmhmem-recap/SKILL.md'
-$source = Join-Path $repo 'deploy/skills/mmhmem-recap/SKILL.md'
+$source = Join-Path $repo 'deploy/codex/skills/mmhmem-recap/SKILL.md'
 & $block
 if ((Get-FileHash $destination).Hash -ne (Get-FileHash $source).Hash) { throw 'Recap skill not installed intact' }
 [IO.File]::WriteAllText($destination, 'stale skill')

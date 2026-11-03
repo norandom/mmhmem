@@ -8,6 +8,7 @@ docker-compose.yml text eol=lf
 docker-compose.*.yml text eol=lf
 .env.example     text eol=lf
 *.sh             text eol=lf
+.githooks/**     text eol=lf
 *.service        text eol=lf
 plugins/**       text eol=lf
 .marketplace/**  text eol=lf

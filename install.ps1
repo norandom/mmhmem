@@ -41,7 +41,7 @@ $stage = Join-Path $tempBase ('mmhmem-install-' + [Guid]::NewGuid().ToString('N'
 try {
     $files = @('install_local.ps1', 'manage_routing.ps1', 'routing_onboarding.ps1')
     if (-not $Remove) {
-        $files += 'instructions/mmhmem-routing.md', 'install_binary.ps1', 'check_worker.ps1', 'skills/unified-memory/SKILL.md', 'skills/mmhmem-recap/SKILL.md', 'commands/claude/mmhmem-recap.md',
+        $files += 'instructions/mmhmem-routing.md', 'install_binary.ps1', 'check_worker.ps1', 'skills/unified-memory/SKILL.md', 'codex/skills/mmhmem-recap/SKILL.md', 'commands/claude/mmhmem-recap.md',
             'commands/opencode/mmhmem-recap.md', 'commands/codex/mmhmem-recap.md'
     }
     foreach ($file in $files) {

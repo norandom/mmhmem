@@ -560,7 +560,7 @@ if ((Want-Agent 'codex') -and $HasCodex) {
     } elseif ($Global) {
         Set-CodexRegistration $Bin
         Install-Skill (Join-Path $HOME '.agents\skills\unified-memory')
-        Install-Skill (Join-Path $HOME '.agents\skills\mmhmem-recap') (Join-Path $RepoRoot 'deploy\skills\mmhmem-recap\SKILL.md')
+        Install-Skill (Join-Path $HOME '.agents\skills\mmhmem-recap') (Join-Path $RepoRoot 'deploy\codex\skills\mmhmem-recap\SKILL.md')
         Set-Command $CodexCommandSrc (Join-Path $CodexCfgDir 'prompts\mmhmem-recap.md')
         $Registered.Add('codex') | Out-Null
     } else {

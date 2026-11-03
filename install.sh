@@ -135,7 +135,7 @@ fi
 
 # --- engine + companion files (raw fetch, no checkout) -------------------------
 tree="$tmp/deploy"
-mkdir -p "$tree/skills/mmhmem-recap" "$tree/skills/unified-memory" "$tree/commands/claude" \
+mkdir -p "$tree/codex/skills/mmhmem-recap" "$tree/skills/unified-memory" "$tree/commands/claude" \
          "$tree/commands/opencode" "$tree/commands/codex"
 fetch "$RAW/deploy/install_local.sh" "$tree/install_local.sh"
 fetch "$RAW/deploy/manage_routing.py" "$tree/manage_routing.py"
@@ -144,7 +144,7 @@ if [ "$REMOVE" -eq 0 ]; then
   mkdir -p "$tree/instructions"
   fetch "$RAW/deploy/instructions/mmhmem-routing.md" "$tree/instructions/mmhmem-routing.md"
   fetch "$RAW/deploy/check_worker.py" "$tree/check_worker.py"
-  fetch "$RAW/deploy/skills/mmhmem-recap/SKILL.md" "$tree/skills/mmhmem-recap/SKILL.md"
+  fetch "$RAW/deploy/codex/skills/mmhmem-recap/SKILL.md" "$tree/codex/skills/mmhmem-recap/SKILL.md"
   fetch "$RAW/deploy/skills/unified-memory/SKILL.md"    "$tree/skills/unified-memory/SKILL.md"
   fetch "$RAW/deploy/commands/claude/mmhmem-recap.md"   "$tree/commands/claude/mmhmem-recap.md"
   fetch "$RAW/deploy/commands/opencode/mmhmem-recap.md" "$tree/commands/opencode/mmhmem-recap.md"
