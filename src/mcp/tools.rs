@@ -32,8 +32,21 @@ impl ServerHandler for McpServer {
         info.instructions = Some(
             "mmhmem: cross-agent memory + I/O shunt server. Call session_resume_or_handoff \
              first; prefer smart_read over raw reads of large files (offset/limit for edits); \
-             search the memory index before fetching details; checkpoint before switching \
-             harnesses."
+             search the memory index before fetching details. Resume at session start or \
+             after context clearing, using the same exact project identity throughout. \
+             If no checkpoint exists, save the accepted objective and next step before execution. \
+             Checkpoint changed state after each task unit, validation batch, plan-changing \
+             decision, or blocker; before a final response and before agent-controlled clear \
+             or handoff. Skip unchanged saves. Use updated_working_state_md and active_objective \
+             for concise objective, verified versus pending work, decisions, blockers, and next \
+             steps; exclude credentials. Await acknowledgement; only success clears changed \
+             state. On failure or unavailable mmhmem, warn that latest changes were not saved \
+             and continue without inventing memory. Ctrl+C/native clear cannot guarantee a save; \
+             recover the last acknowledged checkpoint without a service restart or worker model. \
+             Present checkpoint save time separately from breadcrumb activity. If no checkpoint \
+             exists, show available activity or explicit absence; initialized task IDs are not \
+             saved checkpoints. Harness chat history is separate: the original conversation may \
+             create a checkpoint, but history is not automatically imported."
                 .into(),
         );
         info

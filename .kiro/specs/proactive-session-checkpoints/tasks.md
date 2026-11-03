@@ -25,7 +25,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Depends: 1_
   - _Requirements: 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 4.1, 4.5_
 
-- [ ] 3. Integrate proactive checkpoint instructions across agent entry points
+- [x] 3. Integrate proactive checkpoint instructions across agent entry points
   - Update canonical and server instructions to save the initial objective, changed milestones, and changed final responses using the same project identity and concise resumable state.
   - Distinguish pending from verified work and changed from acknowledged state; avoid duplicate unchanged saves and warn on failures without claiming success.
   - Update all three recap commands to expose history-only recovery, explain separate harness history, and save before agent-controlled handoff/clear when possible.
@@ -64,6 +64,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Runtime verification, Guidance verification (explicit final integration)_
   - _Depends: 1, 2, 3, 4, 5_
   - _Requirements: 2.3, 4.3, 4.4, 4.5, 4.6_
+
 
 
 
