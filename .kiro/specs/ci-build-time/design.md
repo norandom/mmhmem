@@ -346,8 +346,9 @@ def check_memory(mem_total_kib: int, concurrency: int, heavy_count: int) -> None
 
 - Trigger: a workflow step after the gate step, with `if: always()`.
 - Input: the gate step's standard output through an environment variable,
-  plus `ci/timing-baseline.json`. The output name (`stdout` in current
-  action versions) is confirmed against v8.4.1's `action.yml` first.
+  plus `ci/timing-baseline.json`. v8.4.1's `action.yml` declares the output
+  `output` ("Job output", value `steps.exec.outputs.stdout`), so the step
+  reads `steps.gate.outputs.output` (confirmed in task 3.1).
 - Output: a markdown table of stage, status, start, duration, baseline and a
   marker column. A stage over `1.5 × baseline` gets the marker `slow`.
 - Baseline schema: `{"runner": "ubuntu-latest-4vcpu", "stages": {"<name>": <seconds>}}`.

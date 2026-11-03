@@ -64,3 +64,29 @@ installer checks, the unchanged OTel Docker image, compose validation and
 systemd/logrotate checks. Native Windows/macOS jobs build their own artifacts.
 The tokei report is informational. A separate optional credentialed
 model-measurement job compares token use with a real OpenCode harness.
+
+### Gate concurrency and cargo jobs
+
+`all` takes two tuning options. `concurrency` is how many independent stages
+run at once; `cargo_jobs` bounds rustc parallelism in every Rust compile.
+Local defaults are `1` and `2` (sequential, memory-safe on the ~6 GB WSL
+engine). CI passes `--concurrency=3 --cargo-jobs=4` to the gate. The bundle
+export step must pass the same `--cargo-jobs=4` so the engine reuses the
+in-session musl build; change both workflow steps together. Locally:
+
+```powershell
+powershell -NoProfile -File scripts\dagger-ci.ps1 -Call all -ExtraArgs @('--concurrency=2','--cargo-jobs=4')
+```
+
+Before any build, `all` checks the engine's MemTotal against
+`min(concurrency, heavy stages) x 3.0 GiB + 2.0 GiB` and refuses, for example:
+
+```text
+--concurrency=2 needs 8.0 GiB of engine memory (2 heavy stages x 3.0 GiB + 2.0 GiB reserve), but the engine has 5.8 GiB; lower --concurrency
+```
+
+After the gate, an always-run step (`ci/scripts/timing_summary.py`) writes a
+per-stage table of status, start, duration and baseline to the job summary.
+A stage over 1.5 x its baseline in `ci/timing-baseline.json` is marked `slow`;
+the table never changes the job verdict. Update the baseline when stage
+costs change on purpose.

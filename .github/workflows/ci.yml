@@ -12,6 +12,10 @@
 # caps), release build, Docker image built with the otel feature whose
 # payload runs, `docker compose config` on prod + e2e stacks, and pristine
 # systemd-analyze/logrotate validation; tokei LOC report informational.
+# The gate runs `all --concurrency=3 --cargo-jobs=4` (local defaults stay 1
+# and 2); the export step must pass the same --cargo-jobs so the engine
+# reuses the in-session musl build. An always-run step writes the per-stage
+# timing table (ci/scripts/timing_summary.py) to the job summary.
 #
 # e2e-measurement (optional, model-gated; Req 12): enable by setting the
 # repository variable E2E_LLM_ENABLED=true plus the secrets
@@ -61,7 +65,8 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=normal)"
           echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "validation_id=ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
-      - name: fmt, clippy default+otel, tests, release, docker image, compose config, deploy artifacts, tokei
+      - name: musl clippy, tests and release, otel clippy, fmt, docker image, compose config, deploy artifacts, tokei
+        id: gate
         uses: dagger/dagger-for-github@v8.4.1
         with:
           version: "0.21.11"
@@ -69,13 +74,18 @@ jobs:
           # v8.4.1 of the action prefixes `dagger call` itself — the args
           # carry only the function invocation. A fresh checkout carries
           # no target/.git — the --src contract.
-          args: all --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true
+          args: all --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true --concurrency=3 --cargo-jobs=4
+      - name: Write per-stage gate timings to the job summary
+        if: always()
+        env:
+          GATE_OUTPUT: ${{ steps.gate.outputs.output }}
+        run: python3 ci/scripts/timing_summary.py
       - name: Export the same verified Linux bundle
         uses: dagger/dagger-for-github@v8.4.1
         with:
           version: "0.21.11"
           workdir: ci
-          args: static-release --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true export --path=../tmp/linux-static
+          args: static-release --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true --cargo-jobs=4 export --path=../tmp/linux-static
       - name: Upload verified Linux bundle
         uses: actions/upload-artifact@v4
         with:

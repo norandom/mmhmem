@@ -134,7 +134,42 @@ try {
     Assert-True ((Get-WorkflowJob $workflow 'windows').Contains("path: target/release/mmhmem.exe`n")) 'Windows artifact path changed'
     Assert-True ((Get-WorkflowJob $workflow 'macos').Contains("path: |`n            target/release/mmhmem`n            target/x86_64-apple-darwin/release/mmhmem`n")) 'macOS artifact paths changed'
     Assert-True ((Get-WorkflowJob $workflow 'windows').Contains('./scripts/test-install.ps1')) 'Windows installer regression checks removed'
-    Write-Host 'PASS: native provenance, freshness, export containment, arguments, hosted identity and native caches'
+    $gateJob = Get-WorkflowJob $workflow 'quality-gates'
+    $gateSteps = @([regex]::Split($gateJob, '(?m)^      - ') | Select-Object -Skip 1)
+    $gateStep = @($gateSteps | Where-Object { $_ -match '(?m)^\s+args: all ' })
+    Assert-True ($gateStep.Count -eq 1) 'Gate step running all not found exactly once'
+    $gateStep = $gateStep[0]
+    Assert-True ([regex]::IsMatch($gateStep, '(?m)^        id: gate\r?$')) 'Gate step has no id: gate'
+    $gateArgs = [regex]::Match($gateStep, '(?m)^\s+args: (all .*?)\r?$').Groups[1].Value
+    Assert-True ($gateArgs -match '(^| )--concurrency=3( |$)') 'Gate does not pass --concurrency=3'
+    $gateJobs = [regex]::Match($gateArgs, '(?:^| )--cargo-jobs=(\d+)(?: |$)')
+    Assert-True ($gateJobs.Success -and $gateJobs.Groups[1].Value -eq '4') 'Gate does not pass --cargo-jobs=4'
+    foreach ($kept in @('--src ..', '--revision=${{ steps.provenance.outputs.revision }}', '--validation-id=${{ steps.provenance.outputs.validation_id }}', '--source-clean=true')) {
+        Assert-True $gateArgs.Contains($kept) "Gate lost $kept"
+    }
+    $exportStep = @($gateSteps | Where-Object { $_ -match '(?m)^\s+args: static-release .*export --path=\.\./tmp/linux-static' })
+    Assert-True ($exportStep.Count -eq 1) 'Export step not found exactly once'
+    $exportArgs = [regex]::Match($exportStep[0], '(?m)^\s+args: (static-release .*?)\r?$').Groups[1].Value
+    $exportJobs = [regex]::Match($exportArgs, '(?:^| )--cargo-jobs=(\d+)(?: |$)')
+    Assert-True $exportJobs.Success 'Export step does not pass --cargo-jobs'
+    Assert-True ($exportJobs.Groups[1].Value -eq $gateJobs.Groups[1].Value) 'Export --cargo-jobs differs from the gate (bundle would be rebuilt)'
+    Assert-True ($exportArgs.IndexOf('--cargo-jobs=') -lt $exportArgs.IndexOf(' export ')) 'Export --cargo-jobs is not a static-release option'
+    $summaryStep = @($gateSteps | Where-Object { $_.Contains('ci/scripts/timing_summary.py') })
+    Assert-True ($summaryStep.Count -eq 1) 'Timing summary step missing'
+    $summaryStep = $summaryStep[0]
+    Assert-True ([regex]::IsMatch($summaryStep, '(?m)^        if: always\(\)\r?$')) 'Timing summary does not always run'
+    Assert-True ([regex]::IsMatch($summaryStep, '(?m)^        env:\r?\n          GATE_OUTPUT: \$\{\{ steps\.gate\.outputs\.output \}\}\r?$')) 'Timing summary lacks GATE_OUTPUT from steps.gate.outputs.output'
+    $summaryRun = [regex]::Match($summaryStep, '(?ms)^        run: (.*)$').Groups[1].Value
+    Assert-True ($summaryRun.Contains('python3 ci/scripts/timing_summary.py')) 'Timing summary does not run the script with python3'
+    Assert-True (-not $summaryRun.Contains('${{')) 'Timing summary inlines an expression into its script'
+    Assert-True ($gateJob.IndexOf('id: gate') -lt $gateJob.IndexOf('ci/scripts/timing_summary.py')) 'Timing summary runs before the gate'
+    Assert-True $gateJob.Contains('name: linux-static-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}') 'Gate job artifact identity changed'
+    $script:calls.Clear()
+    $script:fakeDestination = ''
+    Assert-True ((Invoke-MmhmemCi -Call all -ExtraArgs @('--concurrency=2', '--cargo-jobs=4')) -eq 0) 'Wrapper rejected concurrency/cargo-jobs options'
+    $tuned = @($script:calls | Where-Object { $_[0] -eq 'wsl' -and $_ -contains 'bash' })[0]
+    Assert-True (($tuned -contains '--concurrency=2') -and ($tuned -contains '--cargo-jobs=4')) 'Wrapper dropped concurrency/cargo-jobs options'
+    Write-Host 'PASS: native provenance, freshness, export containment, arguments, hosted identity, gate tuning, timing summary and native caches'
 } finally {
     # Remove junction itself first; never recursively traverse its target.
     $junction = Join-Path $scratch 'redirect'

@@ -103,11 +103,11 @@ review-gate rules; steering `dev-environment.md`.
 - `ubuntu-latest` for public repositories is a 4-vCPU, 16 GB runner
   ([GitHub docs](https://docs.github.com/en/enterprise-cloud@latest/actions/how-tos/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners),
   [GitHub blog](https://github.blog/news-insights/product-news/github-hosted-runners-double-the-power-for-open-source/)).
-- `dagger/dagger-for-github` exposes the call's standard output as the step
-  output `stdout` in current versions (`output` in v6 and earlier)
-  ([action repository](https://github.com/dagger/dagger-for-github)).
-  The exact name for v8.4.1 must be confirmed against its `action.yml`
-  during implementation.
+- `dagger/dagger-for-github` v8.4.1's `action.yml` declares the outputs
+  `output` ("Job output", value `${{ steps.exec.outputs.stdout }}`) and
+  `traceURL` ([action repository](https://github.com/dagger/dagger-for-github)).
+  The workflow therefore reads `steps.gate.outputs.output`, not `stdout`
+  (confirmed in task 3.1; `stdout` is only the inner exec step's name).
 - Debian's `tokei` package version in bookworm could not be confirmed from
   search results ([tracker](https://tracker.debian.org/pkg/rust-tokei)).
   Implementation must check `apt-cache policy tokei` in the gate image.

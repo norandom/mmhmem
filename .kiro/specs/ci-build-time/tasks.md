@@ -61,7 +61,7 @@ the summary report.
   - _Requirements: 1.2, 4.1, 4.2, 4.3, 5.2_
 
 - [ ] 3. Integrate the pipeline with the workflow
-- [ ] 3.1 Wire concurrency, cargo jobs and the timing summary into the blocking gate job
+- [x] 3.1 Wire concurrency, cargo jobs and the timing summary into the blocking gate job
   - Pass concurrency three and cargo jobs four to the full pipeline, and the same cargo job count to the bundle export step.
   - Confirm the Dagger action's output name for the pinned version from its action definition, then feed that output to the summary step, which always runs.
   - Extend the workflow contract test to assert matching cargo job counts on both Dagger steps, the concurrency option, and the unchanged hosted artifact identity.
@@ -108,3 +108,4 @@ the summary report.
 - Task 2.3 was reviewed inline by the parent (the reviewer subagent was stopped by the user); evidence: diff inspection plus 43 CI unit tests passing on 3.12 and 3.11.
 - Task 3.1 must pass the gate step output to `ci/scripts/timing_summary.py` through the `GATE_OUTPUT` environment variable; the script always exits 0 and appends to `$GITHUB_STEP_SUMMARY`. Task 2.4 was reviewed inline by the parent.
 - Native cache keys gained a `-1.98.1-` toolchain segment, so the first push after merge reports `miss` rather than `fallback`; task 4.3 must measure the version-bump fallback on a later push. Task 2.5 was reviewed inline by the parent.
+- Task 3.1 was reviewed inline by the parent; the parent also renamed the gate step, whose old name still listed the removed glibc default clippy and tests. Whether the action sets `output` when the gate fails can only be seen on a hosted run (task 4.2).
