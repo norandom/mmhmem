@@ -6,7 +6,7 @@ Cargo dependencies, the TLS crypto provider, the bundle manifest or release
 publication. Every commit must pass the project pre-commit gate.
 
 - [ ] 1. Build the compile-cache foundation
-- [ ] 1.1 Build the cache configuration and provisioning module with its unit tests
+- [x] 1.1 Build the cache configuration and provisioning module with its unit tests
   - Accept a cache mode of off, read-only or read-write with the results URL and runtime token as secrets; treat both secrets absent as off and reject a single secret or an unknown mode before any build.
   - Pin an exact sccache release of at least 0.10 for the static Linux target by URL and SHA-256, and verify the checksum before the binary is used.
   - Map an enabled configuration to the container environment (wrapper, GitHub backend on, cache version label, read-write mode, ignore server IO errors) with the two credentials as secret variables only.
@@ -78,3 +78,7 @@ publication. Every commit must pass the project pre-commit gate.
   - Done when the validation report lists measured evidence for every acceptance criterion.
   - _Depends: 3.1, 4.1_
   - _Requirements: 1.2, 1.5, 1.6, 2.1, 2.2, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 5.3_
+
+## Implementation Notes
+
+- Task 1.1: pinned sccache v0.18.0 (published 2026-09-14; v0.19.0 was 10 days old) with the release's published SHA-256 for the musl tarball, matching a local download. Real `--show-stats --stats-format json` output (v0.18.0) has `stats.cache_hits.counts` and `stats.cache_misses.counts` keyed by language (`Rust`, `C/C++`). `sccache.py` imports no dagger symbols at load time, so it is unit tested on the host. Reviewed inline by the parent.
