@@ -108,7 +108,7 @@ verification task rather than forming standalone work.
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3, 4.4, 4.5_
 
 - [ ] 5. Validate integrated installation and real adoption
-- [ ] 5.1 Verify cross-installer safety and distribution behavior
+- [x] 5.1 Verify cross-installer safety and distribution behavior
   - Exchange exact generated outputs between installers for update/removal, including Unicode, newline variants, and ownership failures.
   - Exercise selected/unselected harnesses, both scopes, overrides, disabled loading, backups, concurrency, partial failure, dry-run, and bootstrap payloads.
   - Run native suites in PowerShell 5 and 7 and shell/distribution suites through the canonical Dagger entrypoint, using disposable configurations.
