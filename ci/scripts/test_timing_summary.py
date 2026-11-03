@@ -197,7 +197,8 @@ class CacheTableTests(unittest.TestCase):
 
     STATS = {
         "static_release": {"enabled": True, "hits": 361, "misses": 14, "rust_hits": 300,
-                           "rust_misses": 12, "c_hits": 61, "c_misses": 2, "non_cacheable": 7},
+                           "rust_misses": 12, "c_hits": 61, "c_misses": 2, "non_cacheable": 7,
+                           "writes": 14, "write_errors": 3, "read_errors": 0},
         "clippy_otel": {"enabled": True, "hits": 0, "misses": 0, "reason": "statistics unavailable"},
         "docker_build": {"enabled": False, "reason": "sccache server did not start; built without the cache"},
     }
@@ -217,7 +218,8 @@ class CacheTableTests(unittest.TestCase):
         markdown = self.summary(output)
         self.assertIn(timing_summary.CACHE_HEADING, markdown)
         cache = markdown[markdown.index(timing_summary.CACHE_HEADING):]
-        self.assertEqual(row_for(cache, "static_release"), ["static_release", "on", "361", "14", "61", "2", ""])
+        self.assertEqual(row_for(cache, "static_release"),
+                         ["static_release", "on", "361", "14", "61", "2", "14", "3", ""])
         self.assertEqual(row_for(cache, "clippy_otel")[1:4], ["on", "0", "0"])
         self.assertEqual(row_for(cache, "clippy_otel")[-1], "statistics unavailable")
         disabled = row_for(cache, "docker_build")

@@ -148,11 +148,12 @@ def _count(record, key):
 
 def render_cache(stats):
     """Markdown table of per-stage compile-cache records (Requirements 5.1, 5.2)."""
-    lines = ["| stage | cache | hits | misses | C hits | C misses | note |",
-             "|---|---|---|---|---|---|---|"]
+    lines = ["| stage | cache | hits | misses | C hits | C misses | writes | write errors | note |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for name, record in stats.items():
         state = "on" if record.get("enabled") is True else "off"
-        counts = " | ".join(str(_count(record, k)) for k in ("hits", "misses", "c_hits", "c_misses"))
+        counts = " | ".join(str(_count(record, k)) for k in
+                            ("hits", "misses", "c_hits", "c_misses", "writes", "write_errors"))
         lines.append(f"| {_cell(name)} | {state} | {counts} | {_cell(record.get('reason', ''))} |")
     return "\n".join(lines)
 

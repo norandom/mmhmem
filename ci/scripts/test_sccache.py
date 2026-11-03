@@ -66,6 +66,9 @@ class EnvTests(unittest.TestCase):
         self.assertEqual(env["SCCACHE_GHA_RW_MODE"], "READ_WRITE")
         self.assertEqual(env["SCCACHE_GHA_VERSION"], sccache.GHA_CACHE_VERSION)
         self.assertEqual(env["SCCACHE_IGNORE_SERVER_IO_ERROR"], "1")
+        # GitHub's current cache service; without it sccache uses the retired
+        # API and silently stores nothing (run 41661893251: 0 cache entries).
+        self.assertEqual(env["ACTIONS_CACHE_SERVICE_V2"], "on")
 
     def test_read_only_environment(self):
         self.assertEqual(cache_env("read-only")["SCCACHE_GHA_RW_MODE"], "READ_ONLY")

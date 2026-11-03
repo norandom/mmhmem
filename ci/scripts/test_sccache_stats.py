@@ -22,6 +22,9 @@ SAMPLE = {
         "cache_misses": {"counts": {"Rust": 12, "C/C++": 2}, "adv_counts": {"rust": 12, "c": 2}},
         "cache_errors": {"counts": {}, "adv_counts": {}},
         "non_cacheable_compilations": 7,
+        "cache_writes": 14,
+        "cache_write_errors": 3,
+        "cache_read_errors": 1,
     },
     "cache_location": "GHA, name: mmhmem-1",
     "version": "0.18.0",
@@ -53,6 +56,8 @@ class ParseTests(unittest.TestCase):
         self.assertEqual((record["rust_hits"], record["c_hits"]), (300, 61))
         self.assertEqual((record["rust_misses"], record["c_misses"]), (12, 2))
         self.assertEqual(record["non_cacheable"], 7)
+        self.assertEqual((record["writes"], record["write_errors"], record["read_errors"]), (14, 3, 1))
+        self.assertEqual(record["location"], "GHA, name: mmhmem-1")
 
     def test_empty_or_odd_stats_count_as_zero(self):
         record = parse_stats({"stats": {"cache_hits": {"counts": {}}}})

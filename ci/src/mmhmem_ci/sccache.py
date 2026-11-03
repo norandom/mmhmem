@@ -89,7 +89,12 @@ def parse_stats(data: dict) -> dict:
         return data
     stats = data.get("stats") or {}
     hits, misses = _counts(stats, "cache_hits"), _counts(stats, "cache_misses")
-    non_cacheable = stats.get("non_cacheable_compilations")
+
+    def number(key: str) -> int:
+        value = stats.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    location = data.get("cache_location")
     return {
         "enabled": True,
         "hits": sum(hits.values()),
@@ -98,7 +103,12 @@ def parse_stats(data: dict) -> dict:
         "rust_misses": misses.get("Rust", 0),
         "c_hits": hits.get("C/C++", 0),
         "c_misses": misses.get("C/C++", 0),
-        "non_cacheable": non_cacheable if isinstance(non_cacheable, int) else 0,
+        "non_cacheable": number("non_cacheable_compilations"),
+        # Write and read outcomes make a silent backend failure visible.
+        "writes": number("cache_writes"),
+        "write_errors": number("cache_write_errors"),
+        "read_errors": number("cache_read_errors"),
+        "location": location if isinstance(location, str) else "",
     }
 
 
@@ -118,6 +128,10 @@ def cache_env(mode: str) -> Dict[str, str]:
         "SCCACHE_GHA_ENABLED": "on",
         "SCCACHE_GHA_VERSION": GHA_CACHE_VERSION,
         "SCCACHE_GHA_RW_MODE": "READ_ONLY" if mode == "read-only" else "READ_WRITE",
+        # Select GitHub's current cache service, as mozilla-actions/sccache-action
+        # does. Without it the backend uses the retired API and every write
+        # fails silently (run 41661893251 stored no entries).
+        "ACTIONS_CACHE_SERVICE_V2": "on",
         # Server or backend IO errors fall back to a local compile.
         "SCCACHE_IGNORE_SERVER_IO_ERROR": "1",
     }
