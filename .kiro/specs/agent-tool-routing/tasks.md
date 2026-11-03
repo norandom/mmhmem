@@ -89,7 +89,7 @@ verification task rather than forming standalone work.
   - _Depends: 2.1_
   - _Requirements: 1.4, 2.3, 2.4, 4.2, 4.3_
 
-- [ ] 4.2 Integrate real Claude instruction loading and tool-selection evidence
+- [x] 4.2 Integrate real Claude instruction loading and tool-selection evidence
   - Install into the synthetic fixture using the actual installer and launch fresh bounded sessions with normal tools and permissions.
   - Parse CLI events for ordinary inspection, matching-identity repeat, targeted evidence, and unavailable-worker fallback scenarios.
   - Record effective instruction sources and ambient-instruction limitations; do not inject skill text or force the desired tool.
@@ -141,3 +141,4 @@ verification task rather than forming standalone work.
 - Shared server instructions now live in src/mcp/instructions.rs; checkpoint checker follows that constant and retains scenario mutation tests.
 - Preserve LF when rewriting canonical SKILL.md; shell builder rejects CRLF frontmatter. Native routing/checkpoint and Dagger Debian/Alpine distribution parity verified.
 - Owned instruction commits recheck source bytes before replacement; this detects changes but does not provide cross-process locking.
+- Claude adoption requires completed error-free non-targeted intended-fixture reads; failure reports retain only allowlisted trace/counter evidence. Installer runs with disposable HOME/USERPROFILE separate from authenticated live CLI.

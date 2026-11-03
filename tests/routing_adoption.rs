@@ -12,7 +12,15 @@ fn live_adoption_requires_explicit_opt_in() {
     if std::env::var("E2E_LLM").ok().as_deref() != Some("1") {
         return;
     }
-    panic!("NOT_VERIFIED: live harness adapters are not installed yet");
+    let report = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(claude::run());
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    assert!(
+        matches!(report.evidence.outcome, foundation::Outcome::Pass),
+        "Claude adoption FAIL or NOT_VERIFIED"
+    );
+    assert_eq!(report.repeat_outcome, "PASS", "cache repeat NOT_VERIFIED");
 }
 #[test]
 fn sanitized_events_and_modes() {
@@ -88,4 +96,72 @@ fn bounded_child_drains_both_streams() {
         assert_eq!(output.stdout.len(), 200000);
         assert_eq!(output.stderr.len(), 200000);
     });
+}
+
+#[path = "routing_adoption/claude.rs"]
+mod claude;
+#[test]
+fn claude_events_distinguish_adoption_and_private_payloads() {
+    let stream = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__mmhmem__smart_read","input":{"file_path":"transform.rs","question":"explain","private":"SECRET"}}]}}
+{"type":"result","is_error":false}"#;
+    let trace = claude::parse(stream).unwrap();
+    assert!(claude::adopted(&trace));
+    assert!(!serde_json::to_string(&trace).unwrap().contains("SECRET"));
+    assert!(claude::parse("{}").is_err());
+    let native=claude::parse(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}},{"type":"tool_use","name":"mcp__mmhmem__smart_read","input":{}}]}}
+{"type":"result","is_error":false}"#).unwrap();
+    assert!(!claude::adopted(&native));
+    assert!(!claude::same_identity(&trace, &native));
+}
+
+#[test]
+fn claude_rejects_failed_and_targeted_only_adoption() {
+    assert!(claude::parse(r#"{"type":"result","is_error":true}"#).is_err());
+    let stream = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__mmhmem__smart_read","input":{"file_path":"transform.rs","question":"one","offset":1,"limit":3}}]}}
+{"type":"result","is_error":false}"#;
+    let first = claude::parse(stream).unwrap();
+    assert!(!claude::adopted(&first));
+    let second = claude::parse(&stream.replace("one", "two")).unwrap();
+    assert!(!claude::same_identity(&first, &second));
+    assert!(claude::parse(r#"{"type":"assistant","message":{"content":[]}}"#).is_err());
+}
+
+#[test]
+fn claude_worker_error_fallback_is_bounded() {
+    let stream = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__mmhmem__smart_read","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"SECRET"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}
+{"type":"result","is_error":false}"#;
+    let trace = claude::parse(stream).unwrap();
+    assert!(claude::bounded_fallback(&trace));
+    assert!(!serde_json::to_string(&trace).unwrap().contains("SECRET"));
+}
+
+#[test]
+fn claude_failed_or_unintended_read_cannot_pass() {
+    let stream = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__mmhmem__smart_read","input":{"file_path":"transform.rs"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","is_error":true}]}}
+{"type":"result","is_error":false}"#;
+    assert!(!claude::adopted(&claude::parse(stream).unwrap()));
+    for path in ["other.rs", "", "/other/transform.rs"] {
+        let good = stream
+            .lines()
+            .filter(|l| !l.contains("tool_result"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("transform.rs", path);
+        assert!(!claude::adopted(&claude::parse(&good).unwrap()));
+    }
+}
+
+#[test]
+fn claude_partial_failure_retains_only_allowlisted_trace() {
+    let stream = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"secret":"PRIVATE"}}]}}
+{"type":"unknown","secret":"SECRET"}"#;
+    let (trace, result) = claude::parse_partial(stream);
+    assert!(result.is_err());
+    assert_eq!(trace.tools, vec!["Read"]);
+    let serialized = serde_json::to_string(&trace).unwrap();
+    assert!(!serialized.contains("PRIVATE"));
+    assert!(!serialized.contains("SECRET"));
 }
