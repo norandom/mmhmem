@@ -1,0 +1,390 @@
+{
+  "version": 1,
+  "canonical": "canonical.md",
+  "cases": [
+    {
+      "id": "new",
+      "input": null,
+      "expected": "new.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "dedicated-new",
+      "input": null,
+      "expected": "dedicated-new.expected.bin",
+      "operation": "install",
+      "dedicated": true,
+      "outcome": "changed"
+    },
+    {
+      "id": "empty",
+      "input": "empty.input.bin",
+      "expected": "empty.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "lf",
+      "input": "lf.input.bin",
+      "expected": "lf.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "lf-repeat",
+      "input": "lf-repeat.input.bin",
+      "expected": "lf-repeat.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "lf-remove",
+      "input": "lf-remove.input.bin",
+      "expected": "lf-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "crlf",
+      "input": "crlf.input.bin",
+      "expected": "crlf.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "crlf-repeat",
+      "input": "crlf-repeat.input.bin",
+      "expected": "crlf-repeat.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "crlf-remove",
+      "input": "crlf-remove.input.bin",
+      "expected": "crlf-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "no-final-newline",
+      "input": "no-final-newline.input.bin",
+      "expected": "no-final-newline.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "no-final-newline-repeat",
+      "input": "no-final-newline-repeat.input.bin",
+      "expected": "no-final-newline-repeat.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "no-final-newline-remove",
+      "input": "no-final-newline-remove.input.bin",
+      "expected": "no-final-newline-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "unicode",
+      "input": "unicode.input.bin",
+      "expected": "unicode.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "unicode-repeat",
+      "input": "unicode-repeat.input.bin",
+      "expected": "unicode-repeat.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "unicode-remove",
+      "input": "unicode-remove.input.bin",
+      "expected": "unicode-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "bom",
+      "input": "bom.input.bin",
+      "expected": "bom.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "bom-repeat",
+      "input": "bom-repeat.input.bin",
+      "expected": "bom-repeat.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "bom-remove",
+      "input": "bom-remove.input.bin",
+      "expected": "bom-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "replace",
+      "input": "replace.input.bin",
+      "expected": "replace.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "surrounding",
+      "input": "surrounding.input.bin",
+      "expected": "surrounding.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "remove-surrounding",
+      "input": "remove-surrounding.input.bin",
+      "expected": "remove-surrounding.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "remove-absent",
+      "input": "remove-absent.input.bin",
+      "expected": "remove-absent.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "remove-missing",
+      "input": null,
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "unchanged"
+    },
+    {
+      "id": "remove-dedicated",
+      "input": "remove-dedicated.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": true,
+      "outcome": "delete"
+    },
+    {
+      "id": "legacy-update",
+      "input": "legacy-update.input.bin",
+      "expected": "legacy-update.expected.bin",
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "legacy-remove",
+      "input": "legacy-remove.input.bin",
+      "expected": "legacy-remove.expected.bin",
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "changed"
+    },
+    {
+      "id": "unmatched-start-install",
+      "input": "unmatched-start-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "unmatched-start-remove",
+      "input": "unmatched-start-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "unmatched-end-install",
+      "input": "unmatched-end-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "unmatched-end-remove",
+      "input": "unmatched-end-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "reversed-install",
+      "input": "reversed-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "reversed-remove",
+      "input": "reversed-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "duplicate-install",
+      "input": "duplicate-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "duplicate-remove",
+      "input": "duplicate-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "nested-install",
+      "input": "nested-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "nested-remove",
+      "input": "nested-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "marker-like-install",
+      "input": "marker-like-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "marker-like-remove",
+      "input": "marker-like-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "unowned-install",
+      "input": "unowned-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": true,
+      "outcome": "error"
+    },
+    {
+      "id": "unowned-remove",
+      "input": "unowned-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": true,
+      "outcome": "error"
+    },
+    {
+      "id": "frontmatter-install",
+      "input": "frontmatter-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": true,
+      "outcome": "error"
+    },
+    {
+      "id": "frontmatter-remove",
+      "input": "frontmatter-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": true,
+      "outcome": "error"
+    },
+    {
+      "id": "bad-utf8-install",
+      "input": "bad-utf8-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "bad-utf8-remove",
+      "input": "bad-utf8-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "bad-prefix-install",
+      "input": "bad-prefix-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "bad-prefix-remove",
+      "input": "bad-prefix-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "prefix-mismatch-install",
+      "input": "prefix-mismatch-install.input.bin",
+      "expected": null,
+      "operation": "install",
+      "dedicated": false,
+      "outcome": "error"
+    },
+    {
+      "id": "prefix-mismatch-remove",
+      "input": "prefix-mismatch-remove.input.bin",
+      "expected": null,
+      "operation": "remove",
+      "dedicated": false,
+      "outcome": "error"
+    }
+  ]
+}

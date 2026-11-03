@@ -14,3 +14,4 @@ plugins/**       text eol=lf
 .agents/plugins/** text eol=lf
 .claude-plugin/** text eol=lf
 .gemini-plugin/** text eol=lf
+/tests/fixtures/routing-instructions/*.bin -text

@@ -6,3 +6,5 @@
 /opencode.json
 # Project-local scratch/temp (operations stay inside the project dir)
 /tmp/
+
+__pycache__/
