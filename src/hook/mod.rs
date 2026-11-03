@@ -5,6 +5,7 @@
 //! target file's metadata and a bounded prefix of its bytes, never the
 //! network, configuration or secrets (the caller passes [`HookSettings`]).
 
+pub mod adapters;
 pub mod shell;
 pub mod state;
 

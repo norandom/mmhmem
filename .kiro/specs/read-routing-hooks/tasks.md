@@ -36,7 +36,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Requirements: 2.5_
 
 - [ ] 2. Route Claude Code reads
-- [ ] 2.1 Map Claude Code hook input and output
+- [x] 2.1 Map Claude Code hook input and output
   - Parse the pre-tool event for the native read tool and the Bash and PowerShell tools into a read request, treat every other tool as not a read, and treat input as untrusted.
   - Render a redirect as the documented deny decision with the one-line reason, and a pass as no output.
   - Done when golden input and output tests pass for read with and without a range, recognised and unrecognised shell commands, and non-read tools.
@@ -117,3 +117,4 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 - Task 1.2 (Opus, Opus reviewer APPROVED): line count matches the server's `str::lines`; `Redirect.lines` is capped at the threshold and means "at least N" (redirect text must say so). Parent applied the reviewer's suggestion: invalid UTF-8 in the 8 KiB probe now passes as NotText, because `smart_read` reads with `read_to_string`. Open suggestions: a byte cap for huge files with few newlines, and a test pinning early stop.
 - Task 1.3 (Opus, Opus reviewer APPROVED): `Get-Content -Raw` is accepted (it reads the whole file). Parent added the reviewer's hardening: any Unicode whitespace other than space and tab means not recognised. Requirement 2.6 corrected: `head`/`tail` are partial readers and pass. For task 2.1: `recognise` has no shell dialect, so a few dialect-specific false positives exist (bash `type x`, Git Bash `cat src\\main.rs`), all recoverable through the repeat window; paths are joined without normalisation.
 - Task 1.4 (Sonnet, inline review): `RepeatWindow::new(dir, window_ms)` / `with_default_window(dir)`; keys are SHA-256 of harness, session and path, so the state file holds no plain paths; `remember` creates the directory and returns an error the caller ignores (fail open).
+- Task 2.1 (Sonnet, inline review): `adapters::parse(Harness, &[u8]) -> ParsedCall {harness, session_id, cwd, tool, read}` and `render(Harness, &Decision, &Path) -> String`; any integer offset or limit makes a ranged read; a relative path with an empty cwd is not a read. Redirect reason says "at least <n> lines".
