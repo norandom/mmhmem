@@ -41,7 +41,7 @@ verification task rather than forming standalone work.
   - _Depends: 1.1, 1.2_
   - _Requirements: 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 2.3 (P) Implement native Windows owned-section planning and safe commits
+- [x] 2.3 (P) Implement native Windows owned-section planning and safe commits
   - Implement identical marker parsing, install/update/remove plans, and unchanged-content handling against the frozen shared fixtures.
   - Preserve unrelated bytes and reject ambiguous ownership, undecodable input, reparse destinations, and unsupported dedicated-rule frontmatter.
   - Retain one backup, recheck original content, stage beside the target, atomically replace, and prevent newly appeared targets from being overwritten.
@@ -140,3 +140,4 @@ verification task rather than forming standalone work.
 - Adoption subprocesses must drain stdout/stderr concurrently while enforcing timeout and kill/reap; flood-output and delayed-write regressions cover both.
 - Shared server instructions now live in src/mcp/instructions.rs; checkpoint checker follows that constant and retains scenario mutation tests.
 - Preserve LF when rewriting canonical SKILL.md; shell builder rejects CRLF frontmatter. Native routing/checkpoint and Dagger Debian/Alpine distribution parity verified.
+- Owned instruction commits recheck source bytes before replacement; this detects changes but does not provide cross-process locking.
