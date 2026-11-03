@@ -55,7 +55,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Depends: 1, 2, 4_
   - _Requirements: 1.5, 2.2, 2.3, 2.4, 3.1, 3.2, 3.4, 4.1, 4.2, 4.4, 4.5_
 
-- [ ] 6. Validate the integrated feature against repository gates
+- [x] 6. Validate the integrated feature against repository gates
   - Run formatting, strict clippy, and the full native deterministic suite using the established nextest/cargo fallback; include mandatory LOC, audit, isolation, and size-cap checks.
   - Run the canonical Dagger distribution gate and feature-enabled checks through the sanctioned CI wrapper; resolve regressions within the owning task boundaries.
   - Smoke the newly built local stdio artifact through checkpoint/resume, then verify requirement coverage, cross-task integration, and design alignment.
@@ -64,9 +64,3 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Runtime verification, Guidance verification (explicit final integration)_
   - _Depends: 1, 2, 3, 4, 5_
   - _Requirements: 2.3, 4.3, 4.4, 4.5, 4.6_
-
-
-
-
-
-
