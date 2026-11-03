@@ -21,3 +21,25 @@ with default options (no cache options, no credential). Logs under
 Pending for task 4.2 (hosted): the `env://` secret syntax on Dagger 0.21.11,
 the cached Dockerfile branch, real hit counts including C objects, and the
 warm and cold timing targets.
+
+## Task 4.2: hosted acceptance
+
+### Run 1, cache-populating (run 41661893251, revision 8b80e14, 2026-11-03)
+
+All jobs green: gate 686 s, Windows 271 s, macOS 191 s, LOC job 59 s
+(parallel to the gate).
+
+| Stage | Cache | Hits | Misses | Rust misses | C misses | Duration |
+|---|---|---|---|---|---|---|
+| static_release | on | 0 | 1,294 | 500 | 520 | 592 s |
+| docker_build | on | 0 | 587 | 189 | 261 | 453 s |
+| clippy_otel | on | 0 | 590 | 192 | 261 | 224 s |
+
+- `env://` secret arguments are accepted by Dagger 0.21.11, and the cached
+  Dockerfile branch (download, checksum, sourced secret) ran (1.1).
+- C/C++ compiles of build scripts, including aws-lc-sys and the bundled
+  SQLite, go through sccache: 520 musl and 261 glibc C compiles were cache
+  misses, so they are stored and cacheable (1.2).
+- Cold gate 686 s is within 110 percent of the 666 s baseline (733 s): 1.6
+  PASS.
+- The LOC report ran in its own job and wrote its summary (4.1, 4.4).
