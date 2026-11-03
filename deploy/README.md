@@ -210,3 +210,12 @@ Confirm that the latest endpoint serves the selected known-good checksum and
 restore the matching compatibility guidance. Preserve affected memory stores,
 worker settings and harness registrations. Never rebuild or overwrite the
 tested assets in place to make an existing release appear repaired.
+
+Unix onboarding adds owned routing instructions for selected Claude Code/OpenCode agents.
+Global destinations are `~/.claude/rules/mmhmem.md` and
+`~/.config/opencode/AGENTS.md`; project destinations are `.claude/rules/mmhmem.md`
+and `AGENTS.md`. Existing user text is preserved with one `.mmhmem.bak` backup.
+Use `--remove` to remove owned guidance or `--dry-run` to validate without writing.
+Start a fresh harness session after updates. Custom configuration roots or
+instruction-disable controls require manual review; the installer reports their
+variable names without exposing configuration contents.

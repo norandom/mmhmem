@@ -138,7 +138,11 @@ tree="$tmp/deploy"
 mkdir -p "$tree/skills/unified-memory" "$tree/commands/claude" \
          "$tree/commands/opencode" "$tree/commands/codex"
 fetch "$RAW/deploy/install_local.sh" "$tree/install_local.sh"
+fetch "$RAW/deploy/manage_routing.py" "$tree/manage_routing.py"
+fetch "$RAW/deploy/routing_onboarding.py" "$tree/routing_onboarding.py"
 if [ "$REMOVE" -eq 0 ]; then
+  mkdir -p "$tree/instructions"
+  fetch "$RAW/deploy/instructions/mmhmem-routing.md" "$tree/instructions/mmhmem-routing.md"
   fetch "$RAW/deploy/check_worker.py" "$tree/check_worker.py"
   fetch "$RAW/deploy/skills/unified-memory/SKILL.md"    "$tree/skills/unified-memory/SKILL.md"
   fetch "$RAW/deploy/commands/claude/mmhmem-recap.md"   "$tree/commands/claude/mmhmem-recap.md"

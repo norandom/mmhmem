@@ -59,7 +59,7 @@ verification task rather than forming standalone work.
   - _Depends: 1.1, 1.2_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 3. Integrate safe routing onboarding with both installers
+- [x] 3. Integrate safe routing onboarding with both installers
 - [x] 3.1 Integrate Windows selection, preflight, bootstrap, and removal
   - Resolve selected global/project destinations and plan all instruction changes before selected harness writes.
   - Refuse inconsistent configuration overrides and legacy/unknown-version ownership conflicts; report disabled or unverified loading without changing user controls.
@@ -70,7 +70,7 @@ verification task rather than forming standalone work.
   - _Depends: 2.2, 2.3_
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 3.2 Integrate Unix onboarding with the same ownership and compatibility rules
+- [x] 3.2 Integrate Unix onboarding with the same ownership and compatibility rules
   - Apply the same selected destinations, all-plan preflight, override/version/loading checks, and honest completion behavior.
   - Wire helper and canonical payloads through install, update, remove, and dry-run, including root bootstrap removal downloads.
   - Connect installer test entrypoints and update Unix usage instructions; coordinate shared documentation after Windows integration.

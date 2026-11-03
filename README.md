@@ -119,3 +119,12 @@ connection setup. See the [server guide](docs/server.md).
 - [Daily use and tool reference](docs/usage.md)
 - [Development, CI and releases](docs/development.md)
 - [Concept and background](docs/concept.md)
+
+Unix onboarding adds owned routing instructions for selected Claude Code/OpenCode agents.
+Global destinations are `~/.claude/rules/mmhmem.md` and
+`~/.config/opencode/AGENTS.md`; project destinations are `.claude/rules/mmhmem.md`
+and `AGENTS.md`. Existing user text is preserved with one `.mmhmem.bak` backup.
+Use `--remove` to remove owned guidance or `--dry-run` to validate without writing.
+Start a fresh harness session after updates. Custom configuration roots or
+instruction-disable controls require manual review; the installer reports their
+variable names without exposing configuration contents.

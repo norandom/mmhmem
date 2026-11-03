@@ -2,6 +2,7 @@
 # Offline platform simulation; optional verified candidate runs inside CI only.
 set -euo pipefail
 bash "$(dirname "$0")/test-codex-registration.sh"
+bash "$(dirname "$0")/test-routing-onboarding.sh"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 candidate=""; expected_sha256=""; report=""
 if [ "$#" -gt 0 ]; then
@@ -97,7 +98,9 @@ if run_bootstrap --agent codex; then echo 'Unsupported Linux architecture accept
 export TEST_ARCH=x86_64
 : > "$TEST_LOG"
 run_bootstrap --remove --agent codex
-[ "$(wc -l < "$TEST_LOG")" -eq 1 ]
+[ "$(wc -l < "$TEST_LOG")" -eq 3 ]
+grep -q manage_routing.py "$TEST_LOG"
+grep -q routing_onboarding.py "$TEST_LOG"
 [ -z "$(ls -A "$scratch/temp")" ]
 bash "$root/install.sh" --help >/dev/null
 # Exercise the real registration engine without executing a binary or editing user state.

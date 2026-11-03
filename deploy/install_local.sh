@@ -481,6 +481,19 @@ if [ "$GLOBAL" -eq 1 ] && want_agent codex && [ "$HAS_CODEX" -eq 1 ] && [ "$DRY_
   codex_unmanaged "$CODEX_CFG_DIR/config.toml" > /dev/null || die 'Ambiguous/unmanaged mmhmem TOML needs manual review; Codex config unchanged.'
 fi
 
+# Plan every selected instruction destination before any integration writes.
+ROUTING_AGENTS=()
+if want_agent claude && [ "$HAS_CLAUDE" -eq 1 ]; then ROUTING_AGENTS+=(claude); fi
+if want_agent opencode && [ "$HAS_OPENCODE" -eq 1 ]; then ROUTING_AGENTS+=(opencode); fi
+ROUTING_PLANS='[]'
+if [ "${#ROUTING_AGENTS[@]}" -gt 0 ]; then
+  command -v python3 >/dev/null 2>&1 || die 'Python 3 is required for safe routing onboarding'
+  routing_args=(--home "$HOME" --project "${PROJECT_DIR:-$PWD}" --agents "${ROUTING_AGENTS[@]}")
+  [ "$GLOBAL" -eq 0 ] || routing_args+=(--global-scope)
+  [ "$REMOVE" -eq 0 ] || routing_args+=(--remove)
+  ROUTING_PLANS="$(python3 "$SCRIPT_DIR/routing_onboarding.py" prepare "${routing_args[@]}")" || die 'Routing preflight failed; no integrations were changed'
+fi
+
 # --- optional worker setup -------------------------------------------------
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   printf '\n  Optional: summary cache\n  ----------------------------------------\n'
@@ -554,6 +567,12 @@ if [ "$REMOVE" -eq 0 ] && [ -n "$WORKER_CONFIG_FILE" ]; then
       fi
     fi
   fi
+fi
+
+if [ "${#ROUTING_AGENTS[@]}" -gt 0 ]; then
+  routing_commit_args=()
+  [ "$DRY_RUN" -eq 0 ] || routing_commit_args+=(--dry-run)
+  printf '%s' "$ROUTING_PLANS" | python3 "$SCRIPT_DIR/routing_onboarding.py" commit "${routing_commit_args[@]}" || die 'Routing commit failed; earlier operations may have completed'
 fi
 
 # --- Claude Code CLI ---------------------------------------------------------
