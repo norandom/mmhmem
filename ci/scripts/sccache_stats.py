@@ -20,6 +20,11 @@ import subprocess
 import sys
 from typing import Callable, Dict, List, Tuple
 
+# The stats parser is shared with the Dagger module (the Docker stage parses
+# the same sccache JSON); /src keeps the repository layout in containers.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "mmhmem_ci"))
+from sccache import parse_stats  # noqa: E402
+
 Runner = Callable[[List[str], Dict[str, str]], Tuple[int, str]]
 
 
@@ -33,28 +38,6 @@ def _run(args: List[str], env: Dict[str, str]) -> Tuple[int, str]:
         done = subprocess.run(args, env=env, capture_output=True, text=True, timeout=120)
         return done.returncode, done.stdout
     return subprocess.run(args, env=env).returncode, ""
-
-
-def _counts(stats: dict, key: str) -> Dict[str, int]:
-    counts = (stats.get(key) or {}).get("counts") or {}
-    return {k: v for k, v in counts.items() if isinstance(v, int)}
-
-
-def parse_stats(data: dict) -> dict:
-    """Turn sccache `--stats-format json` output into a stats record."""
-    stats = data.get("stats") or {}
-    hits, misses = _counts(stats, "cache_hits"), _counts(stats, "cache_misses")
-    non_cacheable = stats.get("non_cacheable_compilations")
-    return {
-        "enabled": True,
-        "hits": sum(hits.values()),
-        "misses": sum(misses.values()),
-        "rust_hits": hits.get("Rust", 0),
-        "rust_misses": misses.get("Rust", 0),
-        "c_hits": hits.get("C/C++", 0),
-        "c_misses": misses.get("C/C++", 0),
-        "non_cacheable": non_cacheable if isinstance(non_cacheable, int) else 0,
-    }
 
 
 def run_under_sccache(cmd: List[str], env: Dict[str, str], runner: Runner = _run) -> Tuple[int, dict]:

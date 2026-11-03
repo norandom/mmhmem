@@ -24,8 +24,31 @@ WORKDIR /build
 # component is irrelevant in a build container) and Cargo.lock pins the deps.
 COPY Cargo.toml Cargo.lock clippy.toml ./
 COPY src ./src
+# Optional compile cache (ci-dependency-cache). Hosted CI passes the pinned
+# sccache URL and SHA-256 plus a BuildKit secret `sccache_env` with the GitHub
+# cache credentials; a plain `docker build` sets neither and runs the
+# unchanged cargo build. Credentials never enter an ARG, ENV or layer.
+ARG SCCACHE_URL=
+ARG SCCACHE_SHA256=
 RUN --mount=type=cache,target=/build/target \
-    cargo build --release --locked --features otel \
+    --mount=type=secret,id=sccache_env \
+    if [ -n "$SCCACHE_URL" ] && [ -s /run/secrets/sccache_env ]; then \
+        apt-get update -qq \
+        && apt-get install -y -qq --no-install-recommends curl ca-certificates \
+        && curl -fsSL "$SCCACHE_URL" -o /tmp/sccache.tgz \
+        && echo "$SCCACHE_SHA256  /tmp/sccache.tgz" | sha256sum -c - \
+        && tar -xzf /tmp/sccache.tgz -C /usr/local/bin --strip-components=1 --wildcards '*/sccache' \
+        && . /run/secrets/sccache_env \
+        && if sccache --start-server; then \
+               cargo build --release --locked --features otel \
+               && sccache --show-stats --stats-format json > /build/sccache-stats.json; \
+           else \
+               echo '{"enabled": false, "reason": "sccache server did not start; built without the cache"}' > /build/sccache-stats.json \
+               && env -u RUSTC_WRAPPER cargo build --release --locked --features otel; \
+           fi; \
+    else cargo build --release --locked --features otel \
+        && echo '{"enabled": false, "reason": "not configured"}' > /build/sccache-stats.json; \
+    fi \
     && cp target/release/mmhmem /build/mmhmem-out
 
 # --- runtime: only the binary, non-root, no shell ---

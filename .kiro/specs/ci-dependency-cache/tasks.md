@@ -31,7 +31,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Depends: 1.1, 1.2_
   - _Requirements: 1.1, 1.3, 1.4, 4.5, 5.1_
 
-- [ ] 2.2 Give the Dockerfile builder stage an optional sccache path
+- [x] 2.2 Give the Dockerfile builder stage an optional sccache path
   - Add empty-default build arguments for the sccache URL and checksum and an optional secret mount for the cache environment; without them the build step stays exactly as today.
   - When configured, verify and use sccache in the builder stage and write its statistics file there.
   - Build the builder stage once to read the statistics, then the full image with identical inputs, and add the Docker stage's statistics to the cache line.
@@ -84,3 +84,4 @@ publication. Every commit must pass the project pre-commit gate.
 - Task 1.1: pinned sccache v0.18.0 (published 2026-09-14; v0.19.0 was 10 days old) with the release's published SHA-256 for the musl tarball, matching a local download. Real `--show-stats --stats-format json` output (v0.18.0) has `stats.cache_hits.counts` and `stats.cache_misses.counts` keyed by language (`Rust`, `C/C++`). `sccache.py` imports no dagger symbols at load time, so it is unit tested on the host. Reviewed inline by the parent.
 - Task 1.2: a live run with the real sccache v0.18.0 Windows binary found that output capture keyed on a path ending in `sccache` missed `sccache.exe`; `is_sccache` now compares the file stem and has a regression test. The live run then recorded a Rust cache hit. Reviewed inline by the parent.
 - Task 2.1: the cache layer is applied before the source mount rather than as the very last step (design said last), so a source change does not invalidate the sccache install layer; with the cache off both orders give today's container. `build_candidate` now returns a fourth value, the cache stats record, read from `/tmp/sccache-stats.json` (outside the bundle's report set). The Docker stage reports `Docker builder stage not cached` until task 2.2. Reviewed inline by the parent; the real engine loads the module (static-setup passed).
+- Task 2.2: the stats parser moved into `sccache.py` (`parse_stats`) and `sccache_stats.py` imports it, so the Docker stage parses sccache's raw JSON with the same code. The plain Docker path was verified locally (`-Call docker-build`: image built, payload mmhmem 0.4.1); the cached Dockerfile branch (curl, checksum, sourced secret) can only run with hosted credentials and is first exercised in task 4.2. Reviewed inline by the parent.

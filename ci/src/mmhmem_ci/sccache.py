@@ -12,6 +12,7 @@ tested on the host; containers and secrets are passed in duck-typed.
 """
 
 from dataclasses import dataclass
+import shlex
 from typing import Any, Callable, Dict, List, Optional
 
 # Exact pinned release (published 2026-09-14), static musl build, verified
@@ -74,6 +75,38 @@ def cached_exec(cmd: List[str], stats_path: str = STATS_PATH) -> List[str]:
     """Run `cmd` through the in-container stats wrapper, so the sccache server
     and its statistics share one exec (each Dagger exec is its own process)."""
     return ["python3", "ci/scripts/sccache_stats.py", "--stats", stats_path, "--", *cmd]
+
+
+def _counts(stats: dict, key: str) -> Dict[str, int]:
+    counts = (stats.get(key) or {}).get("counts") or {}
+    return {k: v for k, v in counts.items() if isinstance(v, int)}
+
+
+def parse_stats(data: dict) -> dict:
+    """Turn sccache `--show-stats --stats-format json` output into a stats
+    record (shared by sccache_stats.py and the Docker stage)."""
+    if "enabled" in data:  # already a record (e.g. a Dockerfile fallback note)
+        return data
+    stats = data.get("stats") or {}
+    hits, misses = _counts(stats, "cache_hits"), _counts(stats, "cache_misses")
+    non_cacheable = stats.get("non_cacheable_compilations")
+    return {
+        "enabled": True,
+        "hits": sum(hits.values()),
+        "misses": sum(misses.values()),
+        "rust_hits": hits.get("Rust", 0),
+        "rust_misses": misses.get("Rust", 0),
+        "c_hits": hits.get("C/C++", 0),
+        "c_misses": misses.get("C/C++", 0),
+        "non_cacheable": non_cacheable if isinstance(non_cacheable, int) else 0,
+    }
+
+
+def docker_secret_env(mode: str, url: str, token: str) -> str:
+    """Shell-sourced content of the Dockerfile's `sccache_env` secret: the
+    credentials plus the non-secret cache environment, safely quoted."""
+    pairs = {"ACTIONS_RESULTS_URL": url, "ACTIONS_RUNTIME_TOKEN": token, **cache_env(mode)}
+    return "".join(f"export {name}={shlex.quote(value)}\n" for name, value in pairs.items())
 
 
 def cache_env(mode: str) -> Dict[str, str]:

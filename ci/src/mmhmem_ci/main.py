@@ -152,6 +152,30 @@ async def _clippy_otel(src: dagger.Directory, cargo_jobs: int = 2, cache: CacheC
     return output, json.loads(await done.file(STATS_PATH).contents())
 
 
+async def _docker_image(src: dagger.Directory, cache: CacheConfig = OFF) -> tuple:
+    """Build the Dockerfile image and run its payload; returns (output, stats).
+
+    Cache off: exactly `src.docker_build()`. Cache on: the builder stage gets
+    the pinned sccache by build args and the credentials as the BuildKit
+    secret `sccache_env`; the builder stage is built once to read its stats,
+    then the full image with identical inputs reuses that stage.
+    """
+    if cache.mode == "off":
+        image, stats = src.docker_build(), off_record()
+    else:
+        from .sccache import SCCACHE_SHA256, SCCACHE_URL, docker_secret_env, parse_stats
+
+        env = docker_secret_env(cache.mode, await cache.url.plaintext(), await cache.token.plaintext())
+        secrets = [dag.set_secret('sccache_env', env)]
+        build_args = [dagger.BuildArg(name="SCCACHE_URL", value=SCCACHE_URL),
+                      dagger.BuildArg(name="SCCACHE_SHA256", value=SCCACHE_SHA256)]
+        builder = src.docker_build(build_args=build_args, secrets=secrets, target="builder")
+        stats = parse_stats(json.loads(await builder.file("/build/sccache-stats.json").contents()))
+        image = src.docker_build(build_args=build_args, secrets=secrets)
+    version = await image.with_exec(["--version"], use_entrypoint=True).stdout()
+    return f"docker image built; payload: {version.strip()}", stats
+
+
 async def _stage_runner_tests(src: dagger.Directory, validation_id: str) -> str:
     """Run the stage runner's unit tests in the Debian bookworm runtime (Python 3.11).
 
@@ -349,15 +373,16 @@ class MmhmemCi:
         return bundle.file("mmhmem-linux-x86_64")
 
     @function
-    async def docker_build(self, src: dagger.Directory) -> str:
+    async def docker_build(self, src: dagger.Directory, cache_mode: str = "off",
+                           cache_url: dagger.Secret | None = None,
+                           cache_token: dagger.Secret | None = None) -> str:
         """Blocking: build the image per Dockerfile (compiles with the otel
         feature, Req 11.2/8.6) and prove the runtime payload runs by
         executing `mmhmem --version` inside the distroless image
         (use_entrypoint: the image has ENTRYPOINT mmhmem and no shell, so
         the args must be passed to the entrypoint, not run as a command)."""
-        image = src.docker_build()
-        version = await image.with_exec(["--version"], use_entrypoint=True).stdout()
-        return f"docker image built; payload: {version.strip()}"
+        output, _ = await _docker_image(src, CacheConfig.from_options(cache_mode, cache_url, cache_token))
+        return output
 
     @function
     async def compose_config(self, src: dagger.Directory) -> str:
@@ -500,8 +525,8 @@ class MmhmemCi:
             return manifest
 
         async def docker_build_stage() -> str:
-            cache_stats["docker_build"] = off_record("Docker builder stage not cached")
-            return await self.docker_build(src)
+            output, cache_stats["docker_build"] = await _docker_image(src, cache)
+            return output
 
         async def clippy_otel_stage() -> str:
             output, cache_stats["clippy_otel"] = await _clippy_otel(src, cargo_jobs=cargo_jobs, cache=cache)
