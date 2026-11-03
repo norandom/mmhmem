@@ -26,15 +26,12 @@ from stages import TIMINGS_PREFIX, Stage, StageFailure, run_stages, timings_line
 SOURCE = (MODULE_DIR / "main.py").read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
 
-# Design "`all` stage list" table: (name, heavy, needs), in order, except
-# that loc_report sits right after the three heavy stages (task 2.3, Decision 4
-# fallback): bookworm has no tokei package, so its source build takes the
-# first slot a heavy stage frees and overlaps the static chain.
+# Design "`all` stage list" table: (name, heavy, needs), in order. The LOC
+# report left the gate for its own non-blocking job (ci-dependency-cache 4.5).
 EXPECTED_PLAN = (
     ("static_release", True, ()),
     ("docker_build", True, ()),
     ("clippy_otel", True, ()),
-    ("loc_report", False, ()),
     ("stage_runner_tests", False, ()),
     ("distribution", False, ()),
     ("fmt", False, ()),
@@ -49,7 +46,6 @@ RESEARCH_DURATIONS_S = {
     "static_release": 413,  # musl candidate 365 s + static gates ~48 s
     "docker_build": 162,
     "clippy_otel": 60,
-    "loc_report": 64,  # tokei cargo install from source
     "stage_runner_tests": 10,
     "distribution": 48,
     "fmt": 2,
@@ -270,7 +266,7 @@ class StubPipelineTest(unittest.TestCase):
                 if name == fail:
                     raise RuntimeError(f"{name} stub failure")
                 events.append(f"end:{name}")
-                return {"static_release": "MANIFEST", "loc_report": "TOKEI"}.get(name, "ok")
+                return "MANIFEST" if name == "static_release" else "ok"
             stages.append(Stage(name, run, tuple(needs), heavy))
         return stages, events
 
@@ -311,28 +307,32 @@ class StubPipelineTest(unittest.TestCase):
     def labels(self) -> dict:
         return ast.literal_eval(module_assign("STAGE_LABELS"))
 
-    def test_summary_keeps_ok_lines_manifest_tokei_and_ends_with_timings(self):
-        summary = load("all_summary", {"timings_line": timings_line, "STAGE_LABELS": self.labels()})
+    def test_summary_keeps_ok_lines_manifest_cache_and_ends_with_timings(self):
+        namespace = {"timings_line": timings_line, "STAGE_LABELS": self.labels(), "json": json,
+                     "CACHE_PREFIX": ast.literal_eval(module_assign("CACHE_PREFIX"))}
+        summary = load("all_summary", namespace)
+        cache = {"static_release": {"enabled": True, "hits": 3, "misses": 1},
+                 "docker_build": {"enabled": False, "reason": "cache off"}}
         for concurrency in (1, 3):
             with self.subTest(concurrency=concurrency):
                 stages, _ = self.build()
                 results = asyncio.run(run_stages(stages, concurrency))
-                text = summary(results)
+                text = summary(results, cache)
                 lines = text.splitlines()
                 self.assertTrue(lines[-1].startswith(TIMINGS_PREFIX))
                 records = json.loads(lines[-1][len(TIMINGS_PREFIX):])
                 self.assertEqual([r["name"] for r in records], STAGE_NAMES)
                 self.assertTrue(all(set(r) == {"name", "status", "started_s", "duration_s"} for r in records))
                 ok = [line for line in lines if line.startswith("== ") and line.endswith(": ok")]
-                expected = [name for name in STAGE_NAMES if name != "loc_report"]
-                self.assertEqual([line[3:].split(" ")[0].rstrip(":") for line in ok], expected)
+                self.assertEqual([line[3:].split(" ")[0].rstrip(":") for line in ok], STAGE_NAMES)
                 self.assertIn("== verified Linux bundle:\nMANIFEST\n", text)
-                self.assertIn("== tokei (informational):\nTOKEI\n", text)
-                self.assertLess(text.index("== tokei (informational):"), text.index(TIMINGS_PREFIX))
+                self.assertNotIn("tokei", text, "the LOC report left the gate")
+                self.assertTrue(lines[-2].startswith(namespace["CACHE_PREFIX"]), "cache line precedes timings")
+                self.assertEqual(json.loads(lines[-2][len(namespace["CACHE_PREFIX"]):]), cache)
 
     def test_labels_start_with_the_stage_name(self):
         labels = self.labels()
-        self.assertEqual(set(labels), {name for name in STAGE_NAMES if name != "loc_report"})
+        self.assertEqual(set(labels), set(STAGE_NAMES))
         for name, label in labels.items():
             self.assertTrue(label == name or label.startswith(f"{name} ("), label)
 
@@ -347,31 +347,61 @@ class LocReportTokeiTest(unittest.TestCase):
         self.assertIn(["tokei", "--files"], commands)
         self.assertNotIn("apt-get", ast.get_source_segment(SOURCE, func))
 
-    def test_loc_report_is_light_has_no_dependents_and_follows_the_heavy_stages(self):
-        entries = plan()
-        names = [entry[0] for entry in entries]
-        self.assertEqual(names[0], "static_release")
-        self.assertEqual([entry[1] for entry in entries[:3]], [True, True, True])
-        self.assertEqual(entries[3], ("loc_report", False, ()))
-        self.assertFalse(any("loc_report" in needs for _, _, needs in entries))
+    def test_loc_report_is_no_gate_stage_but_stays_callable(self):
+        """ci-dependency-cache 4.5: the report runs in its own job; locally on demand."""
+        self.assertNotIn("loc_report", [name for name, _, _ in plan()])
+        self.assertFalse(calls_to(all_function(), "loc_report"), "all must not run the LOC report")
+        func = find_function("loc_report")
+        self.assertTrue(any(isinstance(d, ast.Name) and d.id == "function" for d in func.decorator_list))
 
-    def test_loc_report_overlaps_the_static_chain_at_concurrency_three(self):
-        def stub(name):
-            async def run():
-                await asyncio.sleep(RESEARCH_DURATIONS_S[name] * TIME_SCALE)
-                return "ok"
-            return run
 
-        stages = [Stage(name, stub(name), tuple(needs), heavy) for name, heavy, needs in plan()]
-        results = {r.name: r for r in asyncio.run(run_stages(stages, 3))}
-        static = results["static_release"]
-        static_end = static.started_s + static.duration_s
-        loc = results["loc_report"]
-        self.assertLess(loc.started_s, static_end, "loc_report must start before static_release finishes")
-        self.assertLess(loc.started_s + loc.duration_s, static_end, "loc_report must finish inside the static chain")
-        light = [r for name, heavy, _ in plan() if not heavy for r in [results[name]]]
-        self.assertEqual(min(light, key=lambda r: r.started_s).name, "loc_report",
-                         "loc_report must take the first slot a heavy stage frees")
+class CacheWiringTest(unittest.TestCase):
+    """ci-dependency-cache task 2.1: the cache options reach every compiling stage."""
+
+    CACHE_OPTIONS = ("cache_mode", "cache_url", "cache_token")
+
+    def test_all_cache_options_default_to_off(self):
+        func = all_function()
+        self.assertEqual(param_default(func, "cache_mode"), "off")
+        self.assertEqual(param_default(func, "cache_url"), None)
+        self.assertEqual(param_default(func, "cache_token"), None)
+
+    def test_cache_config_is_built_before_the_memory_probe(self):
+        func = all_function()
+        built = calls_to(func, "from_options")
+        self.assertEqual(len(built), 1)
+        self.assertLess(built[0].lineno, min(c.lineno for c in calls_to(func, "from_")))
+
+    def test_bundle_stages_forward_the_cache_options(self):
+        for callee in ("static_release", "static_installer", "deploy_artifacts"):
+            with self.subTest(callee=callee):
+                calls = calls_to(all_function(), callee)
+                self.assertTrue(calls)
+                for option in self.CACHE_OPTIONS:
+                    self.assertTrue(all(forwards(c, option) for c in calls), f"{callee} lacks {option}")
+
+    def test_clippy_otel_uses_the_cache_and_reports_stats(self):
+        helper = module_function("_clippy_otel")
+        self.assertIn("cache", [a.arg for a in helper.args.args], "_clippy_otel takes the cache config")
+        self.assertTrue(calls_to(helper, "cached_exec"), "enabled builds run through the stats wrapper")
+        containers = calls_to(helper, "rust_container")
+        self.assertTrue(containers and all(forwards(c, "cache") for c in containers))
+        self.assertTrue(calls_to(all_function(), "_clippy_otel"))
+
+    def test_rust_container_applies_the_cache_before_mounting_sources(self):
+        factory = module_function("rust_container")
+        applied = calls_to(factory, "with_cache")
+        mounted = calls_to(factory, "with_mounted_directory")
+        self.assertEqual(len(applied), 1)
+        self.assertEqual(len(mounted), 1)
+        receiver = mounted[0].func.value
+        self.assertTrue(isinstance(receiver, ast.Call) and call_name(receiver) == "with_cache",
+                        "sources are mounted on the cache-configured toolchain container")
+
+    def test_all_reports_cache_stats_in_the_summary(self):
+        summary = calls_to(all_function(), "all_summary")
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(len(summary[0].args), 2, "all_summary(results, cache_stats)")
 
 
 if __name__ == "__main__":

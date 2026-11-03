@@ -12,7 +12,7 @@ tested on the host; containers and secrets are passed in duck-typed.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # Exact pinned release (published 2026-09-14), static musl build, verified
 # against the release's published .sha256 before use.
@@ -27,9 +27,14 @@ SCCACHE_BIN = "/usr/local/bin/sccache"
 GHA_CACHE_VERSION = "mmhmem-1"
 
 MODES = ("off", "read-only", "read-write")
+# Where sccache_stats.py writes a build's stats record inside the container
+# (outside /candidate, so the release bundle's report set is unchanged).
+STATS_PATH = "/tmp/sccache-stats.json"
 _TARBALL = "/opt/sccache/sccache.tar.gz"
+# The stats wrapper needs python3; the glibc Rust image lacks it.
 _INSTALL = (
-    f"cd /opt/sccache && echo '{SCCACHE_SHA256}  sccache.tar.gz' | sha256sum -c - "
+    "(command -v python3 >/dev/null || (apt-get update -qq && apt-get install -y -qq python3)) "
+    f"&& cd /opt/sccache && echo '{SCCACHE_SHA256}  sccache.tar.gz' | sha256sum -c - "
     f"&& tar -xzf sccache.tar.gz --strip-components=1 "
     f"sccache-v{SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache "
     f"&& install -m 0755 sccache {SCCACHE_BIN}"
@@ -55,6 +60,20 @@ class CacheConfig:
         if url is None or mode == "off":
             return CacheConfig("off")
         return CacheConfig(mode, url, token)
+
+
+OFF = CacheConfig("off")
+
+
+def off_record(reason: str = "cache off") -> Dict[str, object]:
+    """Stats record for a stage that ran without the cache (Requirement 5.2)."""
+    return {"enabled": False, "reason": reason}
+
+
+def cached_exec(cmd: List[str], stats_path: str = STATS_PATH) -> List[str]:
+    """Run `cmd` through the in-container stats wrapper, so the sccache server
+    and its statistics share one exec (each Dagger exec is its own process)."""
+    return ["python3", "ci/scripts/sccache_stats.py", "--stats", stats_path, "--", *cmd]
 
 
 def cache_env(mode: str) -> Dict[str, str]:

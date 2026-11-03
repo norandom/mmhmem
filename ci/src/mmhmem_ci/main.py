@@ -10,7 +10,11 @@ deterministic test suite (including tests/loc_caps.rs, which
 machine-enforces the Req 13.3 size caps) run on musl inside static_release.
 The public `clippy` and `test` functions keep the glibc passes for local use
 (ci-build-time Decision 3).
-Informational: tokei per-file LOC report (dev tool only, Req 13.5).
+Informational: tokei per-file LOC report (dev tool only, Req 13.5) runs in
+its own non-blocking workflow job; `loc_report` stays callable locally
+(ci-dependency-cache 4.5). Hosted runs pass the GitHub cache credentials so
+every Rust build runs under sccache (ci-dependency-cache); local runs omit
+them and build exactly as before.
 Validation: release build (plain, zero otel crates), Docker image built with
 `--features otel` (Req 11.2/8.6) whose payload runs, `docker compose config`
 on both compose files (Req 8.6), and the Linux deploy artifacts
@@ -22,11 +26,13 @@ Python SDK the leaf getters are coroutines; a sync function returning one
 fails at runtime with FunctionError.
 """
 
+import json
 import time
 
 import dagger
 from dagger import dag, function, object_type
 
+from .sccache import OFF, STATS_PATH, CacheConfig, cached_exec, off_record, with_cache
 from .stages import Stage, check_memory, run_stages, timings_line
 
 RUST_IMAGE = "rust:1.98-slim-bookworm"
@@ -34,14 +40,12 @@ RUST_IMAGE = "rust:1.98-slim-bookworm"
 # The `all` stage list (design "`all` stage list" table): (name, heavy, needs),
 # in list order. Heavy stages count toward the memory guard. The glibc
 # default-feature clippy and test passes are deliberately absent (Decision 3).
-# loc_report sits right after the heavy stages (Decision 4 fallback): Debian
-# bookworm has no tokei package, so its source build takes the first slot a
-# heavy stage frees and overlaps the static chain instead of running last.
+# The tokei LOC report left the gate for its own workflow job
+# (ci-dependency-cache 4.5).
 ALL_STAGE_PLAN = (
     ("static_release", True, ()),
     ("docker_build", True, ()),
     ("clippy_otel", True, ()),
-    ("loc_report", False, ()),
     ("stage_runner_tests", False, ()),
     ("distribution", False, ()),
     ("fmt", False, ()),
@@ -50,7 +54,10 @@ ALL_STAGE_PLAN = (
     ("deploy_artifacts", False, ("static_release",)),
 )
 
-# `== <label>: ok` summary lines; loc_report reports in its own tokei section.
+# Prefix of the gate's compile-cache line, read by ci/scripts/timing_summary.py.
+CACHE_PREFIX = "== cache: "
+
+# `== <label>: ok` summary lines.
 STAGE_LABELS = {
     "static_release": "static_release (musl + same-artifact runtime gate)",
     "docker_build": "docker_build (otel)",
@@ -82,19 +89,21 @@ def parse_mem_total_kib(meminfo: str) -> int:
     raise ValueError("engine /proc/meminfo has no MemTotal line")
 
 
-def all_summary(results) -> str:
-    """Per-stage ok lines, the verified bundle manifest, the tokei report, then the timings line."""
+def all_summary(results, cache_stats) -> str:
+    """Per-stage ok lines, the verified bundle manifest, the compile-cache
+    line, then the timings line."""
     outputs = {result.name: result.output for result in results}
     summary = "\n".join(f"== {STAGE_LABELS[r.name]}: ok" for r in results if r.name in STAGE_LABELS)
+    cache_line = CACHE_PREFIX + json.dumps(cache_stats, separators=(",", ":"), sort_keys=True)
     return (f"{summary}\n== verified Linux bundle:\n{outputs['static_release']}\n"
-            f"== tokei (informational):\n{outputs['loc_report']}\n{timings_line(results)}")
+            f"{cache_line}\n{timings_line(results)}")
 
 # The repo mount keeps the rustup toolchain pin out (its rust-analyzer
 # component is a dev-host concern; the image's 1.98 toolchain is used as-is).
 TOOLCHAIN_PIN = "rust-toolchain.toml"
 
 
-def rust_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Container:
+def rust_container(src: dagger.Directory, cargo_jobs: int = 2, cache: CacheConfig = OFF) -> dagger.Container:
     """Rust 1.98 container with the repo mounted and persistent cargo caches.
 
     Caches mount the registry/git/target dirs, NOT all of CARGO_HOME: env
@@ -105,7 +114,7 @@ def rust_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Contain
     from .static_release import validate_cargo_jobs
 
     validate_cargo_jobs(cargo_jobs)
-    return (
+    toolchain = (
         dag.container()
         .from_(RUST_IMAGE)
         .with_exec(["apt-get", "update", "-qq"])
@@ -123,16 +132,24 @@ def rust_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Contain
         # OOM-kill the dagger engine mid-run — observed twice).
         .with_env_variable("CARGO_INCREMENTAL", "0")
         .with_env_variable("CARGO_BUILD_JOBS", str(cargo_jobs))
-        .with_mounted_directory("/src", src.without_file(TOOLCHAIN_PIN))
-        .with_workdir("/src")
     )
+    # An enabled cache adds sccache before the sources; OFF changes nothing.
+    return (with_cache(toolchain, cache)
+            .with_mounted_directory("/src", src.without_file(TOOLCHAIN_PIN))
+            .with_workdir("/src"))
 
 
-async def _clippy_otel(src: dagger.Directory, cargo_jobs: int = 2) -> str:
-    """The glibc `--features otel` clippy pass: compiles the feature-gated code."""
-    return await rust_container(src, cargo_jobs=cargo_jobs).with_exec(
-        ["cargo", "clippy", "--all-targets", "--features", "otel", "--", "-D", "warnings"]
-    ).stdout()
+async def _clippy_otel(src: dagger.Directory, cargo_jobs: int = 2, cache: CacheConfig = OFF) -> tuple:
+    """The glibc `--features otel` clippy pass: compiles the feature-gated code.
+
+    Returns (output, compile-cache stats record)."""
+    clippy = ["cargo", "clippy", "--all-targets", "--features", "otel", "--", "-D", "warnings"]
+    ctr = rust_container(src, cargo_jobs=cargo_jobs, cache=cache)
+    if cache.mode == "off":
+        return await ctr.with_exec(clippy).stdout(), off_record()
+    done = ctr.with_exec(cached_exec(clippy))
+    output = await done.stdout()
+    return output, json.loads(await done.file(STATS_PATH).contents())
 
 
 async def _stage_runner_tests(src: dagger.Directory, validation_id: str) -> str:
@@ -152,19 +169,27 @@ async def _stage_runner_tests(src: dagger.Directory, validation_id: str) -> str:
 class MmhmemCi:
     @function
     async def static_installer(self, src: dagger.Directory, revision: str, validation_id: str,
-                               source_clean: bool = False, cargo_jobs: int = 2) -> str:
+                               source_clean: bool = False, cargo_jobs: int = 2, cache_mode: str = "off",
+                               cache_url: dagger.Secret | None = None,
+                               cache_token: dagger.Secret | None = None) -> str:
         """Install/update the verified candidate in isolated supported userlands."""
         from .static_release import installer_check
 
-        return await installer_check(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+        cache = CacheConfig.from_options(cache_mode, cache_url, cache_token)
+        return await installer_check(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs, cache=cache)
 
     @function
     async def static_release(self, src: dagger.Directory, revision: str, validation_id: str,
-                             source_clean: bool = False, cargo_jobs: int = 2) -> dagger.Directory:
-        """Return only the same-artifact verified Linux bundle."""
+                             source_clean: bool = False, cargo_jobs: int = 2, cache_mode: str = "off",
+                             cache_url: dagger.Secret | None = None,
+                             cache_token: dagger.Secret | None = None) -> dagger.Directory:
+        """Return only the same-artifact verified Linux bundle. The workflow's
+        export step must pass the same cargo_jobs and cache options as the
+        gate so the engine reuses the in-session build."""
         from .static_release import verified_bundle
 
-        return await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+        cache = CacheConfig.from_options(cache_mode, cache_url, cache_token)
+        return await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs, cache=cache)
 
     @function
     async def static_gate(self, src: dagger.Directory, revision: str, validation_id: str,
@@ -315,9 +340,12 @@ class MmhmemCi:
 
     @function
     async def release(self, src: dagger.Directory, revision: str, validation_id: str,
-                      source_clean: bool = False, cargo_jobs: int = 2) -> dagger.File:
+                      source_clean: bool = False, cargo_jobs: int = 2, cache_mode: str = "off",
+                      cache_url: dagger.Secret | None = None,
+                      cache_token: dagger.Secret | None = None) -> dagger.File:
         """File-compatible entrypoint selecting only the verified Linux bytes."""
-        bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+        bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs,
+                                           cache_mode=cache_mode, cache_url=cache_url, cache_token=cache_token)
         return bundle.file("mmhmem-linux-x86_64")
 
     @function
@@ -383,7 +411,9 @@ class MmhmemCi:
 
     @function
     async def deploy_artifacts(self, src: dagger.Directory, revision: str, validation_id: str,
-                               source_clean: bool = False, cargo_jobs: int = 2) -> str:
+                               source_clean: bool = False, cargo_jobs: int = 2, cache_mode: str = "off",
+                               cache_url: dagger.Secret | None = None,
+                               cache_token: dagger.Secret | None = None) -> str:
         """Blocking: pristine Linux validation of the deploy artifacts
         (Req 8.1/8.2) — systemd-analyze verify against the REAL release
         binary and logrotate --debug as root with the REAL agent-memory
@@ -410,7 +440,8 @@ class MmhmemCi:
             )
             .with_file(
                 "/usr/local/bin/mmhmem",
-                await self.release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs),
+                await self.release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs,
+                                   cache_mode=cache_mode, cache_url=cache_url, cache_token=cache_token),
                 permissions=0o755,
             )
             .with_exec(["install", "-d", "-m", "0750", "/var/log/agent-memory"])
@@ -431,7 +462,9 @@ class MmhmemCi:
 
     @function
     async def all(self, src: dagger.Directory, revision: str, validation_id: str,
-                  source_clean: bool = False, cargo_jobs: int = 2, concurrency: int = 1) -> str:
+                  source_clean: bool = False, cargo_jobs: int = 2, concurrency: int = 1,
+                  cache_mode: str = "off", cache_url: dagger.Secret | None = None,
+                  cache_token: dagger.Secret | None = None) -> str:
         """The full blocking pipeline (without the model-gated e2e suite,
         which runs as a separate workflow job with credentials).
 
@@ -439,12 +472,17 @@ class MmhmemCi:
         `concurrency` at once (default 1: list order, the local memory
         guard). A failed stage never cancels a sibling; one StageFailure at
         the end names every failed and skipped stage. The engine memory is
-        checked against the heavy-stage budget before any build.
+        checked against the heavy-stage budget before any build. With the
+        cache options (hosted runs), every Rust build runs under sccache and
+        the summary carries a compile-cache line; without them nothing
+        changes.
         """
-        from .static_release import validate_cargo_jobs
+        from .static_release import candidate_cache_stats, validate_cargo_jobs
 
         validate_concurrency(concurrency)
         validate_cargo_jobs(cargo_jobs)
+        cache = CacheConfig.from_options(cache_mode, cache_url, cache_token)
+        cache_stats: dict = {}
         # The probe must run every call: a cached /proc/meminfo would be stale.
         meminfo = await (dag.container().from_(MEMORY_PROBE_IMAGE)
                          .with_env_variable("MMHMEM_MEMORY_PROBE", str(time.time_ns()))
@@ -454,14 +492,20 @@ class MmhmemCi:
 
         async def static_release_stage() -> str:
             # The verified bundle is produced here once; its manifest is the report.
-            bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
-            return await bundle.file("verification.json").contents()
+            bundle = await self.static_release(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs,
+                                               cache_mode=cache_mode, cache_url=cache_url, cache_token=cache_token)
+            manifest = await bundle.file("verification.json").contents()
+            cache_stats["static_release"] = await candidate_cache_stats(
+                src, validation_id, cargo_jobs=cargo_jobs, cache=cache)
+            return manifest
 
         async def docker_build_stage() -> str:
+            cache_stats["docker_build"] = off_record("Docker builder stage not cached")
             return await self.docker_build(src)
 
         async def clippy_otel_stage() -> str:
-            return await _clippy_otel(src, cargo_jobs=cargo_jobs)
+            output, cache_stats["clippy_otel"] = await _clippy_otel(src, cargo_jobs=cargo_jobs, cache=cache)
+            return output
 
         async def stage_runner_tests_stage() -> str:
             return await _stage_runner_tests(src, validation_id)
@@ -477,20 +521,17 @@ class MmhmemCi:
 
         async def static_installer_stage() -> str:
             # Runs after static_release, so the bundle's operations are engine-cached.
-            return await self.static_installer(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+            return await self.static_installer(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs,
+                                               cache_mode=cache_mode, cache_url=cache_url, cache_token=cache_token)
 
         async def deploy_artifacts_stage() -> str:
-            return await self.deploy_artifacts(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
-
-        async def loc_report_stage() -> str:
-            # Informational content, but a failure still fails the run.
-            return await self.loc_report(src)
+            return await self.deploy_artifacts(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs,
+                                               cache_mode=cache_mode, cache_url=cache_url, cache_token=cache_token)
 
         runs = {
             "static_release": static_release_stage,
             "docker_build": docker_build_stage,
             "clippy_otel": clippy_otel_stage,
-            "loc_report": loc_report_stage,
             "stage_runner_tests": stage_runner_tests_stage,
             "distribution": distribution_stage,
             "fmt": fmt_stage,
@@ -500,4 +541,4 @@ class MmhmemCi:
         }
         stages = [Stage(name, runs[name], tuple(needs), heavy) for name, heavy, needs in ALL_STAGE_PLAN]
         results = await run_stages(stages, concurrency)
-        return all_summary(results)
+        return all_summary(results, cache_stats)

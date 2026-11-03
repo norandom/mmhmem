@@ -4,7 +4,6 @@
     "static_release": 413,
     "docker_build": 162,
     "clippy_otel": null,
-    "loc_report": 64,
     "stage_runner_tests": null,
     "distribution": null,
     "fmt": 2,

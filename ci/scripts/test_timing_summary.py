@@ -175,7 +175,7 @@ class ShippedBaselineTests(unittest.TestCase):
             "static_release": 413,  # musl candidate 365 s + static gates/installer/distribution ~48 s
             "docker_build": 162,
             "clippy_otel": None,  # no standalone history
-            "loc_report": 64,
+            # loc_report left the gate (ci-dependency-cache 4.5).
             "stage_runner_tests": None,  # new stage
             "distribution": None,  # inside the ~48 s line already counted in static_release
             "fmt": 2,

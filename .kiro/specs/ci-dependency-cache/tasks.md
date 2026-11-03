@@ -23,7 +23,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Requirements: 1.2, 1.3, 5.1, 5.2_
 
 - [ ] 2. Apply the cache and reshape the gate
-- [ ] 2.1 Cache the musl candidate and otel clippy builds and report per-stage cache results
+- [x] 2.1 Cache the musl candidate and otel clippy builds and report per-stage cache results
   - Thread the cache configuration through the full pipeline, the static release path and the otel clippy stage, applying it as the last container step and running each build through the wrapper in the same exec.
   - Emit one machine-readable cache line in the gate output with the per-stage statistics, after the summary and before the timings line.
   - Remove the LOC stage from the gate's stage plan while keeping the standalone LOC function for local use.
@@ -83,3 +83,4 @@ publication. Every commit must pass the project pre-commit gate.
 
 - Task 1.1: pinned sccache v0.18.0 (published 2026-09-14; v0.19.0 was 10 days old) with the release's published SHA-256 for the musl tarball, matching a local download. Real `--show-stats --stats-format json` output (v0.18.0) has `stats.cache_hits.counts` and `stats.cache_misses.counts` keyed by language (`Rust`, `C/C++`). `sccache.py` imports no dagger symbols at load time, so it is unit tested on the host. Reviewed inline by the parent.
 - Task 1.2: a live run with the real sccache v0.18.0 Windows binary found that output capture keyed on a path ending in `sccache` missed `sccache.exe`; `is_sccache` now compares the file stem and has a regression test. The live run then recorded a Rust cache hit. Reviewed inline by the parent.
+- Task 2.1: the cache layer is applied before the source mount rather than as the very last step (design said last), so a source change does not invalidate the sccache install layer; with the cache off both orders give today's container. `build_candidate` now returns a fourth value, the cache stats record, read from `/tmp/sccache-stats.json` (outside the bundle's report set). The Docker stage reports `Docker builder stage not cached` until task 2.2. Reviewed inline by the parent; the real engine loads the module (static-setup passed).

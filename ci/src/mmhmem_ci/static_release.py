@@ -7,6 +7,8 @@ import re
 import dagger
 from dagger import dag
 
+from .sccache import OFF, STATS_PATH, CacheConfig, cached_exec, off_record, with_cache
+
 RUST_VERSION = "1.98.1"
 BUILD_IMAGE = "rust:1.98-slim-bookworm"
 TARGET = "x86_64-unknown-linux-musl"
@@ -23,11 +25,11 @@ def validate_cargo_jobs(cargo_jobs) -> None:
 
 
 async def installer_check(src: dagger.Directory, revision: str, validation_id: str,
-                          source_clean: bool = False, cargo_jobs: int = 2) -> str:
+                          source_clean: bool = False, cargo_jobs: int = 2, cache: CacheConfig = OFF) -> str:
     validate_cargo_jobs(cargo_jobs)
     tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_install.py", "-v"]).stderr())
-    bundle = await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs)
+    bundle = await verified_bundle(src, revision, validation_id, source_clean, cargo_jobs=cargo_jobs, cache=cache)
     manifest = json.loads(await bundle.file("verification.json").contents())
     results = []
     for name in RUNTIME_IMAGES:
@@ -50,7 +52,8 @@ async def gate_tests(src: dagger.Directory, validation_id: str) -> str:
 
 
 async def verified_bundle(src: dagger.Directory, revision: str, validation_id: str,
-                          source_clean: bool = False, cargo_jobs: int = 2) -> dagger.Directory:
+                          source_clean: bool = False, cargo_jobs: int = 2,
+                          cache: CacheConfig = OFF) -> dagger.Directory:
     """One candidate feeds every required check; only final checked bytes escape."""
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase Git commit ID")
@@ -60,7 +63,7 @@ async def verified_bundle(src: dagger.Directory, revision: str, validation_id: s
         raise ValueError("source_clean must be an explicit boolean")
     validate_cargo_jobs(cargo_jobs)
     await gate_tests(src, validation_id)
-    binary, build_reports, build = await build_candidate(src, validation_id, cargo_jobs=cargo_jobs)
+    binary, build_reports, build, _ = await build_candidate(src, validation_id, cargo_jobs=cargo_jobs, cache=cache)
     checksum, version = build["artifact"]["sha256"], build["package_version"]
     # Linkage evidence must retain the release basename, not /candidate.
     inspected = (instrumented_runtime("debian-bookworm", src, validation_id)
@@ -122,7 +125,7 @@ async def server_probe_check(src: dagger.Directory, validation_id: str) -> str:
     tests = await (instrumented_runtime("debian-bookworm", src, validation_id)
                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_release.py", "-v"])
                    .with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_server.py", "-v"]).stderr())
-    binary, _, build = await build_candidate(src, validation_id)
+    binary, _, build, _ = await build_candidate(src, validation_id)
     checksum = build["artifact"]["sha256"]
     results = []
     for name in RUNTIME_IMAGES:
@@ -143,7 +146,7 @@ async def local_probe_check(src: dagger.Directory, validation_id: str) -> str:
         raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
     ctr = instrumented_runtime("debian-bookworm", src, validation_id)
     tests = await ctr.with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_probe_release.py", "-v"]).stderr()
-    binary, _, build = await build_candidate(src, validation_id)
+    binary, _, build, _ = await build_candidate(src, validation_id)
     checksum = build["artifact"]["sha256"]
     inspected = (musl_container(src).with_env_variable("VALIDATION_ID", validation_id)
                  .with_file("/candidate", binary, permissions=0o755)
@@ -275,14 +278,15 @@ async def runtime_setup_check(src: dagger.Directory, validation_id: str) -> str:
     return json.dumps({"status": "passed", "validation_id": validation_id, "scratch_startup": "passed", "runtimes": results}, indent=2)
 
 
-def musl_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Container:
+def musl_container(src: dagger.Directory, cargo_jobs: int = 2, cache: CacheConfig = OFF) -> dagger.Container:
     """Keep native build scripts and GNU/OTel caches independent of musl.
 
     cargo_jobs bounds rustc parallelism; the default of 2 keeps the local WSL
-    engine within memory (and check_static_setup.py asserts it).
+    engine within memory (and check_static_setup.py asserts it). An enabled
+    cache adds sccache before the sources are mounted; OFF changes nothing.
     """
     validate_cargo_jobs(cargo_jobs)
-    return (
+    toolchain = (
         dag.container(platform=dagger.Platform("linux/amd64"))
         .from_(BUILD_IMAGE)
         .with_exec(["apt-get", "update", "-qq"])
@@ -301,9 +305,10 @@ def musl_container(src: dagger.Directory, cargo_jobs: int = 2) -> dagger.Contain
         .with_mounted_cache("/usr/local/cargo/registry", dag.cache_volume("mmhmem-cargo-registry"))
         .with_mounted_cache("/usr/local/cargo/git", dag.cache_volume("mmhmem-cargo-git"))
         .with_mounted_cache("/cargo-target-musl", dag.cache_volume("mmhmem-cargo-target-musl-1.98.1"))
-        .with_mounted_directory("/src", src.without_file("rust-toolchain.toml"))
-        .with_workdir("/src")
     )
+    return (with_cache(toolchain, cache)
+            .with_mounted_directory("/src", src.without_file("rust-toolchain.toml"))
+            .with_workdir("/src"))
 
 
 async def setup_check(src: dagger.Directory) -> str:
@@ -318,20 +323,34 @@ async def setup_check(src: dagger.Directory) -> str:
 
 async def candidate_build_check(src: dagger.Directory, validation_id: str) -> str:
     """Produce an internal candidate, returning only its build status to callers."""
-    _, _, report = await build_candidate(src, validation_id)
+    _, _, report, _ = await build_candidate(src, validation_id)
     return json.dumps(report, indent=2)
 
 
-async def build_candidate(src: dagger.Directory, validation_id: str,
-                          cargo_jobs: int = 2) -> tuple[dagger.File, dagger.Directory, dict]:
-    """Internal candidate and regression evidence; not a verified release export."""
+async def build_candidate(src: dagger.Directory, validation_id: str, cargo_jobs: int = 2,
+                          cache: CacheConfig = OFF) -> tuple[dagger.File, dagger.Directory, dict, dict]:
+    """Internal candidate and regression evidence; not a verified release export.
+
+    Returns the binary, its reports, the build report and the compile-cache
+    stats record (the musl clippy, test and release phases share one exec).
+    """
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", validation_id):
         raise ValueError("validation ID must be a nonempty safe label (maximum 128 characters)")
-    ctr = musl_container(src, cargo_jobs=cargo_jobs).with_env_variable("VALIDATION_ID", validation_id)
+    ctr = musl_container(src, cargo_jobs=cargo_jobs, cache=cache).with_env_variable("VALIDATION_ID", validation_id)
     tested = ctr.with_exec(["python3", "-m", "unittest", "discover", "-s", "ci/scripts", "-p", "test_build_candidate.py", "-v"])
-    candidate = tested.with_exec(["python3", "ci/scripts/build_candidate.py"])
+    build = ["python3", "ci/scripts/build_candidate.py"]
+    enabled = cache.mode != "off"
+    candidate = tested.with_exec(cached_exec(build) if enabled else build)
     report = json.loads(await candidate.stdout())
+    stats = json.loads(await candidate.file(STATS_PATH).contents()) if enabled else off_record()
     report["build_image"] = await dag.container(platform=dagger.Platform("linux/amd64")).from_(BUILD_IMAGE).image_ref()
     # Include resolved image identity in the persisted regression report too.
     candidate = candidate.with_new_file("/candidate/reports/target-suite.json", json.dumps(report, indent=2) + "\n")
-    return candidate.file("/candidate/mmhmem-linux-x86_64"), candidate.directory("/candidate/reports"), report
+    return candidate.file("/candidate/mmhmem-linux-x86_64"), candidate.directory("/candidate/reports"), report, stats
+
+
+async def candidate_cache_stats(src: dagger.Directory, validation_id: str, cargo_jobs: int = 2,
+                                cache: CacheConfig = OFF) -> dict:
+    """The musl candidate's compile-cache record; the identical build is served
+    from the engine's in-session cache, so this does not rebuild."""
+    return (await build_candidate(src, validation_id, cargo_jobs=cargo_jobs, cache=cache))[3]
