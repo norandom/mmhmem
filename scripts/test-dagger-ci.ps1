@@ -164,6 +164,31 @@ try {
     Assert-True (-not $summaryRun.Contains('${{')) 'Timing summary inlines an expression into its script'
     Assert-True ($gateJob.IndexOf('id: gate') -lt $gateJob.IndexOf('ci/scripts/timing_summary.py')) 'Timing summary runs before the gate'
     Assert-True $gateJob.Contains('name: linux-static-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}') 'Gate job artifact identity changed'
+    # ci-dependency-cache: GitHub cache credentials and identical cache options on both Dagger steps.
+    $cacheOptions = '--cache-mode=${{ github.event_name == ''push'' && ''read-write'' || ''read-only'' }} --cache-url=env://ACTIONS_RESULTS_URL --cache-token=env://ACTIONS_RUNTIME_TOKEN'
+    Assert-True $gateArgs.Contains($cacheOptions) 'Gate lacks the cache options (read-write on push, read-only otherwise)'
+    Assert-True $exportArgs.Contains($cacheOptions) 'Export cache options differ from the gate (bundle would be rebuilt)'
+    Assert-True ($exportArgs.IndexOf('--cache-mode=') -lt $exportArgs.IndexOf(' export ')) 'Export cache options are not static-release options'
+    $credentialStep = @($gateSteps | Where-Object { $_.Contains('uses: actions/github-script@v7') })
+    Assert-True ($credentialStep.Count -eq 1) 'Cache credential export step missing'
+    foreach ($name in @('ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN')) {
+        Assert-True $credentialStep[0].Contains("core.exportVariable('$name', process.env.$name || '')") "Credential export lacks $name"
+    }
+    Assert-True ($gateJob.IndexOf('actions/github-script@v7') -lt $gateJob.IndexOf('id: gate')) 'Cache credentials exported after the gate'
+    foreach ($step in $gateSteps) {
+        $run = [regex]::Match($step, '(?ms)^        run: (.*)$').Groups[1].Value
+        Assert-True (-not ($run.Contains('ACTIONS_RUNTIME_TOKEN') -or $run.Contains('ACTIONS_RESULTS_URL') -or $run.Contains('secrets.'))) 'A gate run body references cache credentials'
+    }
+    $locJob = Get-WorkflowJob $workflow 'loc-report'
+    Assert-True ([regex]::IsMatch($locJob, '(?m)^    continue-on-error: true\r?$')) 'LOC job can change the workflow verdict'
+    Assert-True (-not [regex]::IsMatch($locJob, '(?m)^    needs:')) 'LOC job waits for another job'
+    Assert-True (-not [regex]::IsMatch($workflow, '(?m)^    needs:.*loc-report')) 'A job depends on the LOC job'
+    Assert-True ($locJob.Contains('uses: actions/cache@v4') -and $locJob.Contains('path: ~/.cargo/bin/tokei') -and $locJob.Contains('key: tokei-15.0.0-')) 'LOC job does not cache the pinned tokei binary'
+    Assert-True ($locJob.Contains("if: steps.tokei-cache.outputs.cache-hit != 'true'") -and $locJob.Contains('cargo install tokei --locked --version 15.0.0')) 'LOC job compiles tokei even on a cache hit'
+    Assert-True ($locJob.Contains('tokei --files') -and $locJob.Contains('GITHUB_STEP_SUMMARY')) 'LOC report not written to the job summary'
+    Assert-True (-not $locJob.Contains('secrets.')) 'LOC job reads secrets'
+    $plan = [regex]::Match((Get-Content -Raw (Join-Path $repo 'ci/src/mmhmem_ci/main.py')), '(?ms)^ALL_STAGE_PLAN = \((.*?)^\)').Groups[1].Value
+    Assert-True ($plan -and -not $plan.Contains('loc_report')) 'The gate still runs the LOC stage'
     $script:calls.Clear()
     $script:fakeDestination = ''
     Assert-True ((Invoke-MmhmemCi -Call all -ExtraArgs @('--concurrency=2', '--cargo-jobs=4')) -eq 0) 'Wrapper rejected concurrency/cargo-jobs options'

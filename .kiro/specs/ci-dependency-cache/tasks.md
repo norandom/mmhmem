@@ -55,7 +55,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Requirements: 3.1, 3.2, 3.3_
 
 - [ ] 3. Integrate with the workflow
-- [ ] 3.1 Wire the cache credentials, cache options and LOC job into the workflow
+- [x] 3.1 Wire the cache credentials, cache options and LOC job into the workflow
   - Confirm the secret-argument syntax of the pinned Dagger CLI, then export the results URL and runtime token in the gate job and pass them, with read-write mode on pushes and read-only mode on pull requests, to both the gate and the bundle export step.
   - Add the LOC job that runs alongside the gate with continue-on-error, restores the tokei binary by version, installs it only on a miss, and writes the report to its job summary; nothing depends on it.
   - Extend the workflow contract test: identical cache options on both Dagger steps, read-only on pull requests, no credential text in run bodies, the LOC job's independence, and no LOC stage in the gate plan.
@@ -85,3 +85,4 @@ publication. Every commit must pass the project pre-commit gate.
 - Task 1.2: a live run with the real sccache v0.18.0 Windows binary found that output capture keyed on a path ending in `sccache` missed `sccache.exe`; `is_sccache` now compares the file stem and has a regression test. The live run then recorded a Rust cache hit. Reviewed inline by the parent.
 - Task 2.1: the cache layer is applied before the source mount rather than as the very last step (design said last), so a source change does not invalidate the sccache install layer; with the cache off both orders give today's container. `build_candidate` now returns a fourth value, the cache stats record, read from `/tmp/sccache-stats.json` (outside the bundle's report set). The Docker stage reports `Docker builder stage not cached` until task 2.2. Reviewed inline by the parent; the real engine loads the module (static-setup passed).
 - Task 2.2: the stats parser moved into `sccache.py` (`parse_stats`) and `sccache_stats.py` imports it, so the Docker stage parses sccache's raw JSON with the same code. The plain Docker path was verified locally (`-Call docker-build`: image built, payload mmhmem 0.4.1); the cached Dockerfile branch (curl, checksum, sourced secret) can only run with hosted credentials and is first exercised in task 4.2. Reviewed inline by the parent.
+- Task 3.1: Dagger 0.17+ documents secret arguments as `env://NAME`; the gate and export steps pass `--cache-url=env://ACTIONS_RESULTS_URL --cache-token=env://ACTIONS_RUNTIME_TOKEN`, exported by `actions/github-script@v7`. Whether 0.21.11 accepts that form is first proven on the hosted run (task 4.2). Reviewed inline by the parent.
