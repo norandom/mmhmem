@@ -118,6 +118,7 @@ grep -q 'local mode removed' "$scratch/engine.log"
 echo 'PASS: Bash syntax, dry run, global default, Linux/Apple assets, platform refusals, failed-download preservation, removal, cleanup'
 PATH="$scratch/bin:$PATH" python3 "$root/scripts/test-install-menus.py" "$root" "$scratch"
 python3 "$root/scripts/test-worker-check.py"
+python3 "$root/scripts/test_manage_hooks.py"
 if [ -n "$candidate" ]; then
   python3 "$root/ci/scripts/probe_install.py" --binary "$candidate" --expected-sha256 "$expected_sha256" --source "$root" --report "$report"
 fi
