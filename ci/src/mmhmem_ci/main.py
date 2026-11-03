@@ -162,6 +162,7 @@ class MmhmemCi:
                 .with_directory("/src", src)
                 .with_workdir("/src")
                 .with_exec(["bash", "scripts/test-install.sh"])
+                .with_exec(["bash", "scripts/test-routing-instructions.sh"])
                 .with_exec(["python3", "scripts/check-marketplace.py"])
                 .stdout()
             )

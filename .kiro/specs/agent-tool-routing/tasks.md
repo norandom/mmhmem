@@ -22,7 +22,7 @@ verification task rather than forming standalone work.
   - _Boundary: Adoption Evidence Runner_
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 2. Implement discovery, guidance, and safe owned-section operations
+- [x] 2. Implement discovery, guidance, and safe owned-section operations
 - [x] 2.1 (P) Describe tool selection and serialize truthful MCP annotations
   - Update all nine descriptions with purpose, selection conditions, limitations, and the approved conservative annotation matrix.
   - Preserve tool names and argument schemas; align shared initialization guidance with exact reads, authorized fallback, and checkpoint rules.
@@ -50,7 +50,7 @@ verification task rather than forming standalone work.
   - _Depends: 1.1, 1.2_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 2.4 (P) Implement equivalent owned-section operations for the shell installer
+- [x] 2.4 (P) Implement equivalent owned-section operations for the shell installer
   - Implement the approved parser and commit contract with the shell installer's existing Python runtime.
   - Match frozen shared byte outputs, reject unsafe ownership/symlink/frontmatter cases, and preserve Unicode/newline/BOM content.
   - Cover one-backup retention, no-op behavior, no-clobber creation, atomic replacement, concurrent changes, removal, and no-write dry-run.
