@@ -80,7 +80,7 @@ verification task rather than forming standalone work.
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 3.4, 3.5_
 
 - [ ] 4. Integrate behavioral acceptance and honest accounting evidence
-- [ ] 4.1 Verify cache accounting and non-saving read paths
+- [x] 4.1 Verify cache accounting and non-saving read paths
   - Exercise a cold summary and same-identity repeat with unchanged content and a counting worker.
   - Confirm the repeat hits cache, adds no worker request, and updates existing stats with expected attribution.
   - Cover direct, targeted, security-bypass, session-only, and failed-worker cases without changing service policy, schemas, or savings formulas.
