@@ -7,6 +7,7 @@
 //! with `Db::open_read_only`, never creates it, and exits 0 with a clear
 //! message when no statistics exist yet.
 
+pub mod hook;
 pub mod prune;
 pub mod stats;
 pub mod stats_client;
@@ -23,6 +24,7 @@ use crate::storage::db::{DB_FILE_NAME, Db};
 pub const NO_STATS_MESSAGE: &str = "No token-savings statistics recorded yet. Use mmhmem from a harness (stdio \
      or serve mode), then run `mmhmem stats` again.";
 
+pub use hook::run_hook;
 pub use prune::run_prune;
 
 /// `mmhmem stats [--json]` entrypoint (Req 1.3, 8.1-8.6): read-only report

@@ -43,7 +43,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Depends: 1.2, 1.3_
   - _Requirements: 2.6, 2.7, 5.5, 6.1_
 
-- [ ] 2.2 Add the fail-open hook command
+- [x] 2.2 Add the fail-open hook command
   - Add the hook subcommand for a named harness: bounded stdin, only the threshold and worker presence from the local profile, the repeat window, one audit event per read decision without file content, adapter output, exit 0.
   - Answer pass with exit 0 on any error, oversized or malformed input, or panic.
   - List the command in the help text.
@@ -118,3 +118,4 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 - Task 1.3 (Opus, Opus reviewer APPROVED): `Get-Content -Raw` is accepted (it reads the whole file). Parent added the reviewer's hardening: any Unicode whitespace other than space and tab means not recognised. Requirement 2.6 corrected: `head`/`tail` are partial readers and pass. For task 2.1: `recognise` has no shell dialect, so a few dialect-specific false positives exist (bash `type x`, Git Bash `cat src\\main.rs`), all recoverable through the repeat window; paths are joined without normalisation.
 - Task 1.4 (Sonnet, inline review): `RepeatWindow::new(dir, window_ms)` / `with_default_window(dir)`; keys are SHA-256 of harness, session and path, so the state file holds no plain paths; `remember` creates the directory and returns an error the caller ignores (fail open).
 - Task 2.1 (Sonnet, inline review): `adapters::parse(Harness, &[u8]) -> ParsedCall {harness, session_id, cwd, tool, read}` and `render(Harness, &Decision, &Path) -> String`; any integer offset or limit makes a ranged read; a relative path with an empty cwd is not a read. Redirect reason says "at least <n> lines".
+- Task 2.2 (Opus, Opus reviewer APPROVED): release-build decisions 11-43 ms, 10 MiB file 16-24 ms. The project `.mmhmem.json` is resolved against the hook process's working directory (existing loader), so the OpenCode plugin (4.2) must spawn the hook with the project as cwd. Audit reasons: `large_file` for redirects, snake_case pass reasons, `lines` null on pass. Parent replaced `eprintln!` with non-panicking stderr writes and clarified Requirement 5.2 to name the repeat-window state file.

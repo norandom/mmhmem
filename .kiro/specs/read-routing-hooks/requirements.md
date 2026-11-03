@@ -119,7 +119,7 @@ inspectable, so that running it on every tool call is a small, known risk.
 #### Acceptance Criteria
 
 1. The hook entry shall invoke the installed mmhmem binary by absolute path with fixed arguments, and shall never pass tool input through a shell.
-2. The read-routing hook shall only read the hook input, the target file's metadata and line count, and the mmhmem settings; it shall write nothing except its audit event.
+2. The read-routing hook shall only read the hook input, the target file's metadata and line count, and the mmhmem settings; it shall write nothing except its audit event and the repeat-read state file in the mmhmem data directory, which holds only hashed keys and times. (Clarified 2026-11-03 during task 2.2 review: the approved design's repeat window needs this state.)
 3. The read-routing hook shall make no network connections and shall never read or emit secrets, including the worker API key.
 4. The read-routing hook shall record each redirect and pass-through decision in the audit trail with the harness, the decision, the reason and the file path, but never the file content.
 5. The read-routing hook shall treat its input as untrusted, and shall resolve the target path the same way the harness would before applying the rules.

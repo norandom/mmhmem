@@ -38,6 +38,8 @@ fn main() -> ExitCode {
         Some("prune") => {
             mmhmem::cli::run_prune(std::env::args().nth(2).as_deref() == Some("--dry-run"))
         }
+        // Read-routing pre-tool hook; always exits 0 (read-routing-hooks Req 3).
+        Some("hook") => mmhmem::cli::run_hook(std::env::args().nth(2).as_deref()),
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }
