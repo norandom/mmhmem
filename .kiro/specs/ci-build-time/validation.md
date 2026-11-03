@@ -38,3 +38,32 @@ Logs: `tmp/ci-build-time-4.1/` (development artifacts, not committed).
   an upper bound for engine use at concurrency 1. It stays below the 5.8 GiB
   MemTotal, and the guard's 5.0 GiB requirement at concurrency 1 holds.
 - Hosted acceptance (tasks 4.2 and 4.3) is pending and needs pushes to `main`.
+
+## Task 4.2: first hosted run (2026-11-03, accepted by the user as is)
+
+Run 41643349698 on b08668c, `ubuntu-latest` 4 vCPU / 16 GB, `--concurrency=3 --cargo-jobs=4`. All jobs green.
+
+| Job | Before (run 41626826480) | After |
+|---|---|---|
+| Blocking Dagger gate | 896 s | 666 s |
+| Windows | 642 s (cache miss on version bump) | 635 s (expected miss: new key prefix) |
+| macOS | 361 s | 538 s (expected miss: new key prefix) |
+
+| Stage | Start | Duration |
+|---|---|---|
+| static_release | 0 s | 572 s |
+| docker_build | 0 s | 453 s |
+| clippy_otel | 0 s | 169 s |
+| loc_report | 169 s | 157 s |
+| distribution | 326 s | 44 s |
+| static_installer | 572 s | 20 s |
+| deploy_artifacts | 572 s | 8 s |
+| others | | under 6 s each |
+
+Findings:
+
+- The gate is 230 s faster than the last baseline but above the 540 s target (Requirement 1.1 NOT_VERIFIED).
+- Overlap made the heavy stages slower individually: static_release took 572 s against 413 s sequentially, docker_build 453 s against 162 s. Three cargo stages at 4 jobs each oversubscribe 4 vCPU, and the static chain is the critical path.
+- The peak runner memory line was written to the job summary, which the API does not expose; it was not read back. The memory budget was not changed.
+- Candidate follow-ups: run the static chain alone at full width and the other heavy stages at lower width or after it, or try concurrency 2; cross-run caching per Decision 5.
+- Task 4.3 (five-run medians) was not run; the user accepted the result at this point.

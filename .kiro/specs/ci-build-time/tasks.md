@@ -78,7 +78,7 @@ the summary report.
   - Done when the default local run passes with sequential stages and two cargo jobs, its peak engine memory is recorded, and the concurrency-two run fails before any build with a message naming the concurrency option.
   - _Requirements: 2.1, 3.1, 3.2, 3.4_
 
-- [ ] 4.2 Run the first hosted gate, sample memory and calibrate budgets
+- [x] 4.2 Run the first hosted gate, sample memory and calibrate budgets
   - Requires the user's authorization to push the integrated change to `main`.
   - Sample runner memory during the first hosted gate run at concurrency three with a background step on the runner host that records `free -m` every five seconds and reports the peak used value.
   - If the measured peak contradicts the heavy-stage budget, change the budget constant, re-run 1.1's unit tests and 4.1's guard check, and note the revalidation in the validation report.
@@ -89,6 +89,7 @@ the summary report.
   - _Requirements: 1.3, 3.3, 3.4, 5.1, 5.3_
 
 - [ ] 4.3 Measure five-run acceptance and finish the validation report
+  - _Blocked: user accepted the first hosted result (gate 666 s) on 2026-11-03; five-run acceptance not run, Requirement 1.1 NOT_VERIFIED_
   - Requires the user's authorization for further pushes to `main`, including one version-bump commit.
   - Record five consecutive green main runs: gate median, whole-workflow median, per-stage summary tables, cache status lines, and an unchanged verification manifest schema.
   - Compare the version-bump commit's native job times against their warm medians.
