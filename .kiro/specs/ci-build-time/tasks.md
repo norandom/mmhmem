@@ -34,7 +34,7 @@ the summary report.
   - _Depends: 1.1, 2.1_
   - _Requirements: 1.1, 2.1, 2.2, 2.3, 2.4, 3.1, 3.4, 5.1_
 
-- [ ] 2.3 Obtain tokei for the informational LOC report without a per-run source build
+- [x] 2.3 Obtain tokei for the informational LOC report without a per-run source build
   - Change only how the LOC stage installs tokei, and its position in the stage list if the fallback applies. The LOC stage keeps using the glibc build container as adjusted in 2.1.
   - Check whether the gate's Debian bookworm image provides a tokei package and record the version found in research.
   - Install it from the archive when available; otherwise keep the source install but schedule the stage so it overlaps the static chain, as design Decision 4 allows.
@@ -105,3 +105,4 @@ the summary report.
 - The full stage plan lives in `ALL_STAGE_PLAN` and `STAGE_LABELS` (module literals in `main.py`) so stdlib tests can read it with `ast`; keep stage names there in sync with `ci/timing-baseline.json` (task 2.4).
 - If tokei stays a source build (2.3 fallback), decide there whether its compile gets `cargo_jobs`; `loc_report` currently compiles at the default 2 jobs as a light stage.
 - Task 4.1 must confirm the local WSL engine's MemTotal is at least 5 GiB, which the guard requires at concurrency 1; otherwise adjust `ENGINE_RESERVE_GIB` with evidence.
+- Task 2.3 was reviewed inline by the parent (the reviewer subagent was stopped by the user); evidence: diff inspection plus 43 CI unit tests passing on 3.12 and 3.11.

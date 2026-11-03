@@ -111,6 +111,22 @@ review-gate rules; steering `dev-environment.md`.
 - Debian's `tokei` package version in bookworm could not be confirmed from
   search results ([tracker](https://tracker.debian.org/pkg/rust-tokei)).
   Implementation must check `apt-cache policy tokei` in the gate image.
+
+#### Implementation finding (task 2.3)
+
+- Checked 2026-11-03 against the Debian sources archive API
+  ([sources.debian.org/api/src/rust-tokei/](https://sources.debian.org/api/src/rust-tokei/)):
+  `rust-tokei` (binary package `tokei`) exists only as 12.1.2-6 in trixie
+  and 15.0.0-1 in forky/sid. Bookworm has no `tokei` package, so
+  `apt-get install tokei` is not possible in `rust:1.98-slim-bookworm`.
+- A trixie-based image would add a new container image, which the design's
+  Allowed Dependencies forbid. The Decision 4 fallback was taken:
+  `loc_report` keeps `tokei --version >/dev/null 2>&1 || cargo install tokei --locked`
+  (about 64 s on a cold engine) and moves to position 4 of `ALL_STAGE_PLAN`,
+  right after the three heavy stages. At concurrency 3 it takes the first
+  slot a heavy stage frees (after `clippy_otel`) and finishes well inside
+  `static_release`, so it stays off the critical path. At concurrency 1 the
+  total time is unchanged; only the order differs.
 - `Swatinem/rust-cache` falls back to caches from earlier lockfiles, but its
   `cache-hit` output reports exact matches only, so it cannot report a
   fallback restore (Requirement 5.2).

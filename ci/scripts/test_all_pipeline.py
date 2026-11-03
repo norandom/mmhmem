@@ -1,7 +1,7 @@
-"""Contract tests for the `all` pipeline on the stage runner (task 2.2).
+"""Contract tests for the `all` pipeline on the stage runner (tasks 2.2, 2.3).
 
-Requirements 1.1, 2.1-2.4, 3.1, 3.4, 5.1; design "`all` stage list",
-"Memory guard", Key Decisions 2 and 3.
+Requirements 1.1, 2.1-2.4, 3.1, 3.4, 4.4, 5.1; design "`all` stage list",
+"Memory guard", Key Decisions 2, 3 and 4.
 
 main.py imports dagger and needs Python 3.14, so it cannot be imported here.
 The stage plan is a module-level literal (ALL_STAGE_PLAN) read with `ast`;
@@ -26,19 +26,38 @@ from stages import TIMINGS_PREFIX, Stage, StageFailure, run_stages, timings_line
 SOURCE = (MODULE_DIR / "main.py").read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
 
-# Design "`all` stage list" table: (name, heavy, needs), in order.
+# Design "`all` stage list" table: (name, heavy, needs), in order, except
+# that loc_report sits right after the three heavy stages (task 2.3, Decision 4
+# fallback): bookworm has no tokei package, so its source build takes the
+# first slot a heavy stage frees and overlaps the static chain.
 EXPECTED_PLAN = (
     ("static_release", True, ()),
     ("docker_build", True, ()),
     ("clippy_otel", True, ()),
+    ("loc_report", False, ()),
     ("stage_runner_tests", False, ()),
     ("distribution", False, ()),
     ("fmt", False, ()),
     ("compose_config", False, ()),
     ("static_installer", False, ("static_release",)),
     ("deploy_artifacts", False, ("static_release",)),
-    ("loc_report", False, ()),
 )
+TOKEI_SOURCE_INSTALL = "tokei --version >/dev/null 2>&1 || cargo install tokei --locked"
+# Relative stage durations in seconds from research.md (run 41626826480).
+# clippy_otel is taken cold (no default-feature pass warms it any more).
+RESEARCH_DURATIONS_S = {
+    "static_release": 413,  # musl candidate 365 s + static gates ~48 s
+    "docker_build": 162,
+    "clippy_otel": 60,
+    "loc_report": 64,  # tokei cargo install from source
+    "stage_runner_tests": 10,
+    "distribution": 48,
+    "fmt": 2,
+    "compose_config": 5,
+    "static_installer": 10,
+    "deploy_artifacts": 5,
+}
+TIME_SCALE = 1 / 400  # 413 s of static_release becomes about one second
 STAGE_NAMES = [entry[0] for entry in EXPECTED_PLAN]
 OTEL_CLIPPY = ["cargo", "clippy", "--all-targets", "--features", "otel", "--", "-D", "warnings"]
 DEFAULT_CLIPPY = ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
@@ -316,6 +335,43 @@ class StubPipelineTest(unittest.TestCase):
         self.assertEqual(set(labels), {name for name in STAGE_NAMES if name != "loc_report"})
         for name, label in labels.items():
             self.assertTrue(label == name or label.startswith(f"{name} ("), label)
+
+
+class LocReportTokeiTest(unittest.TestCase):
+    """Task 2.3: bookworm has no tokei package, so Decision 4's fallback applies."""
+
+    def test_loc_report_keeps_the_cached_source_install(self):
+        func = find_function("loc_report")
+        commands = list_constants(func)
+        self.assertIn(["sh", "-c", TOKEI_SOURCE_INSTALL], commands)
+        self.assertIn(["tokei", "--files"], commands)
+        self.assertNotIn("apt-get", ast.get_source_segment(SOURCE, func))
+
+    def test_loc_report_is_light_has_no_dependents_and_follows_the_heavy_stages(self):
+        entries = plan()
+        names = [entry[0] for entry in entries]
+        self.assertEqual(names[0], "static_release")
+        self.assertEqual([entry[1] for entry in entries[:3]], [True, True, True])
+        self.assertEqual(entries[3], ("loc_report", False, ()))
+        self.assertFalse(any("loc_report" in needs for _, _, needs in entries))
+
+    def test_loc_report_overlaps_the_static_chain_at_concurrency_three(self):
+        def stub(name):
+            async def run():
+                await asyncio.sleep(RESEARCH_DURATIONS_S[name] * TIME_SCALE)
+                return "ok"
+            return run
+
+        stages = [Stage(name, stub(name), tuple(needs), heavy) for name, heavy, needs in plan()]
+        results = {r.name: r for r in asyncio.run(run_stages(stages, 3))}
+        static = results["static_release"]
+        static_end = static.started_s + static.duration_s
+        loc = results["loc_report"]
+        self.assertLess(loc.started_s, static_end, "loc_report must start before static_release finishes")
+        self.assertLess(loc.started_s + loc.duration_s, static_end, "loc_report must finish inside the static chain")
+        light = [r for name, heavy, _ in plan() if not heavy for r in [results[name]]]
+        self.assertEqual(min(light, key=lambda r: r.started_s).name, "loc_report",
+                         "loc_report must take the first slot a heavy stage frees")
 
 
 if __name__ == "__main__":

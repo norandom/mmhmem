@@ -216,7 +216,7 @@ sequenceDiagram
 | 4.1 | Native caches survive version bumps | Restore with prefix fallback | `restore-keys` | Native cache |
 | 4.2 | No stale outputs in the final result | Cargo fingerprints; save on exact miss only | Cache key scheme | Native cache |
 | 4.3 | No secrets in persisted caches | Cached paths hold no secrets; native jobs read none | Cache path list | Native cache |
-| 4.4 | No per-run tool source build on the critical path | `loc_report` uses the Debian package | `loc_report` | Light stages |
+| 4.4 | No per-run tool source build on the critical path | `loc_report` source build scheduled to overlap the static chain (Decision 4 fallback; bookworm has no tokei package) | `loc_report` | Light stages |
 | 5.1 | Per-stage timings in the summary | Stage runner timings, timing_summary | timings line | Summary |
 | 5.2 | Native cache status in the summary | Restore step outputs | `cache-matched-key` | Native cache |
 | 5.3 | Mark stages over baseline +50% | timing_summary, timing-baseline.json | Baseline schema | Summary |
@@ -318,13 +318,15 @@ def check_memory(mem_total_kib: int, concurrency: int, heavy_count: int) -> None
 | 1 | `static_release` | yes | — | static_release |
 | 2 | `docker_build` | yes | — | docker_build (otel) |
 | 3 | `clippy_otel` | yes | — | clippy, otel pass |
-| 4 | `stage_runner_tests` | no | — | new |
-| 5 | `distribution` | no | — | distribution |
-| 6 | `fmt` | no | — | fmt |
-| 7 | `compose_config` | no | — | compose_config |
-| 8 | `static_installer` | no | `static_release` | static_installer |
-| 9 | `deploy_artifacts` | no | `static_release` | deploy_artifacts |
-| 10 | `loc_report` | no | — | loc_report (informational) |
+| 4 | `loc_report` | no | — | loc_report (informational) |
+| 5 | `stage_runner_tests` | no | — | new |
+| 6 | `distribution` | no | — | distribution |
+| 7 | `fmt` | no | — | fmt |
+| 8 | `compose_config` | no | — | compose_config |
+| 9 | `static_installer` | no | `static_release` | static_installer |
+| 10 | `deploy_artifacts` | no | `static_release` | deploy_artifacts |
+
+- Amended in task 2.3: `loc_report` moved from order 10 to order 4. Debian bookworm has no tokei package, so the Decision 4 fallback applies, and position 4 is what makes its source build take the first slot a heavy stage frees.
 
 - The return text keeps today's `== <stage>: ok` lines, the verified bundle
   manifest and the tokei report, followed by one `timings_line`.
@@ -404,8 +406,9 @@ def check_memory(mem_total_kib: int, concurrency: int, heavy_count: int) -> None
    recomputed, and Requirement 1.1 is re-measured.
 4. **tokei from the Debian archive.** `apt-get install tokei` in the
    `loc_report` container replaces `cargo install` (4.4). If the bookworm
-   archive lacks the package, the stage keeps `cargo install` but runs last
-   with no dependents, so it overlaps the static chain. Both outcomes keep
+   archive lacks the package, the stage keeps `cargo install` and is listed
+   right after the heavy stages with no dependents, so it overlaps the static
+   chain. Task 2.3 found bookworm has no tokei package and took this fallback. Both outcomes keep
    it off the critical path.
 5. **No cross-run Dagger cache in this spec.** The measured lower bound
    without it is about 480 s. Dagger Cloud, sccache with the GitHub cache

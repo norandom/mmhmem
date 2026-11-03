@@ -34,17 +34,20 @@ RUST_IMAGE = "rust:1.98-slim-bookworm"
 # The `all` stage list (design "`all` stage list" table): (name, heavy, needs),
 # in list order. Heavy stages count toward the memory guard. The glibc
 # default-feature clippy and test passes are deliberately absent (Decision 3).
+# loc_report sits right after the heavy stages (Decision 4 fallback): Debian
+# bookworm has no tokei package, so its source build takes the first slot a
+# heavy stage frees and overlaps the static chain instead of running last.
 ALL_STAGE_PLAN = (
     ("static_release", True, ()),
     ("docker_build", True, ()),
     ("clippy_otel", True, ()),
+    ("loc_report", False, ()),
     ("stage_runner_tests", False, ()),
     ("distribution", False, ()),
     ("fmt", False, ()),
     ("compose_config", False, ()),
     ("static_installer", False, ("static_release",)),
     ("deploy_artifacts", False, ("static_release",)),
-    ("loc_report", False, ()),
 )
 
 # `== <label>: ok` summary lines; loc_report reports in its own tokei section.
@@ -292,9 +295,11 @@ class MmhmemCi:
         never a runtime dependency).
 
         tokei stopped shipping prebuilt release binaries (v15.0.0 has no
-        release assets), so it is installed from source via `cargo install`
-        into the persistent cargo cache volume — built once, cached across
-        subsequent runs."""
+        release assets), and Debian bookworm, the base of RUST_IMAGE, has no
+        tokei package (only trixie and later), so it is installed from source
+        via `cargo install` into the persistent cargo cache volume. On a cold
+        engine that build stays off the critical path because `all` schedules
+        this stage right after the heavy stages (design Decision 4 fallback)."""
         return await (
             rust_container(src)
             .with_exec(
@@ -485,13 +490,13 @@ class MmhmemCi:
             "static_release": static_release_stage,
             "docker_build": docker_build_stage,
             "clippy_otel": clippy_otel_stage,
+            "loc_report": loc_report_stage,
             "stage_runner_tests": stage_runner_tests_stage,
             "distribution": distribution_stage,
             "fmt": fmt_stage,
             "compose_config": compose_config_stage,
             "static_installer": static_installer_stage,
             "deploy_artifacts": deploy_artifacts_stage,
-            "loc_report": loc_report_stage,
         }
         stages = [Stage(name, runs[name], tuple(needs), heavy) for name, heavy, needs in ALL_STAGE_PLAN]
         results = await run_stages(stages, concurrency)
