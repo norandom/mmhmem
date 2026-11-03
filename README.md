@@ -128,3 +128,14 @@ Use `--remove` to remove owned guidance or `--dry-run` to validate without writi
 Start a fresh harness session after updates. Custom configuration roots or
 instruction-disable controls require manual review; the installer reports their
 variable names without exposing configuration contents.
+# Verifying routing adoption
+
+Run `cargo test --test routing_adoption` for deterministic adapter tests. For
+explicit live checks, set `E2E_LLM=1`, `E2E_CLAUDE_MODEL`, and
+`E2E_OPENCODE_MODEL`, then run `cargo test --test routing_adoption -- --nocapture`.
+On Windows npm installations, set `E2E_OPENCODE_BINARY` to the installed native
+OpenCode executable when the command is a PowerShell wrapper. These runs use
+synthetic projects and existing authentication; they make model requests.
+An inconclusive cache identity or unavailable harness fails acceptance rather
+than claiming savings. See `.kiro/specs/agent-tool-routing/validation.md` for
+the current verified scope and remaining live prerequisites.

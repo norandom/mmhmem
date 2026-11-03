@@ -62,7 +62,12 @@ pub async fn bounded_command(
     cwd: &std::path::Path,
     timeout: Duration,
 ) -> Result<std::process::Output, &'static str> {
-    let mut command = Command::new(program);
+    let resolved = if program == "opencode" {
+        std::env::var("E2E_OPENCODE_BINARY").unwrap_or_else(|_| program.into())
+    } else {
+        program.into()
+    };
+    let mut command = Command::new(resolved);
     command
         .args(args)
         .current_dir(cwd)
@@ -244,9 +249,10 @@ impl Mode {
 }
 pub fn capabilities(help: &str, required: &[&str]) -> bool {
     !required.is_empty()
-        && required
-            .iter()
-            .all(|flag| help.split_whitespace().any(|word| word == *flag))
+        && required.iter().all(|flag| {
+            help.split_whitespace()
+                .any(|word| word.trim_end_matches(',') == *flag)
+        })
 }
 pub fn extract_tools(events: &serde_json::Value) -> Result<Vec<String>, &'static str> {
     events

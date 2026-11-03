@@ -34,6 +34,11 @@ fn sanitized_events_and_modes() {
         foundation::Mode::AuthenticatedLocal.label()
     );
     assert!(!foundation::capabilities("--help", &["--format"]));
+    assert!(foundation::capabilities(
+        "  --model, -m string    Model to use\n  --format choice    Output\n  --standalone    Private server",
+        &["--model", "--format", "--standalone"]
+    ));
+    assert!(!foundation::capabilities("--model-extra, -m", &["--model"]));
 }
 #[test]
 fn bounded_child_is_killed_before_delayed_write() {

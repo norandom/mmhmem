@@ -1,6 +1,6 @@
 # Implementation Plan
 
-All tasks are required. Each executable task is sized for approximately 1–3 hours.
+All tasks are required. Each executable task is sized for approximately 1â€“3 hours.
 File ownership follows the approved design's File Structure Plan. Parallel markers
 apply only to the core tasks after foundation completion; shared fixtures are frozen
 before those tasks start. Documentation updates accompany their implementation or
@@ -46,7 +46,7 @@ verification task rather than forming standalone work.
   - Preserve unrelated bytes and reject ambiguous ownership, undecodable input, reparse destinations, and unsupported dedicated-rule frontmatter.
   - Retain one backup, recheck original content, stage beside the target, atomically replace, and prevent newly appeared targets from being overwritten.
   - Done when native fixture and injected backup/write/replace/concurrent-change tests preserve originals on failure and dry-run writes nothing.
-  - _Boundary: Owned Markdown Update Contract — PowerShell helper_
+  - _Boundary: Owned Markdown Update Contract â€” PowerShell helper_
   - _Depends: 1.1, 1.2_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
@@ -55,7 +55,7 @@ verification task rather than forming standalone work.
   - Match frozen shared byte outputs, reject unsafe ownership/symlink/frontmatter cases, and preserve Unicode/newline/BOM content.
   - Cover one-backup retention, no-op behavior, no-clobber creation, atomic replacement, concurrent changes, removal, and no-write dry-run.
   - Done when helper fixture and failure-injection tests pass without modifying the shared fixture corpus owned by foundation work.
-  - _Boundary: Owned Markdown Update Contract — Python helper_
+  - _Boundary: Owned Markdown Update Contract â€” Python helper_
   - _Depends: 1.1, 1.2_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
@@ -66,7 +66,7 @@ verification task rather than forming standalone work.
   - Integrate guidance/helpers with registration, removal, and dry-run; fetch required removal helper payloads through the root bootstrap.
   - Report changed paths, partial completion/errors, and fresh-session requirements; update Windows usage instructions with the tested behavior.
   - Done when selected/unselected and scope tests show one owned section, preserved user content, no affected-harness writes after failed preflight, and working bootstrap removal.
-  - _Boundary: Installer Integration — Windows_
+  - _Boundary: Installer Integration â€” Windows_
   - _Depends: 2.2, 2.3_
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 3.4, 3.5_
 
@@ -75,7 +75,7 @@ verification task rather than forming standalone work.
   - Wire helper and canonical payloads through install, update, remove, and dry-run, including root bootstrap removal downloads.
   - Connect installer test entrypoints and update Unix usage instructions; coordinate shared documentation after Windows integration.
   - Done when shell scope/selection, malformed-content, no-write dry-run, and bootstrap removal tests match the Windows ownership contract.
-  - _Boundary: Installer Integration — Unix_
+  - _Boundary: Installer Integration â€” Unix_
   - _Depends: 2.2, 2.4, 3.1_
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 3.4, 3.5_
 
@@ -94,7 +94,7 @@ verification task rather than forming standalone work.
   - Parse CLI events for ordinary inspection, matching-identity repeat, targeted evidence, and unavailable-worker fallback scenarios.
   - Record effective instruction sources and ambient-instruction limitations; do not inject skill text or force the desired tool.
   - Done when parser/negative cases distinguish natural adoption, full-native-read-first failure, identity mismatch, unavailable prerequisites, and unsupported events in sanitized reports.
-  - _Boundary: Adoption Integration — Claude_
+  - _Boundary: Adoption Integration â€” Claude_
   - _Depends: 1.2, 2.1, 3.1, 3.2_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3, 4.4, 4.5_
 
@@ -103,7 +103,7 @@ verification task rather than forming standalone work.
   - Verify normal tool availability and effective global/project instruction sources without an injected-instructions shortcut.
   - Extend sanitized event extraction for ordinary reads, repeat identity, exact evidence, and bounded fallback.
   - Done when parser tests and missing-auth/unsupported-event cases produce accurate outcomes using the same evidence contract as Claude.
-  - _Boundary: Adoption Integration — OpenCode_
+  - _Boundary: Adoption Integration â€” OpenCode_
   - _Depends: 4.2_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3, 4.4, 4.5_
 
@@ -118,6 +118,7 @@ verification task rather than forming standalone work.
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
 - [ ] 5.2 Run regression gates and publish sanitized live acceptance evidence
+  - _Blocked: Live matching-identity cache repeat remains unverified: Claude generated different questions, OpenCode selected targeted reads on its second run. OpenCode execution works after correcting our capability parser._
   - Run formatting, Rust tests, strict default/OTel clippy, and marketplace/checkpoint/routing checks on the integrated change.
   - Execute both real harnesses with explicit models; capture versions, effective instructions, synthetic prompt, tool sequence, actual cache identity, worker counts, and stats deltas.
   - Record per-criterion evidence and tested acceptance commands alongside the implementation validation report and usage instructions.

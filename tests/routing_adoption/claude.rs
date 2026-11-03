@@ -276,6 +276,7 @@ pub async fn run() -> Report {
             &config,
             "--allowedTools",
             "Read,Grep,Glob,Bash,PowerShell,mcp__mmhmem__*",
+            "--",
             &report.evidence.prompt,
         ];
         let output = foundation::bounded_command(

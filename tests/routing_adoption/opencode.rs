@@ -181,7 +181,11 @@ async fn run_capabilities(cwd: &Path) -> bool {
     help.is_ok_and(|o| {
         o.status.success()
             && foundation::capabilities(
-                &String::from_utf8_lossy(&o.stdout),
+                &format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                ),
                 &["--format", "--model", "--standalone"],
             )
     })
