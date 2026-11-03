@@ -51,7 +51,7 @@ the summary report.
   - _Depends: 1.1_
   - _Requirements: 1.3, 5.1, 5.3_
 
-- [ ] 2.5 (P) Restore native cargo caches across version-only lockfile changes
+- [x] 2.5 (P) Restore native cargo caches across version-only lockfile changes
   - Replace the Windows and macOS combined cache steps with separate restore and save steps keyed by OS, toolchain and lockfile hash, with a prefix fallback.
   - Save only on push events and only without an exact hit. Cache only the cargo registry, git checkouts and target directory, and pass no secrets to these jobs.
   - Append exact, fallback with matched key, or miss to each job's summary.
@@ -107,3 +107,4 @@ the summary report.
 - Task 4.1 must confirm the local WSL engine's MemTotal is at least 5 GiB, which the guard requires at concurrency 1; otherwise adjust `ENGINE_RESERVE_GIB` with evidence.
 - Task 2.3 was reviewed inline by the parent (the reviewer subagent was stopped by the user); evidence: diff inspection plus 43 CI unit tests passing on 3.12 and 3.11.
 - Task 3.1 must pass the gate step output to `ci/scripts/timing_summary.py` through the `GATE_OUTPUT` environment variable; the script always exits 0 and appends to `$GITHUB_STEP_SUMMARY`. Task 2.4 was reviewed inline by the parent.
+- Native cache keys gained a `-1.98.1-` toolchain segment, so the first push after merge reports `miss` rather than `fallback`; task 4.3 must measure the version-bump fallback on a later push. Task 2.5 was reviewed inline by the parent.

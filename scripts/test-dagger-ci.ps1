@@ -97,7 +97,44 @@ try {
     Assert-True $workflow.Contains('validation_id=ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}') 'Hosted validation identity missing'
     Assert-True $workflow.Contains('git status --porcelain') 'Hosted checkout cleanliness not checked'
     Assert-True $workflow.Contains('static-release --src ..') 'Hosted export bypasses verified gate'
-    Write-Host 'PASS: native provenance, freshness, export containment, arguments and hosted identity'
+    function Get-WorkflowJob([string]$text, [string]$job) {
+        $match = [regex]::Match($text, '(?ms)^  ' + [regex]::Escape($job) + ':\r?\n(.*?)(?=^  [A-Za-z0-9_-]+:\r?$|\z)')
+        Assert-True $match.Success "Workflow job $job missing"
+        return $match.Groups[1].Value
+    }
+    $nativeJobs = @{ windows = 'mmhmem-x86_64-pc-windows-msvc'; macos = 'mmhmem-macos' }
+    foreach ($os in @('windows', 'macos')) {
+        $job = Get-WorkflowJob $workflow $os
+        Assert-True (-not $job.Contains('uses: actions/cache@v4')) "$os still uses the combined cache action"
+        Assert-True $job.Contains('uses: actions/cache/restore@v4') "$os cache restore step missing"
+        Assert-True $job.Contains('uses: actions/cache/save@v4') "$os cache save step missing"
+        Assert-True $job.Contains('id: cargo-cache') "$os cache restore step has no id"
+        Assert-True $job.Contains("key: cargo-$os-1.98.1-`${{ hashFiles('Cargo.lock') }}") "$os primary cache key wrong"
+        Assert-True ([regex]::IsMatch($job, "restore-keys: \|?\s*cargo-$os-1\.98\.1-\r?\n")) "$os restore-key prefix wrong"
+        Assert-True $job.Contains('key: ${{ steps.cargo-cache.outputs.cache-primary-key }}') "$os save step does not reuse the primary key"
+        Assert-True $job.Contains("if: success() && github.event_name == 'push' && steps.cargo-cache.outputs.cache-hit != 'true'") "$os save is not push-only on a non-exact hit"
+        foreach ($path in @('~/.cargo/registry', '~/.cargo/git', 'target')) {
+            Assert-True ([regex]::Matches($job, '(?m)^\s+' + [regex]::Escape($path) + '\r?$').Count -eq 2) "$os cache path $path not on both restore and save"
+        }
+        $restoreAt = $job.IndexOf('actions/cache/restore@v4'); $saveAt = $job.IndexOf('actions/cache/save@v4')
+        $clippyAt = $job.IndexOf('cargo clippy'); $uploadAt = $job.IndexOf('actions/upload-artifact@v4')
+        Assert-True ($restoreAt -ge 0 -and $restoreAt -lt $clippyAt -and $uploadAt -lt $saveAt) "$os cache steps are not around the cargo steps"
+        $summary = [regex]::Match($job, '(?ms)- name: Report cargo cache status\r?\n(.*?)(?=^      - |\z)')
+        Assert-True $summary.Success "$os cache summary step missing"
+        $summaryText = $summary.Groups[1].Value
+        Assert-True $summaryText.Contains('if: always()') "$os cache summary does not always run"
+        Assert-True $summaryText.Contains('CACHE_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}') "$os cache summary lacks the hit output"
+        Assert-True $summaryText.Contains('CACHE_MATCHED_KEY: ${{ steps.cargo-cache.outputs.cache-matched-key }}') "$os cache summary lacks the matched key"
+        Assert-True ($summaryText.IndexOf('${{') -lt $summaryText.IndexOf('run: ')) "$os cache summary inlines an expression into its script"
+        Assert-True ($summaryText.Contains("'exact'") -and $summaryText.Contains('fallback (') -and $summaryText.Contains("'miss'")) "$os cache summary outcomes missing"
+        Assert-True $summaryText.Contains('GITHUB_STEP_SUMMARY') "$os cache summary not written to the job summary"
+        Assert-True $job.Contains("name: $($nativeJobs[$os])`n") "$os artifact name changed"
+        Assert-True (-not $job.Contains('secrets.')) "$os job reads secrets"
+    }
+    Assert-True ((Get-WorkflowJob $workflow 'windows').Contains("path: target/release/mmhmem.exe`n")) 'Windows artifact path changed'
+    Assert-True ((Get-WorkflowJob $workflow 'macos').Contains("path: |`n            target/release/mmhmem`n            target/x86_64-apple-darwin/release/mmhmem`n")) 'macOS artifact paths changed'
+    Assert-True ((Get-WorkflowJob $workflow 'windows').Contains('./scripts/test-install.ps1')) 'Windows installer regression checks removed'
+    Write-Host 'PASS: native provenance, freshness, export containment, arguments, hosted identity and native caches'
 } finally {
     # Remove junction itself first; never recursively traverse its target.
     $junction = Join-Path $scratch 'redirect'

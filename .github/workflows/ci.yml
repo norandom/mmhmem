@@ -131,14 +131,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.1
-      - name: Cache cargo registry and target (bundled-SQLite builds are slow on first run)
-        uses: actions/cache@v4
+      - name: Restore cargo registry and target (prefix fallback survives version-only lockfile changes)
+        id: cargo-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-windows-${{ hashFiles('Cargo.lock') }}
+          key: cargo-windows-1.98.1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-windows-1.98.1-
       - name: Blocking clippy (same strictness as the Linux gate)
         run: cargo clippy --all-targets -- -D warnings
       - name: Deterministic test suite
@@ -151,6 +154,28 @@ jobs:
           name: mmhmem-x86_64-pc-windows-msvc
           path: target/release/mmhmem.exe
           if-no-files-found: error
+      # success(): a failed build never persists its target dir.
+      # Push-only, so pull requests cannot overwrite main's caches.
+      - name: Save cargo registry and target (only without an exact hit)
+        if: success() && github.event_name == 'push' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      - name: Report cargo cache status
+        if: always()
+        shell: pwsh
+        env:
+          CACHE_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
+          CACHE_MATCHED_KEY: ${{ steps.cargo-cache.outputs.cache-matched-key }}
+        run: |
+          if ($env:CACHE_HIT -eq 'true') { $status = 'exact' }
+          elseif ($env:CACHE_MATCHED_KEY) { $status = "fallback ($env:CACHE_MATCHED_KEY)" }
+          else { $status = 'miss' }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Native cargo cache (windows): $status"
 
   macos:
     name: macOS aarch64 and x86_64 - clippy, deterministic tests, release builds
@@ -164,14 +189,17 @@ jobs:
           toolchain: 1.98.1
       - name: Add the x86_64-apple-darwin target
         run: rustup target add x86_64-apple-darwin
-      - name: Cache cargo registry and target (bundled-SQLite builds are slow on first run)
-        uses: actions/cache@v4
+      - name: Restore cargo registry and target (prefix fallback survives version-only lockfile changes)
+        id: cargo-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-macos-${{ hashFiles('Cargo.lock') }}
+          key: cargo-macos-1.98.1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-1.98.1-
       - name: Blocking clippy (same strictness as the Linux gate)
         run: cargo clippy --all-targets -- -D warnings
       - name: Deterministic test suite
@@ -188,3 +216,26 @@ jobs:
             target/release/mmhmem
             target/x86_64-apple-darwin/release/mmhmem
           if-no-files-found: error
+      # success(): a failed build never persists its target dir.
+      # Push-only, so pull requests cannot overwrite main's caches.
+      - name: Save cargo registry and target (only without an exact hit)
+        if: success() && github.event_name == 'push' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      - name: Report cargo cache status
+        if: always()
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
+          CACHE_MATCHED_KEY: ${{ steps.cargo-cache.outputs.cache-matched-key }}
+        run: |
+          if [ "$CACHE_HIT" = 'true' ]; then status='exact'
+          elif [ -n "$CACHE_MATCHED_KEY" ]; then status="fallback ($CACHE_MATCHED_KEY)"
+          else status='miss'
+          fi
+          printf 'Native cargo cache (macos): %s\n' "$status" >> "$GITHUB_STEP_SUMMARY"
