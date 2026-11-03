@@ -42,6 +42,11 @@ static SECURITY_CRITICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
+/// Security-critical path check shared with the hook command (Req 2.3, 5.4).
+pub fn is_security_critical_path(path: &std::path::Path) -> bool {
+    SECURITY_CRITICAL_RE.is_match(&path.to_string_lossy())
+}
+
 /// Bundled audit metadata for a shunt outcome (keeps audit_shunt under the
 /// clippy 7-arg limit, Req 13).
 struct ShuntAuditMeta<'a> {
@@ -399,7 +404,7 @@ impl ShuntEngine {
 
     /// Security-critical path check (Req 3.3, case-insensitive).
     pub fn is_security_critical(&self, path: &std::path::Path) -> bool {
-        SECURITY_CRITICAL_RE.is_match(&path.to_string_lossy())
+        is_security_critical_path(path)
     }
 
     /// One audit line for a shunt outcome (cache hit / delegated).
@@ -467,5 +472,18 @@ impl ShuntEngine {
                 tracing::warn!("breadcrumb failed: {e}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_security_critical_path;
+    use std::path::Path;
+
+    #[test]
+    fn free_fn_matches_security_paths_case_insensitively() {
+        assert!(is_security_critical_path(Path::new("src/Auth/login.rs")));
+        assert!(is_security_critical_path(Path::new("a/JWT_helper.rs")));
+        assert!(!is_security_critical_path(Path::new("src/readme.rs")));
     }
 }

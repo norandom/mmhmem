@@ -6,7 +6,7 @@ then consent and trust, then Codex and OpenCode, then periphery. Every commit
 must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`).
 
 - [ ] 1. Build the decision core
-- [ ] 1.1 Share the security rule and add the hook audit event types
+- [x] 1.1 Share the security rule and add the hook audit event types
   - Expose the shunt engine's security-critical path rule as a plain function over the existing pattern and have the engine use it, so the hook and the server apply one rule.
   - Add redirect and pass audit event types with their stable string names.
   - Done when the existing shunt tests still pass, a new test shows the function and the engine agree on security-critical and ordinary paths, and the new event names serialize as specified.
@@ -110,3 +110,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - Done when the validation report holds the comparison for every enabled harness.
   - _Depends: 5.1, 2.3_
   - _Requirements: 7.1, 7.2, 7.3_
+
+## Implementation Notes
+
+- Task 1.1 (Sonnet, inline review): `src/services/shunt.rs` is at 489 of 500 lines, so later work must not grow it. `tests/audit_redaction.rs` pins the event-type count (now 20).

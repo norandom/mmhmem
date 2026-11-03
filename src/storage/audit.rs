@@ -102,11 +102,13 @@ pub enum AuditEventType {
     Warmup,
     Prune,
     MemSearchBreadcrumbs,
+    HookRedirect,
+    HookPass,
 }
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 18] = [
+    pub const ALL: [AuditEventType; 20] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -125,11 +127,13 @@ impl AuditEventType {
         AuditEventType::Warmup,
         AuditEventType::Prune,
         AuditEventType::MemSearchBreadcrumbs,
+        AuditEventType::HookRedirect,
+        AuditEventType::HookPass,
     ];
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 18] = [
+        const NAMES: [&str; 20] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -148,6 +152,8 @@ impl AuditEventType {
             "WARMUP",
             "PRUNE",
             "MEM_SEARCH_BREADCRUMBS",
+            "HOOK_REDIRECT",
+            "HOOK_PASS",
         ];
         NAMES[self as usize]
     }
@@ -346,4 +352,18 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuditEventType;
+
+    #[test]
+    fn hook_events_are_listed_with_stable_names() {
+        assert_eq!(AuditEventType::HookRedirect.as_str(), "HOOK_REDIRECT");
+        assert_eq!(AuditEventType::HookPass.as_str(), "HOOK_PASS");
+        assert!(AuditEventType::ALL.contains(&AuditEventType::HookRedirect));
+        assert!(AuditEventType::ALL.contains(&AuditEventType::HookPass));
+        assert_eq!(AuditEventType::ALL.len(), 20);
+    }
 }
