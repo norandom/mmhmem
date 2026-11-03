@@ -188,5 +188,57 @@ class ShippedBaselineTests(unittest.TestCase):
         self.assertEqual(Path(timing_summary.DEFAULT_BASELINE).resolve(), BASELINE_PATH.resolve())
 
 
+def cache_line(stats):
+    return "== cache: " + json.dumps(stats, separators=(",", ":"), sort_keys=True)
+
+
+class CacheTableTests(unittest.TestCase):
+    """ci-dependency-cache task 2.3 (Requirements 5.1, 5.2)."""
+
+    STATS = {
+        "static_release": {"enabled": True, "hits": 361, "misses": 14, "rust_hits": 300,
+                           "rust_misses": 12, "c_hits": 61, "c_misses": 2, "non_cacheable": 7},
+        "clippy_otel": {"enabled": True, "hits": 0, "misses": 0, "reason": "statistics unavailable"},
+        "docker_build": {"enabled": False, "reason": "sccache server did not start; built without the cache"},
+    }
+
+    def summary(self, output):
+        markdown, _ = timing_summary.build_summary(output, BASELINE_PATH)
+        return markdown
+
+    def test_prefix_matches_the_pipeline(self):
+        tree = ast.parse(MAIN_PY.read_text(encoding="utf-8"))
+        value = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == "CACHE_PREFIX" for t in n.targets))
+        self.assertEqual(timing_summary.CACHE_PREFIX, value)
+
+    def test_enabled_and_disabled_stages_are_tabulated(self):
+        output = "\n".join([cache_line(self.STATS), timings(("static_release", "passed", 0, 300))])
+        markdown = self.summary(output)
+        self.assertIn(timing_summary.CACHE_HEADING, markdown)
+        cache = markdown[markdown.index(timing_summary.CACHE_HEADING):]
+        self.assertEqual(row_for(cache, "static_release"), ["static_release", "on", "361", "14", "61", "2", ""])
+        self.assertEqual(row_for(cache, "clippy_otel")[1:4], ["on", "0", "0"])
+        self.assertEqual(row_for(cache, "clippy_otel")[-1], "statistics unavailable")
+        disabled = row_for(cache, "docker_build")
+        self.assertEqual(disabled[1], "off")
+        self.assertIn("did not start", disabled[-1])
+        self.assertLess(markdown.index(timing_summary.HEADING), markdown.index(timing_summary.CACHE_HEADING))
+
+    def test_missing_cache_line_is_reported(self):
+        markdown = self.summary(timings(("fmt", "passed", 0, 1)))
+        self.assertIn(timing_summary.NO_CACHE, markdown)
+
+    def test_malformed_cache_line_is_reported_without_failing(self):
+        markdown = self.summary("== cache: {not json\n" + timings(("fmt", "passed", 0, 1)))
+        self.assertIn("cache line malformed", markdown)
+        self.assertIn("| fmt |", markdown, "the timing table still renders")
+
+    def test_cache_section_renders_even_without_timings(self):
+        markdown = self.summary(cache_line(self.STATS))
+        self.assertIn(timing_summary.NO_TIMINGS, markdown)
+        self.assertIn("| static_release | on |", markdown)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -48,6 +48,9 @@ SLOW_FACTOR = 1.5
 NO_TIMINGS = "no stage timings recorded"
 HEADING = "### Dagger gate stage timings"
 REQUIRED_FIELDS = ("name", "status", "started_s", "duration_s")
+CACHE_PREFIX = "== cache: "  # main.CACHE_PREFIX
+CACHE_HEADING = "### Compile cache (sccache)"
+NO_CACHE = "no compile-cache line recorded"
 
 
 def _is_number(value):
@@ -119,17 +122,51 @@ def render(records, baseline):
     return "\n".join(lines)
 
 
-def build_summary(output, baseline_path):
-    """Return (markdown, warnings) for the gate output and baseline file."""
+def parse_cache(output):
+    """Return {stage: stats record} from the last cache line, None when there
+    is none; raise ValueError when it is not a JSON object of records."""
+    line = None
+    for candidate in output.splitlines():
+        candidate = candidate.strip()
+        if candidate.startswith(CACHE_PREFIX):
+            line = candidate
+    if line is None:
+        return None
+    try:
+        stats = json.loads(line[len(CACHE_PREFIX):])
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid JSON: {error}") from None
+    if not isinstance(stats, dict) or not all(isinstance(v, dict) for v in stats.values()):
+        raise ValueError("expected a JSON object of per-stage records")
+    return stats
+
+
+def _count(record, key):
+    value = record.get(key, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def render_cache(stats):
+    """Markdown table of per-stage compile-cache records (Requirements 5.1, 5.2)."""
+    lines = ["| stage | cache | hits | misses | C hits | C misses | note |",
+             "|---|---|---|---|---|---|---|"]
+    for name, record in stats.items():
+        state = "on" if record.get("enabled") is True else "off"
+        counts = " | ".join(str(_count(record, k)) for k in ("hits", "misses", "c_hits", "c_misses"))
+        lines.append(f"| {_cell(name)} | {state} | {counts} | {_cell(record.get('reason', ''))} |")
+    return "\n".join(lines)
+
+
+def _timing_section(output, baseline_path):
     parts, warnings = [HEADING, ""], []
     try:
         records = parse_timings(output)
     except ValueError as error:
         parts.append(f"timings line malformed, no table rendered: {_cell(error)}")
-        return "\n".join(parts) + "\n", [f"timing_summary: malformed timings line: {error}"]
+        return parts, [f"timing_summary: malformed timings line: {error}"]
     if records is None:
         parts.append(NO_TIMINGS)
-        return "\n".join(parts) + "\n", warnings
+        return parts, warnings
     try:
         baseline = load_baseline(baseline_path)
     except ValueError as error:
@@ -139,7 +176,26 @@ def build_summary(output, baseline_path):
     parts.append(render(records, baseline))
     parts.append("")
     parts.append(f"`slow` marks a stage over {SLOW_FACTOR:g} x its baseline; it never fails the job.")
-    return "\n".join(parts) + "\n", warnings
+    return parts, warnings
+
+
+def _cache_section(output):
+    parts = ["", CACHE_HEADING, ""]
+    try:
+        stats = parse_cache(output)
+    except ValueError as error:
+        return parts + [f"cache line malformed, no table rendered: {_cell(error)}"], [
+            f"timing_summary: malformed cache line: {error}"]
+    if stats is None:
+        return parts + [NO_CACHE], []
+    return parts + [render_cache(stats)], []
+
+
+def build_summary(output, baseline_path):
+    """Return (markdown, warnings) for the gate output and baseline file."""
+    timing, warnings = _timing_section(output, baseline_path)
+    cache, cache_warnings = _cache_section(output)
+    return "\n".join(timing + cache) + "\n", warnings + cache_warnings
 
 
 def main(argv=None, environ=None, stdout=None, stderr=None):

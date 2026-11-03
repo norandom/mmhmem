@@ -39,7 +39,7 @@ publication. Every commit must pass the project pre-commit gate.
   - _Depends: 2.1_
   - _Requirements: 1.1, 1.2, 2.3, 2.4, 5.1_
 
-- [ ] 2.3 Add the compile-cache table to the job-summary report
+- [x] 2.3 Add the compile-cache table to the job-summary report
   - Parse the cache line and render a per-stage table of enabled state, hits and misses, with the reason for disabled stages.
   - Report a missing cache line as such, and keep the script's always-zero exit.
   - Done when unit tests cover enabled stages, a disabled stage with its reason, and a missing line.
