@@ -28,7 +28,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Boundary: shell_
   - _Requirements: 2.6_
 
-- [ ] 1.4 (P) Implement the repeat-read window
+- [x] 1.4 (P) Implement the repeat-read window
   - Remember a redirect per harness, session and file for 120 seconds in a small state file in the local data directory, pruning entries older than an hour and writing atomically.
   - Report whether a request repeats a recent redirect, and tolerate a missing, corrupt or concurrently replaced state file by treating it as empty.
   - Done when tests cover a repeat inside and outside the window, pruning, and a corrupt file.
@@ -116,3 +116,4 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 - Task 1.1 (Sonnet, inline review): `src/services/shunt.rs` is at 489 of 500 lines, so later work must not grow it. `tests/audit_redaction.rs` pins the event-type count (now 20).
 - Task 1.2 (Opus, Opus reviewer APPROVED): line count matches the server's `str::lines`; `Redirect.lines` is capped at the threshold and means "at least N" (redirect text must say so). Parent applied the reviewer's suggestion: invalid UTF-8 in the 8 KiB probe now passes as NotText, because `smart_read` reads with `read_to_string`. Open suggestions: a byte cap for huge files with few newlines, and a test pinning early stop.
 - Task 1.3 (Opus, Opus reviewer APPROVED): `Get-Content -Raw` is accepted (it reads the whole file). Parent added the reviewer's hardening: any Unicode whitespace other than space and tab means not recognised. Requirement 2.6 corrected: `head`/`tail` are partial readers and pass. For task 2.1: `recognise` has no shell dialect, so a few dialect-specific false positives exist (bash `type x`, Git Bash `cat src\\main.rs`), all recoverable through the repeat window; paths are joined without normalisation.
+- Task 1.4 (Sonnet, inline review): `RepeatWindow::new(dir, window_ms)` / `with_default_window(dir)`; keys are SHA-256 of harness, session and path, so the state file holds no plain paths; `remember` creates the directory and returns an error the caller ignores (fail open).

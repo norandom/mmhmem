@@ -6,6 +6,7 @@
 //! network, configuration or secrets (the caller passes [`HookSettings`]).
 
 pub mod shell;
+pub mod state;
 
 use std::path::PathBuf;
 
