@@ -13,7 +13,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = 'deploy/skills/unified-memory/SKILL.md'
 PACKAGE = 'plugins/unified-memory/skills/unified-memory/SKILL.md'
-SERVER = 'src/mcp/tools.rs'
+SERVER = 'src/mcp/instructions.rs'
 RECAPS = [f'deploy/commands/{agent}/mmhmem-recap.md'
           for agent in ('claude', 'codex', 'opencode')]
 INPUTS = [CANONICAL, PACKAGE, SERVER, *RECAPS]
@@ -77,7 +77,7 @@ def validate(root):
         text = texts[path]
         label = 'canonical' if path == CANONICAL else path
         if path == SERVER:
-            match = re.search(r'info\.instructions = Some\((.*?)\.into\(\)', text, re.S)
+            match = re.search(r'const INSTRUCTIONS: &str = (.*?);\s*$', text, re.S)
             if not match:
                 errors.append('server instructions assignment not found')
                 continue

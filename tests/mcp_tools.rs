@@ -2,6 +2,8 @@
 //! axum+rmcp server on an ephemeral port, full initialize -> tools/list ->
 //! tools/call flow over Streamable HTTP (SSE responses parsed from `data:`).
 
+mod routing_metadata;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -113,6 +115,7 @@ async fn tools_list_exposes_the_six_tools_and_call_round_trips_memory() {
     assert_eq!(status, 200);
     let msgs = sse_json(&body);
     let list = &msgs[0];
+    routing_metadata::assert_metadata(&list["result"]["tools"]);
     let names: Vec<&str> = list["result"]["tools"]
         .as_array()
         .unwrap()

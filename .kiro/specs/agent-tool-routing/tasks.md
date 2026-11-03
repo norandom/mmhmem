@@ -23,7 +23,7 @@ verification task rather than forming standalone work.
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
 - [ ] 2. Implement discovery, guidance, and safe owned-section operations
-- [ ] 2.1 (P) Describe tool selection and serialize truthful MCP annotations
+- [x] 2.1 (P) Describe tool selection and serialize truthful MCP annotations
   - Update all nine descriptions with purpose, selection conditions, limitations, and the approved conservative annotation matrix.
   - Preserve tool names and argument schemas; align shared initialization guidance with exact reads, authorized fallback, and checkpoint rules.
   - Keep protocol handlers thin and within source-size limits; this task owns protocol metadata and its tests, not portable skill text.
@@ -138,3 +138,4 @@ verification task rather than forming standalone work.
 
 ## Implementation Notes
 - Adoption subprocesses must drain stdout/stderr concurrently while enforcing timeout and kill/reap; flood-output and delayed-write regressions cover both.
+- Shared server instructions now live in src/mcp/instructions.rs; checkpoint checker follows that constant and retains scenario mutation tests.

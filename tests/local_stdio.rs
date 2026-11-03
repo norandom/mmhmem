@@ -3,6 +3,8 @@
 //! piped stdio with hand-rolled JSON-RPC lines — no new dev-dependencies
 //! (house stub style, like tests/cli.rs and tests/daemon_smoke.rs).
 
+mod routing_metadata;
+
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -177,6 +179,7 @@ async fn stdio_handshake_lists_all_nine_tools() {
     mcp.handshake().await;
 
     let list = mcp.request("tools/list", json!({})).await;
+    routing_metadata::assert_metadata(&list["result"]["tools"]);
     let names: Vec<&str> = list["result"]["tools"]
         .as_array()
         .expect("tools array")

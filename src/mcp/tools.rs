@@ -29,26 +29,7 @@ impl ServerHandler for McpServer {
         // Without it, capability-negotiating clients (OpenCode) enumerate
         // zero tools. No `listChanged` claim: the server never emits them.
         info.capabilities.tools = Some(ToolsCapability::default());
-        info.instructions = Some(
-            "mmhmem: cross-agent memory + I/O shunt server. Call session_resume_or_handoff \
-             first; prefer smart_read over raw reads of large files (offset/limit for edits); \
-             search the memory index before fetching details. Resume at session start or \
-             after context clearing, using the same exact project identity throughout. \
-             If no checkpoint exists, save the accepted objective and next step before execution. \
-             Checkpoint changed state after each task unit, validation batch, plan-changing \
-             decision, or blocker; before a final response and before agent-controlled clear \
-             or handoff. Skip unchanged saves. Use updated_working_state_md and active_objective \
-             for concise objective, verified versus pending work, decisions, blockers, and next \
-             steps; exclude credentials. Await acknowledgement; only success clears changed \
-             state. On failure or unavailable mmhmem, warn that latest changes were not saved \
-             and continue without inventing memory. Ctrl+C/native clear cannot guarantee a save; \
-             recover the last acknowledged checkpoint without a service restart or worker model. \
-             Present checkpoint save time separately from breadcrumb activity. If no checkpoint \
-             exists, show available activity or explicit absence; initialized task IDs are not \
-             saved checkpoints. Harness chat history is separate: the original conversation may \
-             create a checkpoint, but history is not automatically imported."
-                .into(),
-        );
+        info.instructions = Some(super::instructions::INSTRUCTIONS.into());
         info
     }
 }
@@ -96,7 +77,13 @@ where
 #[tool_router]
 impl McpServer {
     #[tool(
-        description = "Cross-agent session bus. Call WITHOUT updated_working_state_md at session start to inherit the live in-flight session from another harness (returns working state, last harness, objective, last 15 breadcrumbs). Call WITH it to checkpoint for cross-agent handoff. Optional client_usage reports harness frontier token totals for server-side stats."
+        description = "Cross-agent session bus: resume at session start or after clearing without updated_working_state_md; supply it to replace the saved checkpoint for handoff. Returns checkpoint state and recent breadcrumbs, not imported chat history. Use mem_search_breadcrumbs for older activity. Optional client_usage accepts only actual harness-reported frontier totals.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn session_resume_or_handoff(
         &self,
@@ -114,7 +101,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Deterministic shunted read. offset+limit returns an exact L<n>: line slice (for edits). Files below the shunt threshold or on security-critical paths return full line-numbered content directly. Larger files return a cached or worker-generated structural summary (bullets with symbol + [Lstart-Lend]); repeats of an unchanged file are served from the SHA-256 cache with zero worker calls."
+        description = "Use for ordinary repository inspection before a full native or shell read when available and authorized. Large files return cached or worker-generated structural summaries, not exact source evidence. Use offset+limit for exact line slices when editing or verifying; small/security-critical files return direct content. Unchanged content with the same cache identity (including question) hits cache without a worker call. Cache, audit and stats may be written. On worker failure use bounded authorized targeted/native fallback, not repeated retries or invented savings.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn smart_read(
         &self,
@@ -154,7 +147,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Generate boilerplate via the worker model and write it straight to target_path (both paths confined to AGENT_MEM_ALLOWED_ROOTS). Returns a one-line confirmation with sha256, line count, worker model, and latency — zero frontier input/output tokens for reference reading and generation."
+        description = "Generate requested boilerplate with the worker and write target_path, potentially overwriting it; both paths stay within allowed roots. Use only for intended generation, not source inspection (use smart_read). Returns a compact write acknowledgement; worker access, cache/audit and token accounting have side effects. Does not guarantee measured frontier savings.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn boilerplate_write(
         &self,
@@ -193,7 +192,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Search the project's long-term memory index (FTS5). Returns a compact table of matching observations (ID, type, harness, title, files) — never full narratives. Use obs_type to filter (decision, bugfix, feature, refactor, discovery, change)."
+        description = "Search the project long-term memory index before fetching observation details. Returns compact matching IDs, types, titles and files, not full narratives; use mem_get_observations for validated IDs. Optional obs_type filters results. Search appends audit/breadcrumb activity.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn mem_search(
         &self,
@@ -239,7 +244,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Fetch full narratives, facts, and files for validated observation IDs (project-scoped) from mem_search results."
+        description = "Fetch full narratives, facts and files for project-scoped observation IDs validated through mem_search. Prefer the compact search first; this retrieves memory, not current exact source. Appends audit/breadcrumb activity.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn mem_get_observations(
         &self,
@@ -265,7 +276,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Record a durable, immediately searchable observation in the project's long-term memory (type: decision, bugfix, feature, refactor, discovery, change). Redacted before persist; secrets and <private> spans are scrubbed."
+        description = "Record a durable searchable project observation for a meaningful decision, bugfix, feature, refactor, discovery or change. Prefer session_resume_or_handoff for in-flight checkpoints. Appends observation and audit/breadcrumb records; configured secret/private-span redaction is applied before persistence.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn mem_record_observation(
         &self,
@@ -299,7 +316,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Warm the corpus: run key files (max 25 per batch) through the real shunt path — worker-delegated or cached structural summaries with honest stats. Threshold/security files are skipped, missing/denied/failed paths are counted without aborting the batch."
+        description = "Warm selected corpus files only when prebuilding summaries is intended; for ordinary inspection use smart_read. Processes at most 25 paths per batch through cached/worker summary reads, potentially updating cache and stats. Threshold/security files are skipped; missing, denied and failed paths are counted. Requires worker access for uncached summaries; does not guarantee measured frontier savings.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn shunt_warmup(
         &self,
@@ -335,7 +358,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Remove stale cache rows: entries whose file is missing or whose content hash changed. dry_run previews the grouped counts; fresh rows are never touched."
+        description = "Remove stale cache rows whose files are missing or content hashes changed, only when cache cleanup is intended. Use dry_run to preview grouped counts; fresh rows remain. Deletes cache entries, not source files or durable observations; use smart_read for inspection.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn shunt_prune(
         &self,
@@ -368,7 +397,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Search the project's breadcrumb history (literal substring over tool name, target resource, action summary), newest first — what earlier sessions did beyond the last 15 crumbs the resume view returns. Blank query lists all crumbs; optional harness filter."
+        description = "Search older project breadcrumb activity beyond the recent resume view. Literal substring matches tool, resource and action summary, newest first; blank query lists activity and harness optionally filters. This is recorded activity, not a saved checkpoint or imported chat history; use session_resume_or_handoff for saved state. Appends audit/breadcrumb activity.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn mem_search_breadcrumbs(
         &self,
