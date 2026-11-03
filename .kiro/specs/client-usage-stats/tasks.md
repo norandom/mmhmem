@@ -6,7 +6,7 @@ how client usage reports are written or stored. Every commit must pass the
 project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
 
 - [ ] 1. Reduce client-reported rows to per-day totals
-- [ ] 1.1 Build the client-row reduction module with its unit tests
+- [x] 1.1 Build the client-row reduction module with its unit tests
   - Read every client-reported row with a read-only query and parse its stored details into prompt tokens, completion tokens and source, never failing on missing, non-numeric, negative or malformed values.
   - Keep only the latest report per project, harness, workspace task and source, by newest timestamp and then by later row.
   - Sum the kept reports per UTC day, project and harness, with the sorted distinct sources behind each total.
@@ -41,3 +41,7 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
   - Done when the integration tests pass with only the latest report per key counted, the full suite and both clippy passes are green, and no test inserts client values into numeric columns.
   - _Depends: 2.1, 2.2_
   - _Requirements: 1.2, 1.3, 1.5, 2.3, 3.2, 3.3, 3.4, 3.5, 5.1, 5.2_
+
+## Implementation Notes
+
+- Task 1.1: `ClientReport` also carries `day`, computed by SQLite's `date(ts_epoch_ms / 1000, 'unixepoch')` so client days match the estimate query exactly (the crate has no date library); per-day summing is the public `client_days` function. Reviewed inline by the parent.

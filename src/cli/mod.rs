@@ -9,6 +9,7 @@
 
 pub mod prune;
 pub mod stats;
+pub mod stats_client;
 
 use std::process::ExitCode;
 
