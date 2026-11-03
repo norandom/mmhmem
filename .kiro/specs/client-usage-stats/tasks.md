@@ -5,7 +5,7 @@ File ownership follows the approved design's File Structure Plan. No task change
 how client usage reports are written or stored. Every commit must pass the
 project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
 
-- [ ] 1. Reduce client-reported rows to per-day totals
+- [x] 1. Reduce client-reported rows to per-day totals
 - [x] 1.1 Build the client-row reduction module with its unit tests
   - Read every client-reported row with a read-only query and parse its stored details into prompt tokens, completion tokens and source, never failing on missing, non-numeric, negative or malformed values.
   - Keep only the latest report per project, harness, workspace task and source, by newest timestamp and then by later row.
@@ -14,7 +14,7 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
   - Done when unit tests show complete, partial, malformed and empty details parsed as specified, repeated reports for one key counted once with ties broken by row order, different tasks and sources each counted, and each kept report placed on its own UTC day.
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 3.2, 3.3, 3.4_
 
-- [ ] 2. Report client usage and state the contract
+- [x] 2. Report client usage and state the contract
 - [x] 2.1 Rework the stats aggregation, table and JSON output around the new client totals
   - Exclude client-reported rows from the estimate aggregation, merge estimates with the client totals by day, project and harness, and fill zeros on the side a key lacks.
   - Replace the former client-reported avoided value with frontier prompt and frontier completion values plus the source list, keeping every other JSON field and the row ordering unchanged.
@@ -32,8 +32,8 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
   - _Boundary: contract wording_
   - _Requirements: 3.1, 3.5_
 
-- [ ] 3. Verify against the production write path
-- [ ] 3.1 Rewrite the stats command integration tests on rows written by the server code
+- [x] 3. Verify against the production write path
+- [x] 3.1 Rewrite the stats command integration tests on rows written by the server code
   - Write client-reported rows through the same collector the server uses, adjusting a row's timestamp afterwards only where a day boundary is needed.
   - Cover three cumulative reports for one task and source, two tasks and two sources, a report on an earlier day, a hand-written row with a missing value, rows already present before the change, and the source list in the JSON output.
   - Confirm the command leaves the store file unchanged and that every report is still stored and audited.
@@ -46,3 +46,4 @@ project pre-commit gate (fmt, size caps, clippy on default and `otel` features).
 
 - Task 1.1: `ClientReport` also carries `day`, computed by SQLite's `date(ts_epoch_ms / 1000, 'unixepoch')` so client days match the estimate query exactly (the crate has no date library); per-day summing is the public `client_days` function. Reviewed inline by the parent.
 - Task 2.1: the stats unit tests moved to `src/cli/stats_tests.rs` (`#[path]` module, as `session_bus_tests.rs`) to keep `stats.rs` under the 500-line cap. The two `tests/stats_cli.rs` assertions on the old JSON field and table label were updated in the same commit so the suite stays green; task 3.1 rewrites that file on production-written rows. Reviewed inline by the parent.
+- Task 3.1: full `cargo test` and strict clippy (default and `otel`) green on 2026-11-03; the hand-written row for the missing-value case carries values only in `details`. Reviewed inline by the parent.
