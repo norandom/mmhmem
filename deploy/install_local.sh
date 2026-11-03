@@ -349,36 +349,56 @@ CODEX_BEGIN='# BEGIN mmhmem (managed by install_local.sh -- do not edit)'
 CODEX_END='# END mmhmem'
 codex_block() { # $1 = binary path (TOML-escaped)
   printf '%s\n[mcp_servers.mmhmem]\ncommand = "%s"\nargs = ["stdio"]\n%s' \
-    "$CODEX_BEGIN" "$(printf '%s' "$1" | sed 's/\\/\\\\/g')" "$CODEX_END"
+    "$CODEX_BEGIN" "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')" "$CODEX_END"
 }
-set_codex_registration() { # $1 = binary path
+codex_unmanaged() {
+  # Validate first; callers only replace config after awk succeeds.
+  awk '
+    /^# BEGIN mmhmem \(managed by install_local\.(ps1|sh) -- do not edit\)$/ {
+      if (managed) { bad=1; exit 1 }; managed=1; next
+    }
+    /^# END mmhmem$/ { if (!managed) { bad=1; exit 1 }; managed=0; next }
+    {
+      if (index($0, "\"\"\"") || index($0, sprintf("%c%c%c",39,39,39))) { bad=1; exit 1 }
+      if (managed) {
+        if ($0 !~ /^[[:space:]]*(#.*|\[mcp_servers\.mmhmem\]|command[[:space:]]*=.*|args[[:space:]]*=.*)?[[:space:]]*$/) { bad=1; exit 1 }
+        next
+      }
+      # Keep bracket escapes outside character classes: BusyBox awk and
+      # Debian awk interpret escaped brackets inside a class differently.
+      normal=$0
+      gsub(/[[:space:]"]/, "", normal)
+      gsub(sprintf("%c", 39), "", normal)
+      gsub(/\[/, "", normal)
+      gsub(/\]/, "", normal)
+      if (normal ~ /^mcp_servers\.mmhmem([.#=]|$)/ || normal ~ /^mcp_servers=/ || normal ~ /^mmhmem([.#=]|$)/) { bad=1; exit 1 }
+      print
+    }
+    END { if (bad || managed) exit 1 }
+  ' "$1"
+}
+write_codex_registration() {
   cfg="$CODEX_CFG_DIR/config.toml"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    info "[dry-run] merge [mcp_servers.mmhmem] into $cfg"
-    return 0
-  fi
   mkdir -p "$CODEX_CFG_DIR"
-  block="$(codex_block "$1")"
-  {
-    if [ -f "$cfg" ]; then
-      sed "/^$CODEX_BEGIN\$/,/^$CODEX_END\$/d" "$cfg"
-    fi
-    printf '%s\n' "$block"
-  } > "$cfg.new"
-  mv "$cfg.new" "$cfg"
-  info "codex registration written: $cfg"
+  temporary="$(mktemp "$cfg.XXXXXX")"
+  if [ -f "$cfg" ] && ! codex_unmanaged "$cfg" > "$temporary"; then
+    rm -f "$temporary"
+    die 'Ambiguous/unmanaged mmhmem TOML needs manual review; Codex config unchanged.'
+  fi
+  if [ "$REMOVE" -eq 0 ]; then codex_block "$1" >> "$temporary"; printf '\n' >> "$temporary"; fi
+  if [ -f "$cfg" ]; then cp -p "$cfg" "$cfg.mmhmem.bak"; chmod --reference="$cfg" "$temporary" 2>/dev/null || true; fi
+  mv "$temporary" "$cfg"
+}
+set_codex_registration() {
+  if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] merge [mcp_servers.mmhmem] into $CODEX_CFG_DIR/config.toml"; return; fi
+  write_codex_registration "$1"
+  info "codex registration written: $CODEX_CFG_DIR/config.toml"
 }
 remove_codex_registration() {
-  cfg="$CODEX_CFG_DIR/config.toml"
-  if [ "$DRY_RUN" -eq 1 ]; then
-    info "[dry-run] remove [mcp_servers.mmhmem] from $cfg"
-    return 0
-  fi
-  [ -f "$cfg" ] || return 0
-  grep -q "^$CODEX_BEGIN\$" "$cfg" || return 0
-  sed "/^$CODEX_BEGIN\$/,/^$CODEX_END\$/d" "$cfg" > "$cfg.new"
-  mv "$cfg.new" "$cfg"
-  info "codex registration removed: $cfg"
+  if [ "$DRY_RUN" -eq 1 ]; then info "[dry-run] remove [mcp_servers.mmhmem] from $CODEX_CFG_DIR/config.toml"; return; fi
+  [ -f "$CODEX_CFG_DIR/config.toml" ] || return 0
+  write_codex_registration ''
+  info "codex registration removed: $CODEX_CFG_DIR/config.toml"
 }
 
 # want_agent NAME: true when the selection (or the default) includes it.
@@ -456,6 +476,11 @@ note_missing desktop "$([ -n "$DESKTOP_CFG_DIR" ] && echo 1 || echo 0)" "Claude 
 note_missing antigravity "$HAS_ANTIGRAVITY" "Antigravity"
 note_missing codex "$HAS_CODEX" "Codex CLI"
 [ -z "$missing_requested" ] || die "requested but not detected:$missing_requested"
+# Refuse ambiguous Codex edits before committing binary or worker changes.
+if [ "$GLOBAL" -eq 1 ] && want_agent codex && [ "$HAS_CODEX" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ -f "$CODEX_CFG_DIR/config.toml" ]; then
+  codex_unmanaged "$CODEX_CFG_DIR/config.toml" > /dev/null || die 'Ambiguous/unmanaged mmhmem TOML needs manual review; Codex config unchanged.'
+fi
+
 # --- optional worker setup -------------------------------------------------
 if [ "$REMOVE" -eq 0 ] && [ -z "$WORKER_MODEL" ] && [ -t 0 ]; then
   printf '\n  Optional: summary cache\n  ----------------------------------------\n'

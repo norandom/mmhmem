@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Offline platform simulation; optional verified candidate runs inside CI only.
 set -euo pipefail
+bash "$(dirname "$0")/test-codex-registration.sh"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 candidate=""; expected_sha256=""; report=""
 if [ "$#" -gt 0 ]; then

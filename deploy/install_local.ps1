@@ -290,37 +290,56 @@ function Codex-Block([string]$bin) {
     $esc = $bin.Replace('\', '\\')
     "$CodexBegin`n[mcp_servers.mmhmem]`ncommand = `"$esc`"`nargs = [`"stdio`"]`n$CodexEnd"
 }
+function Get-CodexUnmanagedLines([string[]]$lines) {
+    $keep = New-Object 'System.Collections.Generic.List[string]'
+    $managed = $false
+    foreach ($line in $lines) {
+        if ($line -match '^# BEGIN mmhmem \(managed by install_local\.(ps1|sh) -- do not edit\)$') {
+            if ($managed) { throw 'Nested mmhmem markers; Codex config unchanged.' }
+            $managed = $true; continue
+        }
+        if ($line -eq '# END mmhmem') {
+            if (-not $managed) { throw 'Unmatched mmhmem marker; Codex config unchanged.' }
+            $managed = $false; continue
+        }
+        if ($line.Contains('"""') -or $line.Contains(([string][char]39 * 3))) { throw 'Multiline TOML needs manual review; Codex config unchanged.' }
+        if ($managed) {
+            if ($line -notmatch '^\s*(#.*|\[mcp_servers\.mmhmem\]|command\s*=.*|args\s*=.*)?\s*$') { throw 'Custom managed mmhmem settings need manual review; Codex config unchanged.' }
+            continue
+        }
+        $normal = $line -replace '[\s"''\[\]]', ''
+        if ($normal -match '^mcp_servers\.mmhmem([.#=]|$)' -or $normal -match '^mcp_servers=' -or $normal -match '^mmhmem([.#=]|$)') {
+            throw 'Existing unmanaged mmhmem registration needs manual review; Codex config unchanged.'
+        }
+        $keep.Add($line)
+    }
+    if ($managed) { throw 'Unclosed mmhmem marker; Codex config unchanged.' }
+    return ,$keep.ToArray()
+}
+function Write-CodexRegistration([string]$cfg, [string[]]$lines) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $cfg) -Force | Out-Null
+    $temporary = $cfg + '.' + [guid]::NewGuid().ToString('N') + '.new'
+    try {
+        [IO.File]::WriteAllText($temporary, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $cfg) { [IO.File]::Replace($temporary, $cfg, ($cfg + '.mmhmem.bak')) }
+        else { [IO.File]::Move($temporary, $cfg) }
+    } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary } }
+}
 function Set-CodexRegistration([string]$bin) {
     $cfg = Join-Path $CodexCfgDir 'config.toml'
     if ($DryRun) { Info "[dry-run] merge [mcp_servers.mmhmem] into $cfg"; return }
-    New-Item -ItemType Directory -Path $CodexCfgDir -Force | Out-Null
-    $block = Codex-Block $bin
-    $lines = @()
-    if (Test-Path -LiteralPath $cfg) {
-        $lines = Get-Content -LiteralPath $cfg
-        $start = [Array]::IndexOf($lines, $CodexBegin)
-        if ($start -ge 0) {
-            $end = [Array]::IndexOf($lines, $CodexEnd)
-            if ($end -ge $start) {
-                $keep = @($lines[0..($start - 1)] + $lines[($end + 1)..($lines.Count - 1)] | Where-Object { $null -ne $_ })
-                $lines = $keep
-            }
-        }
-    }
-    ($lines + $block) | Set-Content -LiteralPath $cfg -Encoding UTF8
+    $lines = if (Test-Path -LiteralPath $cfg) { @(Get-Content -LiteralPath $cfg -Encoding UTF8) } else { @() }
+    $keep = Get-CodexUnmanagedLines $lines
+    Write-CodexRegistration $cfg @($keep + (Codex-Block $bin))
     Info "codex registration written: $cfg"
 }
 function Remove-CodexRegistration() {
     $cfg = Join-Path $CodexCfgDir 'config.toml'
     if ($DryRun) { Info "[dry-run] remove [mcp_servers.mmhmem] from $cfg"; return }
     if (-not (Test-Path -LiteralPath $cfg)) { return }
-    $lines = Get-Content -LiteralPath $cfg
-    $start = [Array]::IndexOf($lines, $CodexBegin)
-    if ($start -lt 0) { return }
-    $end = [Array]::IndexOf($lines, $CodexEnd)
-    if ($end -lt $start) { return }
-    $keep = @($lines[0..($start - 1)] + $lines[($end + 1)..($lines.Count - 1)] | Where-Object { $null -ne $_ })
-    $keep | Set-Content -LiteralPath $cfg -Encoding UTF8
+    $lines = @(Get-Content -LiteralPath $cfg -Encoding UTF8)
+    $keep = Get-CodexUnmanagedLines $lines
+    Write-CodexRegistration $cfg $keep
     Info "codex registration removed: $cfg"
 }
 
@@ -376,6 +395,12 @@ Note-Missing 'desktop' $HasDesktop 'Claude Desktop'
 Note-Missing 'antigravity' $HasAntigravity 'Antigravity'
 Note-Missing 'codex' $HasCodex 'Codex CLI'
 if ($MissingRequested.Count -gt 0) { Die ("requested but not detected: " + ($MissingRequested -join ' ')) }
+# Refuse ambiguous Codex edits before committing binary or worker changes.
+if ($Global -and (Want-Agent 'codex') -and $HasCodex -and -not $DryRun) {
+    $cfg = Join-Path $CodexCfgDir 'config.toml'
+    if (Test-Path -LiteralPath $cfg) { $null = Get-CodexUnmanagedLines @(Get-Content -LiteralPath $cfg -Encoding UTF8) }
+}
+
 # --- optional worker setup -------------------------------------------------
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
