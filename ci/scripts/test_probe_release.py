@@ -75,11 +75,18 @@ class ProbeTests(unittest.TestCase):
         self.assertNotIn("cases", result)
 
     def test_statistics_require_recorded_row_and_consistent_typed_totals(self):
-        values = {"avoided_input_tokens_est": 0, "avoided_input_tokens_client_reported": 0,
+        values = {"avoided_input_tokens_est": 0, "frontier_prompt_tokens_client_reported": 1234,
+                  "frontier_completion_tokens_client_reported": 56,
                   "worker_prompt_tokens": 0, "worker_completion_tokens": 0}
-        report = {"days": [{"day": "2026-11-02", "project": "p", "harness": "opencode", **values}],
+        report = {"days": [{"day": "2026-11-02", "project": "p", "harness": "opencode",
+                            "client_reported_sources": ["static-probe"], **values}],
                   "totals": values.copy()}
         validate_statistics(report, "p")
+        unreported = json.loads(json.dumps(report))
+        unreported["days"][0]["frontier_prompt_tokens_client_reported"] = 0
+        unreported["totals"]["frontier_prompt_tokens_client_reported"] = 0
+        with self.assertRaisesRegex(ValueError, "client_usage payload"):
+            validate_statistics(unreported, "p")
         with self.assertRaisesRegex(ValueError, "recorded session row"):
             validate_statistics({"days": [], "totals": values}, "p")
         report["totals"]["avoided_input_tokens_est"] = 1

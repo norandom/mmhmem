@@ -20,6 +20,8 @@ from release_support import ProbeWorkspace, TARGET, run, validate_identity
 TOOLS = {"session_resume_or_handoff", "smart_read", "boilerplate_write", "mem_search",
          "mem_get_observations", "mem_record_observation", "shunt_warmup", "shunt_prune",
          "mem_search_breadcrumbs"}
+# The probe's public client_usage report; `mmhmem stats --json` must echo it.
+CLIENT_USAGE = {"prompt_tokens": 1234, "completion_tokens": 56, "source": "static-probe"}
 
 
 def verify_binary(binary, expected_sha256):
@@ -331,7 +333,7 @@ def local_cases(binary, expected_version, validation_id):
                 raise ValueError(f"observation insertion returned no ID: {recorded}")
             observation_id = int(match[1])
             client.tool("session_resume_or_handoff", {**context, "updated_working_state_md": checkpoint,
-                        "client_usage": {"prompt_tokens": 1234, "completion_tokens": 56, "source": "static-probe"}})
+                        "client_usage": CLIENT_USAGE})
         # A second OS process must recover the first process's durable state.
         with McpProcess(binary, environment) as restarted:
             restarted.initialize(expected_version)
@@ -359,13 +361,18 @@ def validate_statistics(statistics, project):
     if not any(row.get("project") == project and row.get("harness") == "opencode"
                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", row.get("day", "")) for row in days):
         raise ValueError(f"statistics JSON missing recorded session row: {statistics}")
-    # Public client_usage creates a row; current CLI aggregates its existing
-    # estimate columns (zero for that row), not the usage stored in details.
-    for key in ("avoided_input_tokens_est", "avoided_input_tokens_client_reported",
+    for key in ("avoided_input_tokens_est", "frontier_prompt_tokens_client_reported",
+                "frontier_completion_tokens_client_reported",
                 "worker_prompt_tokens", "worker_completion_tokens"):
         if (type(totals.get(key)) is not int or any(type(row.get(key)) is not int for row in days)
                 or totals[key] != sum(row[key] for row in days)):
             raise ValueError(f"statistics JSON has invalid/inconsistent {key}: {statistics}")
+    # The public client_usage report (1234/56, "static-probe") must be reported
+    # as frontier tokens spent (client-usage-stats Requirement 1.1, 2.3).
+    if (totals["frontier_prompt_tokens_client_reported"] != CLIENT_USAGE["prompt_tokens"]
+            or totals["frontier_completion_tokens_client_reported"] != CLIENT_USAGE["completion_tokens"]
+            or not any(CLIENT_USAGE["source"] in row.get("client_reported_sources", []) for row in days)):
+        raise ValueError(f"statistics JSON does not report the client_usage payload: {statistics}")
 
 
 def probe(binary, expected_sha256, expected_version, validation_id, mode="local"):
