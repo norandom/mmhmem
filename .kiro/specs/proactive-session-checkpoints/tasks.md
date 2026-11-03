@@ -45,7 +45,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Depends: 3_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 3.1, 3.3, 4.1, 4.3, 4.6_
 
-- [ ] 5. Verify interruption recovery across transports and processes
+- [x] 5. Verify interruption recovery across transports and processes
   - Extend HTTP, stdio, and multiprocess coverage using an isolated store and no worker configuration.
   - Save checkpoint A, record later activity without saving state B, disconnect/terminate the client, and resume A through a fresh connection/process with its timestamp and separate activity.
   - Exercise missing-checkpoint cases with and without breadcrumbs, exact project isolation, redaction, state-size limits, and preserved worker notices.
@@ -64,6 +64,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Runtime verification, Guidance verification (explicit final integration)_
   - _Depends: 1, 2, 3, 4, 5_
   - _Requirements: 2.3, 4.3, 4.4, 4.5, 4.6_
+
 
 
 

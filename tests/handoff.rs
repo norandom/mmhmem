@@ -178,3 +178,93 @@ async fn history_without_checkpoint_is_exposed_over_http() {
     assert!(text.contains("No worker model configured"), "{text}");
     assert!(!text.contains("Checkpoint saved"), "{text}");
 }
+
+#[tokio::test]
+async fn new_http_session_recovers_saved_boundary_with_later_activity() {
+    let (_roots, _data, _logs, state) = test_state("secret-token");
+    let (port, handle) = spawn_server(state).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+    let mut session = mcp_init(&client, &base, "secret-token").await;
+    let working = format!(
+        "HTTP_CHECKPOINT_A\napi_key=sk-123456789012345678901234567890\n{}\nUNSAVED_TAIL",
+        "line\n".repeat(1600)
+    );
+    let args = serde_json::json!({"project":"http-boundary", "agent_harness":"opencode",
+        "updated_working_state_md":working});
+    let (_, body) = mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        10,
+        "session_resume_or_handoff",
+        &args.to_string(),
+    )
+    .await;
+    let ack = tool_text(&body);
+    assert!(ack.contains("Checkpoint saved"), "{ack}");
+    let epoch = ack
+        .split("epoch ms: ")
+        .nth(1)
+        .unwrap()
+        .split(')')
+        .next()
+        .unwrap()
+        .to_string();
+    let args = serde_json::json!({"project":"http-boundary", "agent_harness":"opencode", "query":"later-work"});
+    mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        11,
+        "mem_search",
+        &args.to_string(),
+    )
+    .await;
+    drop(session);
+    drop(client);
+    // A new client and MCP session reuse the running service and its store.
+    let client = reqwest::Client::new();
+    let mut session = mcp_init(&client, &base, "secret-token").await;
+    let args = serde_json::json!({"project":"http-boundary", "agent_harness":"claude-code"});
+    let (status, body) = mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        12,
+        "session_resume_or_handoff",
+        &args.to_string(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let text = tool_text(&body);
+    assert!(
+        text.contains("HTTP_CHECKPOINT_A") && text.contains(&format!("epoch ms: {epoch}")),
+        "{text}"
+    );
+    assert!(!text.contains("UNSAVED_TAIL"), "size cap retained");
+    assert!(
+        !text.contains("sk-123456789012345678901234567890"),
+        "redaction retained"
+    );
+    assert!(text.contains("Recorded Activity") && text.contains("mem_search"));
+    assert!(text.contains("No worker model configured"));
+    let args = serde_json::json!({"project":"http-boundary-other", "agent_harness":"claude-code"});
+    let (_, body) = mcp_tool(
+        &client,
+        &base,
+        "secret-token",
+        &mut session,
+        13,
+        "session_resume_or_handoff",
+        &args.to_string(),
+    )
+    .await;
+    let isolated = tool_text(&body);
+    assert!(isolated.contains("no saved state or recorded prior activity"));
+    assert!(!isolated.contains("HTTP_CHECKPOINT_A"));
+    handle.abort();
+}

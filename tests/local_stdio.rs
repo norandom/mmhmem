@@ -384,3 +384,51 @@ async fn resume_has_no_worker_notice_when_configured() {
     let (ok, _stderr) = mcp.shutdown().await;
     assert!(ok);
 }
+
+#[tokio::test]
+async fn failed_checkpoint_over_stdio_has_no_receipt_and_preserves_state() {
+    let data = tempfile::tempdir().unwrap();
+    let mut mcp = StdioMcp::new(data.path()).await;
+    mcp.handshake().await;
+    let args = json!({"name":"session_resume_or_handoff", "arguments":{
+        "project":"failure", "agent_harness":"opencode",
+        "updated_working_state_md":"PERSISTED_A\napi_key=sk-123456789012345678901234567890\n"
+    }});
+    let saved = mcp.request("tools/call", args).await;
+    let saved_text = saved["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(saved_text.contains("Checkpoint saved"));
+    let db = mmhmem::storage::db::Db::open(data.path()).unwrap();
+    db.with_conn(|conn| {
+        conn.execute_batch("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON session_breadcrumbs WHEN NEW.tool_name = 'session_handoff' BEGIN SELECT RAISE(ABORT, 'fixture checkpoint failure'); END;")?;
+        Ok(())
+    }).await.unwrap();
+    let failed = mcp.request("tools/call", json!({"name":"session_resume_or_handoff", "arguments":{
+        "project":"failure", "agent_harness":"opencode", "updated_working_state_md":"REPLACEMENT_B"
+    }})).await;
+    assert!(!failed.to_string().contains("Checkpoint saved"), "{failed}");
+    assert!(
+        failed.get("error").is_some() || failed["result"]["isError"] == true,
+        "{failed}"
+    );
+    let recovered = mcp
+        .request(
+            "tools/call",
+            json!({"name":"session_resume_or_handoff", "arguments":{
+                "project":"failure", "agent_harness":"opencode"
+            }}),
+        )
+        .await;
+    let text = recovered["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("recovery response: {recovered}"));
+    assert!(
+        text.contains("PERSISTED_A") && !text.contains("REPLACEMENT_B"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("sk-123456789012345678901234567890"),
+        "{text}"
+    );
+    assert!(text.contains("No worker model configured"));
+    assert!(mcp.shutdown().await.0);
+}

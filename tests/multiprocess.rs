@@ -405,3 +405,132 @@ async fn startup_failure_includes_child_stderr() {
     // No write race: invalid local state fails before protocol processing.
     child.wait_for(1).await;
 }
+
+fn saved_epoch(text: &str) -> i64 {
+    text.split("epoch ms: ")
+        .nth(1)
+        .unwrap()
+        .split(')')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn abrupt_exit_recovers_checkpoint_not_unsaved_work() {
+    let data = tempfile::tempdir().unwrap();
+    let mut a = StdioMcp::new(data.path()).await;
+    a.handshake().await;
+    let checkpoint = a
+        .call_tool(
+            "session_resume_or_handoff",
+            json!({
+                "project":"interrupted", "agent_harness":"opencode",
+                "updated_working_state_md":"CHECKPOINT_A verified; next: continue"
+            }),
+        )
+        .await;
+    assert!(checkpoint.contains("Checkpoint saved"), "{checkpoint}");
+    let epoch = saved_epoch(&checkpoint);
+    let activity = a
+        .call_tool(
+            "mem_search",
+            json!({
+                "project":"interrupted", "agent_harness":"opencode", "query":"LATER_ACTIVITY"
+            }),
+        )
+        .await;
+    assert!(!activity.contains("error"), "{activity}");
+    // State B exists only in the harness; no checkpoint request has been sent.
+    let unsaved_state = "UNSAVED_STATE_B";
+    a.child.kill().await.unwrap();
+    a.child.wait().await.unwrap();
+    drop(a);
+
+    let mut b = StdioMcp::new(data.path()).await;
+    b.handshake().await;
+    let resumed = b
+        .call_tool(
+            "session_resume_or_handoff",
+            json!({
+                "project":"interrupted", "agent_harness":"claude-code"
+            }),
+        )
+        .await;
+    assert!(resumed.contains("CHECKPOINT_A"), "{resumed}");
+    assert!(!resumed.contains(unsaved_state), "{resumed}");
+    assert_eq!(saved_epoch(&resumed), epoch);
+    assert!(resumed.contains("Recorded Activity") && resumed.contains("mem_search"));
+    assert!(resumed.contains("No worker model configured"));
+    let isolated = b
+        .call_tool(
+            "session_resume_or_handoff",
+            json!({
+                "project":"interrupted-other", "agent_harness":"claude-code"
+            }),
+        )
+        .await;
+    assert!(!isolated.contains("CHECKPOINT_A"));
+    assert!(isolated.contains("no saved state or recorded prior activity"));
+    assert!(b.shutdown().await);
+}
+
+#[tokio::test]
+async fn committed_checkpoint_survives_without_reading_its_reply() {
+    let data = tempfile::tempdir().unwrap();
+    let mut a = StdioMcp::new(data.path()).await;
+    a.handshake().await;
+    a.send(
+        &json!({"jsonrpc":"2.0", "id":50, "method":"tools/call", "params":{
+            "name":"session_resume_or_handoff", "arguments":{
+                "project":"lost-reply", "agent_harness":"opencode",
+                "updated_working_state_md":"COMMITTED_WITHOUT_CLIENT_ACK"
+            }
+        }})
+        .to_string(),
+    )
+    .await;
+    // Observe commit through a separate connection, never the unread MCP reply.
+    let db = Db::open(data.path()).unwrap();
+    timeout(READ_TIMEOUT, async {
+        loop {
+            let committed = db
+                .with_conn(|conn| {
+                    Ok(conn.query_row(
+                        "SELECT COUNT(*) FROM active_sessions WHERE project='lost-reply'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )? == 1)
+                })
+                .await
+                .unwrap();
+            if committed {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("checkpoint commit observed before termination");
+    a.child.kill().await.unwrap();
+    a.child.wait().await.unwrap();
+    drop(a);
+    drop(db);
+    let mut b = StdioMcp::new(data.path()).await;
+    b.handshake().await;
+    let resumed = b
+        .call_tool(
+            "session_resume_or_handoff",
+            json!({
+                "project":"lost-reply", "agent_harness":"opencode"
+            }),
+        )
+        .await;
+    assert!(
+        resumed.contains("COMMITTED_WITHOUT_CLIENT_ACK"),
+        "{resumed}"
+    );
+    assert!(resumed.contains("Checkpoint saved at:"));
+    assert!(b.shutdown().await);
+}
