@@ -8,6 +8,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod hook;
 pub mod mcp;
 pub mod services;
 pub mod storage;

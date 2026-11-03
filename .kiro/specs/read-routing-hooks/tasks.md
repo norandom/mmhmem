@@ -12,7 +12,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - Done when the existing shunt tests still pass, a new test shows the function and the engine agree on security-critical and ordinary paths, and the new event names serialize as specified.
   - _Requirements: 2.3, 5.4_
 
-- [ ] 1.2 (P) Implement the read decision with its unit tests
+- [x] 1.2 (P) Implement the read decision with its unit tests
   - Decide a read request in the design's order: exact range, missing or not a regular file, security rule, no worker, not text, below threshold, otherwise redirect.
   - Count lines by streaming with an early stop at the threshold, and treat a NUL byte in the first 8 KiB as not text.
   - Done when a decision-matrix test covers every pass reason and the redirect, and a 10 MiB text file is decided in under 200 ms.
@@ -114,3 +114,4 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 ## Implementation Notes
 
 - Task 1.1 (Sonnet, inline review): `src/services/shunt.rs` is at 489 of 500 lines, so later work must not grow it. `tests/audit_redaction.rs` pins the event-type count (now 20).
+- Task 1.2 (Opus, Opus reviewer APPROVED): line count matches the server's `str::lines`; `Redirect.lines` is capped at the threshold and means "at least N" (redirect text must say so). Parent applied the reviewer's suggestion: invalid UTF-8 in the 8 KiB probe now passes as NotText, because `smart_read` reads with `read_to_string`. Open suggestions: a byte cap for huge files with few newlines, and a test pinning early stop.
