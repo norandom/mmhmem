@@ -35,7 +35,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Depends: 2_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1, 4.3, 4.6_
 
-- [ ] 4. Add workflow and distribution regression checks
+- [x] 4. Add workflow and distribution regression checks
   - Add the guidance check and invoke it from the existing marketplace gate, preserving the existing distribution pipeline.
   - Cover initial objective, all four milestone triggers, changed/unchanged final response, advance-notice clear/handoff, direct Ctrl+C, failed save, and history-only recovery across shipped instructions.
   - Check token budget, canonical/package parity, and recap consistency; review semantic scenarios alongside mechanical assertions.
@@ -64,6 +64,7 @@ All tasks retain the existing LOC, redaction, isolation, and size-cap gates.
   - _Boundary: Runtime verification, Guidance verification (explicit final integration)_
   - _Depends: 1, 2, 3, 4, 5_
   - _Requirements: 2.3, 4.3, 4.4, 4.5, 4.6_
+
 
 
 
