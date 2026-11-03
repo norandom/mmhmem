@@ -6,7 +6,7 @@ apply only to the core tasks after foundation completion; shared fixtures are fr
 before those tasks start. Documentation updates accompany their implementation or
 verification task rather than forming standalone work.
 
-- [ ] 1. Establish shared verification foundations
+- [x] 1. Establish shared verification foundations
 - [x] 1.1 Define executable owned-instruction fixtures and test drivers
   - Cover UTF-8, BOM, LF/CRLF, no final newline, user text, valid ownership, malformed markers, and dedicated-file conflicts.
   - Define byte-exact installation, update, removal, and no-op outputs, including cross-OS exchange cases.
@@ -14,7 +14,7 @@ verification task rather than forming standalone work.
   - _Boundary: Owned Markdown Update Contract test infrastructure_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 1.2 Establish isolated adoption-test infrastructure and prerequisite reporting
+- [x] 1.2 Establish isolated adoption-test infrastructure and prerequisite reporting
   - Add the opt-in test entrypoint, synthetic eligible repository, test-owned store, counting worker, process timeouts, and cleanup.
   - Check harness availability, CLI capabilities, model settings, and existing authentication without copying credentials or private conversations.
   - Define allowlisted report fields, isolated-CI versus authenticated-local modes, and explicit PASS, FAIL, and NOT_VERIFIED outcomes.
@@ -135,3 +135,6 @@ verification task rather than forming standalone work.
 - Task-graph sanity review: PASS (independent); no blocking findings.
 - Tasks remain unapproved until human review under the project phase gate.
 
+
+## Implementation Notes
+- Adoption subprocesses must drain stdout/stderr concurrently while enforcing timeout and kill/reap; flood-output and delayed-write regressions cover both.
