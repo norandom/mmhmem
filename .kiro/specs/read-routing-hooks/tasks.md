@@ -20,7 +20,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Depends: 1.1_
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.3_
 
-- [ ] 1.3 (P) Recognise whole-file reads in shell commands
+- [x] 1.3 (P) Recognise whole-file reads in shell commands
   - Accept only one simple command that reads one whole file (`cat`, `type`, `less`, `more`, `Get-Content` and its aliases without range options), resolving the path against the working directory.
   - Reject pipes, redirects, command separators, subshells, substitutions, globs, several files, partial readers and any `Get-Content` range option.
   - Unwrap shell-invocation arrays such as `bash -lc "<script>"` before recognising.
@@ -115,3 +115,4 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 
 - Task 1.1 (Sonnet, inline review): `src/services/shunt.rs` is at 489 of 500 lines, so later work must not grow it. `tests/audit_redaction.rs` pins the event-type count (now 20).
 - Task 1.2 (Opus, Opus reviewer APPROVED): line count matches the server's `str::lines`; `Redirect.lines` is capped at the threshold and means "at least N" (redirect text must say so). Parent applied the reviewer's suggestion: invalid UTF-8 in the 8 KiB probe now passes as NotText, because `smart_read` reads with `read_to_string`. Open suggestions: a byte cap for huge files with few newlines, and a test pinning early stop.
+- Task 1.3 (Opus, Opus reviewer APPROVED): `Get-Content -Raw` is accepted (it reads the whole file). Parent added the reviewer's hardening: any Unicode whitespace other than space and tab means not recognised. Requirement 2.6 corrected: `head`/`tail` are partial readers and pass. For task 2.1: `recognise` has no shell dialect, so a few dialect-specific false positives exist (bash `type x`, Git Bash `cat src\\main.rs`), all recoverable through the repeat window; paths are joined without normalisation.

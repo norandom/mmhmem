@@ -78,7 +78,7 @@ never obstructed.
 3. When the file is below the line threshold, is security-critical by the shunt engine's rules, is not a regular text file, or does not exist, the read-routing hook shall let the read proceed.
 4. Where no worker model is configured for mmhmem, the read-routing hook shall let every read proceed, because no summary can be produced.
 5. When an agent repeats the same full read of the same file shortly after a redirect, the read-routing hook shall let it proceed, so an agent that needs the whole file is never deadlocked.
-6. Where a harness lets the hook intercept shell commands, the read-routing hook shall apply criteria 2.1 to 2.5 to whole-file shell reads (such as `cat`, `head`, `tail` or `Get-Content` on a single file) and shall let filtered, piped or multi-file commands proceed.
+6. Where a harness lets the hook intercept shell commands, the read-routing hook shall apply criteria 2.1 to 2.5 to whole-file shell reads (such as `cat`, `type` or `Get-Content` on a single file) and shall let partial readers (`head`, `tail`), filtered, piped or multi-file commands proceed. (Corrected 2026-11-03 during task 1.3: `head` and `tail` print only part of a file, as the approved design already states.)
 7. The read-routing hook shall never decline edit, write or search tools.
 8. When an agent edits a file it was redirected away from, the edit shall succeed after an exact-range read of the lines it changes; if a harness requires a full read before editing, the read-routing hook shall let that read proceed.
 

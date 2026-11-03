@@ -5,6 +5,8 @@
 //! target file's metadata and a bounded prefix of its bytes, never the
 //! network, configuration or secrets (the caller passes [`HookSettings`]).
 
+pub mod shell;
+
 use std::path::PathBuf;
 
 /// One native read request, as mapped from a harness tool call.
