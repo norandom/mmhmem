@@ -15,7 +15,7 @@ function Invoke-Helper {
     $ErrorActionPreference = 'Continue'
     Push-Location -LiteralPath $WorkDir
     try {
-        $out = & $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper @Arguments 2>&1 | Out-String
+        $out = & $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper @Arguments 2>&1 | ForEach-Object { [string]$_ } | Out-String  # whole lines: 5.1 wraps error records at console width
         $code = $LASTEXITCODE
     } finally { Pop-Location; $ErrorActionPreference = $previous }
     return @{ Code = $code; Out = $out }
@@ -259,6 +259,55 @@ try {
     Check ($r.Code -eq 0 -and $r.Out -match '(?m)\binstalled\b' -and $r.Out -notmatch 'not installed') 'status reports installed' $r.Out
     $r = Invoke-Helper @('status', '-Harness', 'claude', '-SettingsPath', (Join-Path $dir 'none.json'), '-ManagedSettingsPath', $managed)
     Check ($r.Code -eq 0 -and $r.Out -match 'not installed') 'status reports not installed' $r.Out
+
+    # 11b. managed-settings edge cases follow Claude Code: empty is {}, a non-object blocks, a denied read is skipped
+    $dir = Case 'policy-empty'
+    $settings = Join-Path $dir 'settings.json'
+    $managed = Join-Path $dir 'ClaudeCode/managed-settings.json'
+    Write-Text $managed " `r`n`t"
+    $r = Invoke-Helper @('install', '-Harness', 'claude', '-Binary', $bin, '-SettingsPath', $settings, '-ManagedSettingsPath', $managed)
+    Check ($r.Code -eq 0 -and (Get-Ours (Read-Json $settings)).Count -eq 1) 'empty managed settings file counts as {}' $r.Out
+    $nonObject = [ordered]@{ 'array' = '[]'; 'string' = '"x"' }
+    foreach ($kind in $nonObject.Keys) {
+        $dir = Case ('policy-nonobject-' + $kind)
+        $settings = Join-Path $dir 'settings.json'
+        $managed = Join-Path $dir 'ClaudeCode/managed-settings.json'
+        Write-Text $managed $nonObject[$kind]
+        $r = Invoke-Helper @('install', '-Harness', 'claude', '-Binary', $bin, '-SettingsPath', $settings, '-ManagedSettingsPath', $managed)
+        Check ($r.Code -ne 0 -and ($r.Out -replace '\s+', ' ') -match 'managed-settings\.json is not a JSON object' -and -not (Test-Path -LiteralPath $settings)) "managed $kind top level refuses install" $r.Out
+    }
+    $dir = Case 'policy-dropin-nonobject'
+    $settings = Join-Path $dir 'settings.json'
+    $managed = Join-Path $dir 'ClaudeCode/managed-settings.json'
+    Write-Text (Join-Path $dir 'ClaudeCode/managed-settings.d/20-bad.json') '[1]'
+    $r = Invoke-Helper @('install', '-Harness', 'claude', '-Binary', $bin, '-SettingsPath', $settings, '-ManagedSettingsPath', $managed)
+    Check ($r.Code -ne 0 -and ($r.Out -replace '\s+', ' ') -match '20-bad\.json is not a JSON object' -and -not (Test-Path -LiteralPath $settings)) 'drop-in with a non-object top level refuses install' $r.Out
+    # Dot-named drop-ins are ignored, as Claude Code ignores hidden files there.
+    $dir = Case 'policy-dropin-dotfile'
+    $settings = Join-Path $dir 'settings.json'
+    $managed = Join-Path $dir 'ClaudeCode/managed-settings.json'
+    Write-Text (Join-Path $dir 'ClaudeCode/managed-settings.d/.30-off.json') '{ "disableAllHooks": true }'
+    $r = Invoke-Helper @('install', '-Harness', 'claude', '-Binary', $bin, '-SettingsPath', $settings, '-ManagedSettingsPath', $managed)
+    Check ($r.Code -eq 0 -and (Test-Path -LiteralPath $settings)) 'dot-named drop-in is ignored' $r.Out
+    $dir = Case 'policy-denied'
+    $settings = Join-Path $dir 'settings.json'
+    $managed = Join-Path $dir 'ClaudeCode/managed-settings.json'
+    Write-Text $managed '{"disableAllHooks": true}'
+    $denied = $false
+    # (RD) denies the contents only: denying (R) also removes READ_CONTROL, and
+    # then icacls cannot lift the deny again.
+    & icacls $managed /deny "${env:USERNAME}:(RD)" 2>&1 | Out-Null
+    try {
+        try { [IO.File]::ReadAllText($managed) | Out-Null } catch [UnauthorizedAccessException] { $denied = $true }
+        if ($denied) {
+            $r = Invoke-Helper @('install', '-Harness', 'claude', '-Binary', $bin, '-SettingsPath', $settings, '-ManagedSettingsPath', $managed)
+            Check ($r.Code -eq 0 -and $r.Out -match 'permission denied' -and $r.Out -match 'managed-settings\.json' -and (Get-Ours (Read-Json $settings)).Count -eq 1) 'permission-denied managed file is skipped with a note' $r.Out
+        } else { Write-Host 'skip permission-denied managed file: this host could not deny read access to the current user' }
+    } finally {
+        $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        & icacls $managed /remove:d "${env:USERNAME}" 2>&1 | Out-Null
+        $ErrorActionPreference = $previous
+    }
 
     # 12. show and dry runs write nothing
     $dir = Case 'show'

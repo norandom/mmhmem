@@ -320,16 +320,32 @@ function Get-PolicyBlock($Root, [string]$Source, [switch]$Managed) {
     }
     return $null
 }
+# Claude Code starts without a managed source the OS denies it; say so instead of staying silent.
+function Write-DeniedNote([string]$Path) {
+    [Console]::Error.WriteLine("[mmhmem] note: managed settings $Path cannot be read by this user (permission denied); Claude Code also runs without it, so it was not checked.")
+}
 function Get-ManagedBlocks($Def, [string]$ManagedPath, [bool]$UseRegistry) {
     $blocks = @()
     $files = @()
     if ([IO.File]::Exists($ManagedPath)) { $files += $ManagedPath }
     $dropIns = Join-Path ([IO.Path]::GetDirectoryName($ManagedPath)) 'managed-settings.d'
-    if ([IO.Directory]::Exists($dropIns)) { $files += @(Get-ChildItem -LiteralPath $dropIns -Filter '*.json' -File | Sort-Object Name | ForEach-Object { $_.FullName }) }
+    if ([IO.Directory]::Exists($dropIns)) {
+        try { $files += @(Get-ChildItem -LiteralPath $dropIns -Filter '*.json' -File -ErrorAction Stop | Where-Object { $_.Name.EndsWith('.json', [StringComparison]::OrdinalIgnoreCase) -and -not $_.Name.StartsWith('.') } | Sort-Object Name | ForEach-Object { $_.FullName }) }
+        catch {
+            if ($_.Exception -is [UnauthorizedAccessException]) { Write-DeniedNote $dropIns }
+            else { $blocks += "managed settings $dropIns cannot be read; Claude Code refuses to start until it is fixed" }
+        }
+    }
     foreach ($file in $files) {
-        try { $root = ConvertFrom-JsonText ([IO.File]::ReadAllText($file)) }
-        catch { $blocks += "managed settings $file cannot be parsed; Claude Code refuses to start until it is fixed"; continue }
-        $block = Get-PolicyBlock $root "managed settings $file" -Managed
+        $source = "managed settings $file"
+        try { $text = [IO.File]::ReadAllText($file) }
+        catch [UnauthorizedAccessException] { Write-DeniedNote $file; continue }
+        catch { $blocks += "$source cannot be parsed; Claude Code refuses to start until it is fixed"; continue }
+        if ($text.Trim().Length -eq 0) { continue }  # an empty managed settings file counts as {}
+        try { $root = ConvertFrom-JsonText $text }
+        catch { $blocks += "$source cannot be parsed; Claude Code refuses to start until it is fixed"; continue }
+        if ($root.K -ne 'o') { $blocks += "$source is not a JSON object; Claude Code refuses to start until it is fixed"; continue }
+        $block = Get-PolicyBlock $root $source -Managed
         if ($block) { $blocks += $block }
     }
     if ($UseRegistry) {
@@ -337,8 +353,9 @@ function Get-ManagedBlocks($Def, [string]$ManagedPath, [bool]$UseRegistry) {
             $value = $null
             try { $value = (Get-ItemProperty -LiteralPath $key -Name 'Settings' -ErrorAction Stop).Settings } catch { continue }
             if (-not $value) { continue }
-            # Unparsable policy blocks, as an unparsable managed file does.
+            # Unparsable or non-object policy blocks, as an unparsable managed file does.
             try { $root = ConvertFrom-JsonText ([string]$value) } catch { $blocks += "managed settings registry $key\Settings is not valid JSON"; continue }
+            if ($root.K -ne 'o') { $blocks += "managed settings registry $key\Settings is not a JSON object; Claude Code refuses to start until it is fixed"; continue }
             $block = Get-PolicyBlock $root "managed settings registry $key\Settings" -Managed
             if ($block) { $blocks += $block }
         }
