@@ -401,6 +401,17 @@ if ($Global -and (Want-Agent 'codex') -and $HasCodex -and -not $DryRun) {
     if (Test-Path -LiteralPath $cfg) { $null = Get-CodexUnmanagedLines @(Get-Content -LiteralPath $cfg -Encoding UTF8) }
 }
 
+# Validate every selected routing destination before any harness/config writes.
+. (Join-Path $PSScriptRoot 'routing_onboarding.ps1')
+$RoutingPlans = @{}
+foreach ($harness in @('claude','opencode')) {
+    $detected = if ($harness -eq 'claude') { $HasClaude } else { $HasOpenCode }
+    if ((Want-Agent $harness) -and $detected) {
+        $routingProject = if ($ProjectDir) { $ProjectDir } else { $HOME }
+        $RoutingPlans[$harness] = New-HarnessRoutingPlan -Harness $harness -UserRoot $HOME -Project $routingProject -Global:$Global -Remove:$Remove
+    }
+}
+
 # --- optional worker setup -------------------------------------------------
 if (-not $Remove -and -not $WorkerModel -and $Interactive) {
     Write-Host "`n  Optional: summary cache`n  ----------------------------------------"
@@ -489,6 +500,7 @@ if ((Want-Agent 'claude') -and $HasClaude) {
     Set-Skill (Join-Path $HOME '.claude\skills\unified-memory')
     $claudeCmdDir = if ($Global) { Join-Path $HOME '.claude\commands' } else { Join-Path $ProjectDir '.claude\commands' }
     Set-Command $CommandSrcClaude (Join-Path $claudeCmdDir 'mmhmem-recap.md')
+    Complete-HarnessRouting -Plan $RoutingPlans['claude'] -DryRun:$DryRun
     $Registered.Add('claude-code') | Out-Null
 }
 
@@ -504,6 +516,7 @@ if ((Want-Agent 'opencode') -and $HasOpenCode) {
     if ($Global) { Set-Skill (Join-Path $HOME '.config\opencode\skills\unified-memory') }
     $openCodeCmdDir = if ($Global) { Join-Path $HOME '.config\opencode\command' } else { Join-Path $ProjectDir '.opencode\command' }
     Set-Command $CommandSrcOpenCode (Join-Path $openCodeCmdDir 'mmhmem-recap.md')
+    Complete-HarnessRouting -Plan $RoutingPlans['opencode'] -DryRun:$DryRun
     $Registered.Add('opencode') | Out-Null
 }
 

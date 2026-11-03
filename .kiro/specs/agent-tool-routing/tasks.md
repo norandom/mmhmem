@@ -60,7 +60,7 @@ verification task rather than forming standalone work.
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
 - [ ] 3. Integrate safe routing onboarding with both installers
-- [ ] 3.1 Integrate Windows selection, preflight, bootstrap, and removal
+- [x] 3.1 Integrate Windows selection, preflight, bootstrap, and removal
   - Resolve selected global/project destinations and plan all instruction changes before selected harness writes.
   - Refuse inconsistent configuration overrides and legacy/unknown-version ownership conflicts; report disabled or unverified loading without changing user controls.
   - Integrate guidance/helpers with registration, removal, and dry-run; fetch required removal helper payloads through the root bootstrap.

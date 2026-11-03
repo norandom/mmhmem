@@ -61,6 +61,14 @@ $installer = [scriptblock]::Create((irm https://raw.githubusercontent.com/norand
 Removal preserves your memory and worker settings. Claude Desktop detection
 supports both traditional and MSIX installations.
 
+Selected Claude Code installations add owned guidance to `.claude/rules/mmhmem.md`
+(global or project scope). OpenCode uses global `.config/opencode/AGENTS.md` or
+project `AGENTS.md`. Existing text is preserved; changed files retain one
+`.mmhmem.bak` backup. Removal strips only the owned section. Start a fresh agent
+session after updating. Unsupported configuration-root overrides or ambiguous
+instruction ownership stop onboarding before integrations are changed; use the
+default configuration or resolve the reported conflict first.
+
 ### macOS — Apple Silicon or Intel
 
 ```sh
