@@ -65,6 +65,12 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=normal)"
           echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "validation_id=ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      # Memory-guard calibration (ci-build-time task 4.2): sample used MiB
+      # every 5 s outside the checkout; the report step below reads the peak.
+      - name: Sample runner memory during the gate
+        shell: bash
+        run: |
+          ( while :; do free -m | awk '/^Mem:/ {print $3}'; sleep 5; done ) > "$RUNNER_TEMP/mem-used-mib.log" 2>&1 &
       - name: musl clippy, tests and release, otel clippy, fmt, docker image, compose config, deploy artifacts, tokei
         id: gate
         uses: dagger/dagger-for-github@v8.4.1
@@ -80,6 +86,13 @@ jobs:
         env:
           GATE_OUTPUT: ${{ steps.gate.outputs.output }}
         run: python3 ci/scripts/timing_summary.py
+      - name: Write peak runner memory to the job summary
+        if: always()
+        shell: bash
+        run: |
+          peak=$(sort -n "$RUNNER_TEMP/mem-used-mib.log" 2>/dev/null | tail -n 1)
+          total=$(free -m | awk '/^Mem:/ {print $2}')
+          echo "Peak runner memory used during the gate: ${peak:-unknown} MiB of ${total} MiB" >> "$GITHUB_STEP_SUMMARY"
       - name: Export the same verified Linux bundle
         uses: dagger/dagger-for-github@v8.4.1
         with:
