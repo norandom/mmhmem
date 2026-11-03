@@ -1,0 +1,50 @@
+name: Publish release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish from its successful main CI run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'norandom/mmhmem' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Always execute trusted default-branch publication code. Binaries come
+      # exclusively from the exact tagged commit's successful main CI run.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Validate publisher regressions
+        shell: pwsh
+        run: |
+          ./scripts/test-publish-linux-release.ps1
+          ./scripts/test-publish-ci-release.ps1
+      - name: Publish verified artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          SOURCE_RUN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+        run: ./scripts/publish-ci-release.ps1 -Tag $env:RELEASE_TAG -RunId $env:SOURCE_RUN

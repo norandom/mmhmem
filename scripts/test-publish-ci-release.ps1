@@ -1,0 +1,60 @@
+#Requires -Version 5.1
+# Offline regression checks. No GitHub writes or executable fixtures.
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'publish-ci-release.ps1') -Tag 'v0.3.0' -RunId '123'
+if ($Tag -cne 'v0.3.0' -or $RunId -cne '123') {throw 'Entrypoint parameters were lost while loading the Linux publisher'}
+$scratch=New-ReleaseScratch
+function Assert-Rejected([scriptblock]$Action) {
+    $rejected=$false
+    try {& $Action} catch {$rejected=$true}
+    if (-not $rejected) {throw 'Invalid release input was accepted'}
+}
+Assert-CiReleaseTag 'v0.3.0'
+foreach ($bad in @('main','v0.3','v01.3.0','v0.3.0-rc1','v0.3.0;echo bad')) {Assert-Rejected {Assert-CiReleaseTag $bad}}
+$revision='a'*40
+$validRun=@{id=123;head_sha=$revision;event='push';head_branch='main';status='completed';conclusion='success';path='.github/workflows/ci.yml';repository=@{full_name='norandom/mmhmem'};head_repository=@{full_name='norandom/mmhmem'}}
+Assert-CiReleaseRun $validRun $revision
+foreach ($change in @(@('event','pull_request'),@('head_sha',('b'*40)),@('head_branch','feature'),@('status','in_progress'),@('conclusion','failure'),@('path','.github/workflows/other.yml'))) {
+    $bad=$validRun.Clone();$bad[$change[0]]=$change[1]
+    Assert-Rejected {Assert-CiReleaseRun $bad $revision}
+}
+$bad=$validRun.Clone();$bad.head_repository=@{full_name='fork/mmhmem'}
+Assert-Rejected {Assert-CiReleaseRun $bad $revision}
+foreach ($relative in @('windows','macos/release','macos/x86_64-apple-darwin/release')) {New-Item -ItemType Directory -Path (Join-Path $scratch $relative) -Force|Out-Null}
+foreach ($relative in @('windows/mmhmem.exe','macos/release/mmhmem','macos/x86_64-apple-darwin/release/mmhmem')) {[IO.File]::WriteAllText((Join-Path $scratch $relative),'synthetic fixture')}
+$assets=Get-CiNativeAssets $scratch
+if ($assets.Count -ne 3 -or $assets['mmhmem-macos-aarch64'] -notmatch '[\\/]macos[\\/]release[\\/]mmhmem$') {throw 'Native mapping mismatch'}
+[IO.File]::WriteAllText((Join-Path $scratch 'windows/extra.exe'),'extra')
+Assert-Rejected {Get-CiNativeAssets $scratch}
+Remove-Item -LiteralPath (Join-Path $scratch 'windows/extra.exe')
+[IO.File]::WriteAllText((Join-Path $scratch 'windows/mmhmem.exe'),'')
+Assert-Rejected {Get-CiNativeAssets $scratch}
+$script:UploadCount=0
+$script:RemoteContent='expected asset bytes'
+$script:Published=$false
+$script:HasAsset=$false
+function Get-ReleaseApi([string]$Endpoint) {
+    return [pscustomobject]@{draft=(-not $script:Published);assets=$(if($script:HasAsset){@([pscustomobject]@{name='native.bin'})}else{@()})}
+}
+function Invoke-ReleaseGh([string[]]$Arguments) {
+    if ($Arguments[0] -ne 'release') {throw 'Unexpected mocked command'}
+    if ($Arguments[1] -eq 'upload') {$script:UploadCount++;return ''}
+    if ($Arguments[1] -eq 'download') {
+        $destination=$Arguments[($Arguments.IndexOf('--dir')+1)]
+        [IO.File]::WriteAllText((Join-Path $destination 'native.bin'),$script:RemoteContent)
+        return ''
+    }
+    throw 'Unexpected mocked mutation'
+}
+$path=Join-Path $scratch 'native.bin';[IO.File]::WriteAllText($path,'expected asset bytes')
+Send-CiReleaseAsset 'v0.3.0' $path $scratch
+if ($script:UploadCount -ne 1) {throw 'Missing asset was not uploaded'}
+$script:HasAsset=$true
+Send-CiReleaseAsset 'v0.3.0' $path $scratch
+if ($script:UploadCount -ne 1) {throw 'Existing identical asset was replaced'}
+$script:RemoteContent='conflicting bytes'
+Assert-Rejected {Send-CiReleaseAsset 'v0.3.0' $path $scratch}
+$script:Published=$true
+Assert-Rejected {Send-CiReleaseAsset 'v0.3.0' $path $scratch}
+if ($script:UploadCount -ne 1) {throw 'Conflict caused an upload'}
+Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection'

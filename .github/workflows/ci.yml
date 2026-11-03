@@ -41,7 +41,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Preserve an older commit's in-flight release candidates when main moves.
+  # Reruns of the same commit can still supersede one another.
+  group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
