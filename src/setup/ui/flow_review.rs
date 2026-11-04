@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use super::{Flow, text};
+use super::{Flow, shown_file, text};
 use crate::setup::adopt::adoption_plan;
 use crate::setup::agents::{AgentId, Selection};
 use crate::setup::plan::{Action, Change, Plan};
@@ -108,7 +108,7 @@ impl Flow {
                 notes: Vec::new(),
             };
         };
-        let mut intro = Vec::new();
+        let mut intro: Vec<String> = self.intro.iter().cloned().collect();
         if planned.adoption {
             intro.push(text::ADOPT_REVIEW.to_owned());
         }
@@ -155,6 +155,10 @@ impl Flow {
         let record = self.loaded.record.as_ref();
         let mut plan = Plan::new((self.deps.now)());
         let mut problems = Vec::new();
+        let any = !want.agents().is_empty() || record.is_some_and(|r| !r.agents.is_empty());
+        if any {
+            plan.changes.extend(self.install_changes());
+        }
         for agent in registry.agents() {
             let id = agent.id();
             let rec = record.and_then(|r| r.agents.get(&id));
@@ -190,7 +194,7 @@ impl Flow {
                 None => {
                     files.push(change.file.clone());
                     groups.push(FileGroup {
-                        file: self.tidy(&change.file.display().to_string()),
+                        file: shown_file(self.deps.env.home(), &change.target),
                         items: Vec::new(),
                     });
                     groups.last_mut().expect("just pushed")

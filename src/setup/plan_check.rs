@@ -4,14 +4,19 @@
 //! Before the first write for an agent, every change of that agent is
 //! checked in plan order:
 //!
-//! - **Shape:** the change's file is its target's file, a `PATH` entry is not
-//!   a file change, and only a whole file mmhmem owns may be deleted.
+//! - **Shape:** the change's file is its target's file (for a `PATH` entry:
+//!   the folder), and only a whole file mmhmem owns may be deleted.
 //! - **Stale guard:** the first change of each file must find exactly its
 //!   `before` bytes on disk; a later change of the same file must start from
 //!   the previous change's `after`.
 //! - **Re-parse:** the new content is parsed with the file's own parser
-//!   (JSON/JSONC via `edit::json`, TOML via `edit::toml`; Markdown and other
-//!   files are not parsed), and a strict JSON file must stay strict JSON.
+//!   (JSON/JSONC via `edit::json`, TOML via `edit::toml`, a `PATH` value via
+//!   [`PathValue::decode`]; Markdown and other files are not parsed), and a
+//!   strict JSON file must stay strict JSON.
+//!
+//! A `PATH` entry's "file" is the user's `PATH` value, read through the
+//! [`UserPathStore`]; its entry is present when the folder is one of the
+//! value's folders.
 //! - **Entries:** the target's hash before and after comes from the planned
 //!   bytes, the action matches it (a removal leaves no entry, anything else
 //!   leaves one), and a later change in the same file leaves every earlier
@@ -24,7 +29,8 @@ use std::path::{Path, PathBuf};
 
 use super::{Action, Change, Skip, target_file};
 use crate::setup::edit;
-use crate::setup::record::{Observation, Sha256Hex, Target, observe_in};
+use crate::setup::record::{Observation, Sha256Hex, Target, observe_in, path_entry_hash};
+use crate::setup::user_path::{PathValue, UserPathStore};
 
 /// The parser a file's new content is checked with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +51,7 @@ struct FileState {
 }
 
 /// Check all of one agent's changes before anything is written.
-pub(super) fn check_agent(changes: &[&Change]) -> Result<(), Skip> {
+pub(super) fn check_agent(changes: &[&Change], paths: &dyn UserPathStore) -> Result<(), Skip> {
     let mut files: Vec<FileState> = Vec::new();
     for change in changes {
         let invalid = |reason: &str| Skip::Invalid {
@@ -61,7 +67,7 @@ pub(super) fn check_agent(changes: &[&Change]) -> Result<(), Skip> {
             }
             Some(i) => i,
             None => {
-                if read_current(&change.file)? != change.before {
+                if read_current(change, paths)? != change.before {
                     return Err(Skip::Stale {
                         file: change.file.clone(),
                     });
@@ -90,8 +96,26 @@ pub(super) fn check_agent(changes: &[&Change]) -> Result<(), Skip> {
     Ok(())
 }
 
+/// The bytes of the change's file now (`None` when it does not exist); for
+/// a `PATH` entry the encoded user `PATH` value.
+pub(super) fn read_current(
+    change: &Change,
+    paths: &dyn UserPathStore,
+) -> Result<Option<Vec<u8>>, Skip> {
+    if let Target::PathEntry { .. } = change.target {
+        return paths
+            .read()
+            .map(|v| v.map(|v| v.encode()))
+            .map_err(|reason| Skip::Unreadable {
+                file: change.file.clone(),
+                reason,
+            });
+    }
+    read_file(&change.file)
+}
+
 /// The file's bytes now (`None` when it does not exist).
-pub(super) fn read_current(file: &Path) -> Result<Option<Vec<u8>>, Skip> {
+fn read_file(file: &Path) -> Result<Option<Vec<u8>>, Skip> {
     match std::fs::read(file) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e)
@@ -128,6 +152,10 @@ fn entry_hash(target: &Target, bytes: Option<&[u8]>) -> Result<Option<Sha256Hex>
     let Some(bytes) = bytes else {
         return Ok(None);
     };
+    if let Target::PathEntry { value } = target {
+        let path = PathValue::decode(bytes)?;
+        return Ok(path.contains(value).then(|| path_entry_hash(value)));
+    }
     match observe_in(target, bytes) {
         Observation::Present(hash) => Ok(Some(hash)),
         Observation::Missing => Ok(None),
@@ -136,8 +164,12 @@ fn entry_hash(target: &Target, bytes: Option<&[u8]>) -> Result<Option<Sha256Hex>
 }
 
 fn check_shape(change: &Change) -> Result<(), &'static str> {
-    match target_file(&change.target) {
-        None => return Err("a PATH entry is not a file change"),
+    let file = match &change.target {
+        Target::PathEntry { value } => Some(value.as_path()),
+        other => target_file(other),
+    };
+    match file {
+        None => return Err("the change names no file"),
         Some(file) if file != change.file => {
             return Err("the change names a different file than its entry");
         }
@@ -172,6 +204,9 @@ fn validate_content(change: &Change) -> Result<(), String> {
     let Some(after) = change.after.as_deref() else {
         return Ok(());
     };
+    if let Target::PathEntry { .. } = change.target {
+        return PathValue::decode(after).map(|_| ());
+    }
     let kind = kind(change);
     if kind == FileKind::Text {
         return Ok(());

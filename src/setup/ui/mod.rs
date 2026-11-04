@@ -16,17 +16,20 @@ mod text_tests;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
+use crate::setup::adopt;
 use crate::setup::agents::Env;
 use crate::setup::record::{LocationInput, RecordStore, ReleaseTag};
-use crate::setup::release::{self, ReleaseSource};
-use flow::{Deps, Flow, Newest};
+use crate::setup::release::{self, LocalRelease, ReleaseSource};
+use flow::{Deps, Flow, Newest, Releases};
 
 /// Internal arguments of `mmhmem setup`; never shown in `--help`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SetupArgs {
     /// Release tag the install script downloaded (`--bootstrap <tag>`).
     pub bootstrap: Option<String>,
-    /// Local release artefacts for maintainers and CI (`--release-dir <dir>`).
+    /// Local release artefacts for maintainers and CI (`--release-dir <dir>`):
+    /// archives, `SHA256SUMS` and `SHA256SUMS.sig`, served to the normal
+    /// release checks on a loopback port ([`LocalRelease`]).
     pub release_dir: Option<PathBuf>,
 }
 
@@ -81,21 +84,26 @@ pub fn current_mode() -> Mode {
 
 /// Entry point of `mmhmem setup`. Returns the process exit code.
 pub fn run(args: SetupArgs) -> i32 {
+    if let Some(dir) = args.release_dir.as_ref().filter(|d| !d.is_dir()) {
+        eprintln!("The release folder {} does not exist.", dir.display());
+        return 1;
+    }
+    let Some(deps) = process_deps(&args) else {
+        eprintln!("{}", text::NO_HOME);
+        return 1;
+    };
     match current_mode() {
-        Mode::Menu => run_menu(),
-        mode => run_fallback(None, mode, &args),
+        Mode::Menu => run_menu(deps),
+        mode => run_fallback(Flow::load(deps), mode),
     }
 }
 
 /// The full-screen menu; falls back to the numbered prompts when the
 /// terminal cannot enter raw mode or the alternate screen.
-fn run_menu() -> i32 {
-    let Some(deps) = process_deps() else {
-        eprintln!("{}", text::NO_HOME);
-        return 1;
-    };
+fn run_menu(deps: Deps) -> i32 {
+    let source = deps.releases.source.clone();
     let flow = Flow::load(deps);
-    match app::run_terminal(flow, Box::new(newest_release)) {
+    match app::run_terminal(flow, Box::new(move || newest_release(&source))) {
         Ok((code, progress)) => {
             let lines = progress.map(|p| p.all_lines()).unwrap_or_default();
             for line in lines {
@@ -106,27 +114,21 @@ fn run_menu() -> i32 {
             }
             code
         }
-        Err(app::TerminalUnavailable(flow)) => {
-            run_fallback(Some(*flow), Mode::Fallback, &SetupArgs::default())
-        }
+        Err(app::TerminalUnavailable(flow)) => run_fallback(*flow, Mode::Fallback),
     }
 }
 
 /// The numbered prompts (`TERM=dumb`, or the menu could not start) or the
-/// run without a terminal: both drive the same [`Flow`] (`fallback.rs`).
-fn run_fallback(flow: Option<Flow>, mode: Mode, _args: &SetupArgs) -> i32 {
-    // TODO(7.1): `--bootstrap <tag>` names the release to install.
-    let Some(mut flow) = flow.or_else(|| process_deps().map(Flow::load)) else {
-        eprintln!("{}", text::NO_HOME);
-        return 1;
-    };
+/// run without a terminal: both drive the same [`Flow`] (`fallback.rs`),
+/// with the same `--bootstrap` and `--release-dir` dependencies.
+fn run_fallback(mut flow: Flow, mode: Mode) -> i32 {
     let mut out = std::io::stdout().lock();
     if mode == Mode::NoTerminal {
         flow.set_newest(Newest::Unknown);
         return fallback::run_default(&mut flow, &mut out);
     }
     let _ = writeln!(out, "{}", text::DUMB_TERMINAL);
-    flow.set_newest(newest_within(NEWEST_WAIT));
+    flow.set_newest(newest_within(flow.release_source(), NEWEST_WAIT));
     fallback::run(&mut flow, &mut std::io::stdin().lock(), &mut out)
 }
 
@@ -135,34 +137,58 @@ const NEWEST_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The newest release, or [`Newest::Unknown`] when the lookup takes longer
 /// than `wait`.
-fn newest_within(wait: std::time::Duration) -> Newest {
+fn newest_within(source: ReleaseSource, wait: std::time::Duration) -> Newest {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(newest_release());
+        let _ = tx.send(newest_release(&source));
     });
     rx.recv_timeout(wait).unwrap_or(Newest::Unknown)
 }
 
-/// The real environment, record folder, binary and release of this run.
-fn process_deps() -> Option<Deps> {
+/// The real environment, record folder, program, `PATH` store and release
+/// source of this run.
+///
+/// The agents always launch the program at its permanent place: the
+/// recorded one, else the standard place for this OS
+/// ([`adopt::installed_binary`]). The running program is copied there
+/// (a reviewed change) when it was started by the bootstrap
+/// (`--bootstrap <tag>`, from a temporary folder that is deleted
+/// afterwards) or when nothing is there yet.
+fn process_deps(args: &SetupArgs) -> Option<Deps> {
     let env = Env::from_process()?;
     let store = RecordStore::locate(&LocationInput::from_process()).ok()?;
-    let version = ReleaseTag::try_from(format!("v{}", env!("CARGO_PKG_VERSION"))).ok()?;
-    // TODO(7.1): install the program to its final place first; until then
-    // the agents launch the recorded program, or this one.
+    let own = ReleaseTag::try_from(format!("v{}", env!("CARGO_PKG_VERSION"))).ok()?;
+    let version = args
+        .bootstrap
+        .clone()
+        .and_then(|t| ReleaseTag::try_from(t).ok())
+        .unwrap_or(own);
     let recorded = store.load().ok().flatten().and_then(|r| r.binary);
-    let binary = match recorded {
-        Some(b) => b.path,
-        None => std::env::current_exe().ok()?,
-    };
-    Some(Deps::new(env, store, binary, version))
+    let binary = recorded.map_or_else(|| adopt::installed_binary(&env.dirs), |b| b.path);
+    let running = std::env::current_exe().ok();
+    let install_from = running
+        .filter(|r| !same_file(r, &binary) && (args.bootstrap.is_some() || !binary.exists()));
+    let mut deps = Deps::new(env, store, binary, version);
+    deps.install_from = install_from;
+    if let Some(dir) = &args.release_dir {
+        deps.releases = Releases::local(LocalRelease::serve(dir).ok()?);
+    }
+    Some(deps)
+}
+
+/// Whether two paths name the same file (also through links).
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 /// The newest stable release, or [`Newest::Unknown`] when it cannot be
 /// looked up (offline, rate limit, a platform without releases).
-fn newest_release() -> Newest {
+fn newest_release(source: &ReleaseSource) -> Newest {
     release::Target::current()
-        .and_then(|target| release::latest_release(&ReleaseSource::github(), target))
+        .and_then(|target| release::latest_release(source, target))
         .map_or(Newest::Unknown, |latest| Newest::Known(latest.tag))
 }
 

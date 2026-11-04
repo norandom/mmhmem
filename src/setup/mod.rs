@@ -15,4 +15,5 @@ pub mod record;
 pub mod release;
 pub mod release_keys;
 pub mod ui;
+pub mod user_path;
 pub mod verify;

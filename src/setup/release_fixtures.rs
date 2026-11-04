@@ -13,20 +13,20 @@ use crate::setup::record::ReleaseTag;
 use crate::setup::release_keys::test_keys::signing_key;
 
 /// The trusted test key seed; others act as unknown keys.
-pub(super) const TRUSTED: u8 = 1;
-pub(super) const OWNER: &str = "o";
-pub(super) const REPO: &str = "r";
+pub(crate) const TRUSTED: u8 = 1;
+pub(crate) const OWNER: &str = "o";
+pub(crate) const REPO: &str = "r";
 
-pub(super) fn tag(text: &str) -> ReleaseTag {
+pub(crate) fn tag(text: &str) -> ReleaseTag {
     ReleaseTag::try_from(text.to_string()).unwrap()
 }
 
-pub(super) fn source(server: &MockServer) -> ReleaseSource {
+pub(crate) fn source(server: &MockServer) -> ReleaseSource {
     ReleaseSource::with_base_urls(OWNER, REPO, &server.base_url(), &server.base_url())
 }
 
 /// A zip with the single program entry.
-pub(super) fn zip_archive(entry: &str, content: &[u8]) -> Vec<u8> {
+pub(crate) fn zip_archive(entry: &str, content: &[u8]) -> Vec<u8> {
     let mut buf = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut buf);
@@ -41,7 +41,7 @@ pub(super) fn zip_archive(entry: &str, content: &[u8]) -> Vec<u8> {
 
 /// A `.tar.gz` with the single program entry (ustar, mode 0755; gzip with
 /// stored deflate blocks, so no compressor is needed).
-pub(super) fn tar_gz_archive(entry: &str, content: &[u8]) -> Vec<u8> {
+pub(crate) fn tar_gz_archive(entry: &str, content: &[u8]) -> Vec<u8> {
     let mut header = [0u8; 512];
     let mut field = |at: usize, bytes: &[u8]| header[at..at + bytes.len()].copy_from_slice(bytes);
     field(0, entry.as_bytes());
@@ -92,7 +92,7 @@ fn crc32(data: &[u8]) -> u32 {
 }
 
 /// The archive signed by key `seed` under its published `name` (context).
-pub(super) fn sign_archive(target: Target, archive: &[u8], name: &str, seed: u8) -> Vec<u8> {
+pub(crate) fn sign_archive(target: Target, archive: &[u8], name: &str, seed: u8) -> Vec<u8> {
     let mut out = Cursor::new(Vec::new());
     let keys = [signing_key(seed)];
     let context = Some(name.as_bytes());
@@ -120,7 +120,7 @@ pub(super) fn sign_archive(target: Target, archive: &[u8], name: &str, seed: u8)
 }
 
 /// `SHA256SUMS.sig` exactly as `zipsign sign separate` produces it.
-pub(super) fn sign_sums(sums: &[u8], seed: u8) -> Vec<u8> {
+pub(crate) fn sign_sums(sums: &[u8], seed: u8) -> Vec<u8> {
     let mut prehash = Prehash::new();
     prehash.write_all(sums).unwrap();
     zipsign_api::sign::gather_signature_data(&[signing_key(seed)], &prehash, Some(b"SHA256SUMS"))
@@ -128,7 +128,7 @@ pub(super) fn sign_sums(sums: &[u8], seed: u8) -> Vec<u8> {
 }
 
 /// One release as the fake server publishes it.
-pub(super) struct FakeRelease {
+pub(crate) struct FakeRelease {
     pub tag: ReleaseTag,
     pub target: Target,
     pub archive: Vec<u8>,
@@ -143,7 +143,7 @@ pub(super) struct FakeRelease {
 impl FakeRelease {
     /// A correct release: archive signed by the trusted key, `SHA256SUMS`
     /// listing it, `SHA256SUMS.sig` by the trusted key.
-    pub(super) fn good(target: Target, content: &[u8]) -> Self {
+    pub(crate) fn good(target: Target, content: &[u8]) -> Self {
         let tag = tag("v9.9.9");
         let name = target.archive_name(&tag);
         let raw = match target {
@@ -164,12 +164,12 @@ impl FakeRelease {
         fake
     }
 
-    pub(super) fn archive_name(&self) -> String {
+    pub(crate) fn archive_name(&self) -> String {
         self.target.archive_name(&self.tag)
     }
 
     /// Rewrite `SHA256SUMS` to list `bytes` for the archive, and sign it.
-    pub(super) fn resign_sums(&mut self, bytes: &[u8]) {
+    pub(crate) fn resign_sums(&mut self, bytes: &[u8]) {
         let hash = crate::storage::audit::sha256_hex(bytes);
         let sums = format!(
             "{hash}  {}\n{}  install.ps1\n",
@@ -197,7 +197,7 @@ impl FakeRelease {
     }
 
     /// Serve this release (by tag and as `latest`) on `server`.
-    pub(super) fn serve<'a>(&self, server: &'a MockServer) -> Vec<Mock<'a>> {
+    pub(crate) fn serve<'a>(&self, server: &'a MockServer) -> Vec<Mock<'a>> {
         let release = self.release_json(&server.base_url());
         let mut mocks = Vec::new();
         for path in [
@@ -231,6 +231,6 @@ impl FakeRelease {
 }
 
 /// Total requests the server answered through `mocks`.
-pub(super) fn calls(mocks: &[Mock<'_>]) -> usize {
+pub(crate) fn calls(mocks: &[Mock<'_>]) -> usize {
     mocks.iter().map(Mock::calls).sum()
 }

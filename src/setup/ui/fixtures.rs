@@ -10,13 +10,14 @@ use ratatui::backend::TestBackend;
 use serde_json::{Value, json};
 
 use super::app::{App, Key};
-use super::flow::{Deps, Flow, Newest};
+use super::flow::{Deps, Flow, Newest, Releases};
 use crate::setup::agents::doubles::{Reply, TestHome};
 use crate::setup::agents::doubles_cli::{self, CLAUDE_MCP_GET, CODEX_MCP_LIST_JSON};
 use crate::setup::agents::{AgentId, AgentRecord, Feature, PendingUserStep};
 use crate::setup::record::{
     CheckResult, InstallRecord, LastCheck, Os, RecordStore, ReleaseTag, Sha256Hex, UtcTimestamp,
 };
+use crate::setup::user_path::NoUserPath;
 
 /// The program path in the captured CLI fixtures.
 const FIXTURE_BIN: &str = r"C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe";
@@ -45,6 +46,9 @@ pub(crate) fn fx() -> Fx {
         env: home.env.clone(),
         store: RecordStore::new(state),
         binary,
+        install_from: None,
+        paths: Arc::new(NoUserPath),
+        releases: Releases::github(),
         version: tag("v0.4.1"),
         now: Arc::new(|| at("2026-11-04T10:00:00Z")),
     };

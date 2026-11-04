@@ -9,7 +9,7 @@ use crate::setup::record::{CheckResult, ReleaseTag};
 /// One action on the home screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HomeAction {
-    /// Update to a newer release (task 7.1 does the update itself).
+    /// Update to a newer release, then review the agents again.
     UpdateTo(ReleaseTag),
     /// Install, or bring the recorded choices up to date.
     Install,
@@ -103,10 +103,9 @@ impl Flow {
     pub fn begin(&mut self, action: &HomeAction) -> Next {
         self.planned = None;
         self.progress = None;
+        self.intro = None;
         match action {
-            // TODO(7.1): replace the binary with release::update_binary, then
-            // re-plan with the recorded choices and go to the review.
-            HomeAction::UpdateTo(_) => Next::Note(text::UPDATE_LATER),
+            HomeAction::UpdateTo(tag) => self.update_to(tag),
             // TODO(7.2): plan_remove for every recorded agent, then the
             // binary, the PATH entry and the record last.
             HomeAction::Remove => Next::Note(text::REMOVE_LATER),

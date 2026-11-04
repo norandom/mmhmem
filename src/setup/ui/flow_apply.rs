@@ -11,8 +11,8 @@
 
 use super::{Flow, text};
 use crate::setup::agents::{AgentId, Selection};
-use crate::setup::plan::{ApplyReport, Outcome, apply};
-use crate::setup::record::{BinaryInfo, CheckResult, InstallRecord, Scope, Sha256Hex};
+use crate::setup::plan::{ApplyReport, Outcome, apply_with};
+use crate::setup::record::{CheckResult, InstallRecord, Scope};
 use crate::setup::verify::{Checker, VerifyReport};
 
 /// What a confirm did.
@@ -58,7 +58,8 @@ impl Flow {
             return Confirmed::Done;
         };
         let mut record = self.loaded.record.clone().unwrap_or_default();
-        let mut applied = apply(&planned.plan, &self.deps.store, &mut record);
+        let paths = self.deps.paths.as_ref();
+        let mut applied = apply_with(&planned.plan, &self.deps.store, &mut record, paths);
         if planned.adoption {
             if let Err(e) = self.deps.store.save(&record) {
                 self.loaded.notes.push(self.tidy(&e.to_string()));
@@ -77,6 +78,9 @@ impl Flow {
         let verify = checker.run(&self.selection, &mut applied, &mut record);
         self.finish_record(&mut record);
         let mut progress = self.progress_of(&applied, &verify, &planned.problems);
+        if !record.agents.is_empty() {
+            progress.next_steps.extend(self.path_next_step());
+        }
         if let Err(e) = self.deps.store.save(&record) {
             progress.lines.push(self.tidy(&e.to_string()));
             progress.code = 1;
@@ -111,8 +115,9 @@ impl Flow {
         self.loaded.record = Some(record);
     }
 
-    /// The release and binary of this install; agents that are no longer
-    /// selected and manage nothing leave the record.
+    /// The release, the program and the `PATH` entry of this install;
+    /// agents that are no longer selected and manage nothing leave the
+    /// record.
     fn finish_record(&self, record: &mut InstallRecord) {
         let selected = self.selection.agents();
         record
@@ -122,14 +127,7 @@ impl Flow {
             return;
         }
         record.release = Some(self.deps.version.clone());
-        if record.binary.is_none()
-            && let Ok(bytes) = std::fs::read(&self.deps.binary)
-        {
-            record.binary = Some(BinaryInfo {
-                path: self.deps.binary.clone(),
-                sha256: Sha256Hex::of(&bytes),
-            });
-        }
+        self.finish_install(record);
     }
 
     fn progress_of(

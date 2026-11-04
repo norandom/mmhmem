@@ -413,3 +413,28 @@ fn archive_gate_refuses_a_file_not_matching_the_verified_sums() {
     assert_eq!(expected, Sha256Hex::of(b"other").to_string());
     assert_eq!(actual, Sha256Hex::of(b"bytes").to_string());
 }
+
+#[test]
+fn a_local_release_folder_is_served_to_the_same_checks() {
+    let fake = FakeRelease::good(Target::WindowsX64, b"NEW");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(fake.archive_name()), &fake.archive).unwrap();
+    std::fs::write(dir.path().join(SUMS_NAME), &fake.sums).unwrap();
+    std::fs::write(dir.path().join(SUMS_SIG_NAME), &fake.sig).unwrap();
+    let local = LocalRelease::serve(dir.path()).unwrap();
+    let latest = latest_release(local.source(), Target::WindowsX64).unwrap();
+    assert_eq!(latest.tag, fake.tag);
+    let path = old_install(dir.path());
+    let done = update_binary(local.source(), &fake.tag, fake.target, &trusted(), &path).unwrap();
+    assert_eq!(std::fs::read(&done.path).unwrap(), b"NEW");
+    let err = update_binary(
+        local.source(),
+        &tag("v1.0.0"),
+        fake.target,
+        &trusted(),
+        &path,
+    )
+    .expect_err("an unknown tag is a lookup error");
+    assert!(matches!(err, ReleaseError::Lookup { .. }), "{err}");
+    assert!(LocalRelease::serve(&dir.path().join("missing")).is_err());
+}

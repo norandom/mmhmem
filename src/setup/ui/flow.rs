@@ -22,12 +22,15 @@
 //! `confirm` changes nothing ([`text::CANCELLED`], exit code 2).
 //!
 //! Submodules: `flow_home.rs` (home model, actions), `flow_select.rs`
-//! (agents and features), `flow_review.rs` (plan and review) and
-//! `flow_apply.rs` (apply, check, progress lines).
+//! (agents and features), `flow_review.rs` (plan and review),
+//! `flow_install.rs` (the program and `PATH` changes), `flow_update.rs`
+//! (the update) and `flow_apply.rs` (apply, check, progress lines).
 //!
 //! Everything outside comes in through [`Deps`]: the agents' [`Env`], the
-//! record folder, the binary the agents launch, this build's release tag
-//! and the clock, so tests run on temporary homes with the agent doubles.
+//! record folder, the binary the agents launch and the program to install
+//! there, the user's `PATH` store, the release source and keys, this
+//! build's release tag and the clock, so tests run on temporary homes with
+//! the agent doubles, a fake `PATH` and local releases.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -44,20 +47,26 @@ use crate::setup::record::{
     detect_drift, recovery_scan,
 };
 use crate::setup::release::{BinaryStatus, status_hash};
+use crate::setup::user_path::{UserPathStore, process_store};
 
 #[path = "flow_apply.rs"]
 mod finish;
 #[path = "flow_home.rs"]
 mod home;
+#[path = "flow_install.rs"]
+mod install;
 #[path = "flow_review.rs"]
 mod review;
 #[path = "flow_select.rs"]
 mod select;
+#[path = "flow_update.rs"]
+mod update;
 
 pub use finish::{Confirmed, Progress};
 pub use home::{AgentRow, AgentState, HomeAction, HomeView};
 pub use review::{FileGroup, ReviewItem, ReviewView};
 pub use select::{Choice, FeatureRow};
+pub use update::Releases;
 
 /// The exit code when the user cancels or quits before confirming.
 pub const EXIT_CANCELLED: i32 = 2;
@@ -72,8 +81,16 @@ pub struct Deps {
     pub env: Env,
     /// Where the install record and backups live.
     pub store: RecordStore,
-    /// The installed mmhmem program the agents are set up to launch.
+    /// The installed mmhmem program the agents are set up to launch: always
+    /// its permanent place, never a temporary copy.
     pub binary: PathBuf,
+    /// The program to copy to [`Deps::binary`] (the bootstrap's temporary
+    /// copy); `None` keeps what is there.
+    pub install_from: Option<PathBuf>,
+    /// The user's `PATH` value (the registry on Windows; none elsewhere).
+    pub paths: Arc<dyn UserPathStore>,
+    /// Where updates come from and the keys they must be signed with.
+    pub releases: Releases,
     /// This build's release tag.
     pub version: ReleaseTag,
     /// The run clock.
@@ -81,12 +98,16 @@ pub struct Deps {
 }
 
 impl Deps {
-    /// Dependencies with the system clock.
+    /// Dependencies of a real run: the system clock, this process's `PATH`
+    /// store and GitHub releases; nothing to copy.
     pub fn new(env: Env, store: RecordStore, binary: PathBuf, version: ReleaseTag) -> Self {
         Self {
             env,
             store,
             binary,
+            install_from: None,
+            paths: process_store(),
+            releases: Releases::github(),
             version,
             now: Arc::new(UtcTimestamp::now),
         }
@@ -137,6 +158,8 @@ pub struct Flow {
     worker: bool,
     planned: Option<review::Planned>,
     progress: Option<Progress>,
+    /// A line above the next review (after an update).
+    intro: Option<String>,
 }
 
 impl Flow {
@@ -148,8 +171,9 @@ impl Flow {
             None
         });
         if let Some(rec) = record.as_mut() {
-            notes.extend(recover(rec, &deps.env));
-            notes.extend(drift_notes(rec, &deps.env));
+            let dirs = install::user_path_dirs(&deps);
+            notes.extend(recover(rec, deps.env.home(), &dirs));
+            notes.extend(drift_notes(rec, deps.env.home(), &dirs));
             notes.extend(binary_note(rec));
         }
         let scan = record
@@ -184,6 +208,7 @@ impl Flow {
             worker: false,
             planned: None,
             progress: None,
+            intro: None,
         };
         flow.loaded.current = flow.is_current();
         flow
@@ -192,6 +217,11 @@ impl Flow {
     /// Hands over the answer of the newest-release lookup.
     pub fn set_newest(&mut self, newest: Newest) {
         self.newest = newest;
+    }
+
+    /// Where releases are looked up and downloaded.
+    pub fn release_source(&self) -> crate::setup::release::ReleaseSource {
+        self.deps.releases.source.clone()
     }
 
     /// The newest release as far as known.
@@ -272,7 +302,7 @@ pub(crate) fn tidy(home: &Path, text: &str) -> String {
 }
 
 /// The file a target lives in, for the user.
-fn shown_file(home: &Path, target: &Target) -> String {
+pub(super) fn shown_file(home: &Path, target: &Target) -> String {
     target_file(target).map_or_else(
         || text::PATH_SETTING.to_owned(),
         |f| tidy(home, &f.display().to_string()),
@@ -281,9 +311,9 @@ fn shown_file(home: &Path, target: &Target) -> String {
 
 /// Resolves the `applying` entries of an interrupted run in memory: written
 /// ones are finished, unwritten ones undone, the rest reported.
-fn recover(record: &mut InstallRecord, env: &Env) -> Vec<String> {
+fn recover(record: &mut InstallRecord, home: &Path, dirs: &[PathBuf]) -> Vec<String> {
     let probe = Probe {
-        user_path: Some(env.path_dirs()),
+        user_path: Some(dirs),
     };
     let mut notes = Vec::new();
     let mut resolved = false;
@@ -292,7 +322,7 @@ fn recover(record: &mut InstallRecord, env: &Env) -> Vec<String> {
             Recovery::Applied => record.finish_change(report.scope, &report.target),
             Recovery::NotApplied => record.undo_change(report.scope, &report.target),
             Recovery::Diverged { .. } | Recovery::Unreadable { .. } => {
-                let file = shown_file(env.home(), &report.target);
+                let file = shown_file(home, &report.target);
                 notes.push(text::recovery_unclear(&file));
                 continue;
             }
@@ -306,14 +336,14 @@ fn recover(record: &mut InstallRecord, env: &Env) -> Vec<String> {
 }
 
 /// One line per managed entry changed or deleted outside setup.
-fn drift_notes(record: &InstallRecord, env: &Env) -> Vec<String> {
+fn drift_notes(record: &InstallRecord, home: &Path, dirs: &[PathBuf]) -> Vec<String> {
     let probe = Probe {
-        user_path: Some(env.path_dirs()),
+        user_path: Some(dirs),
     };
     detect_drift(record, &probe)
         .into_iter()
         .filter_map(|report| {
-            let file = shown_file(env.home(), &report.target);
+            let file = shown_file(home, &report.target);
             match report.drift {
                 Drift::Unchanged => None,
                 Drift::Changed { .. } => Some(text::drift_changed(&file)),
@@ -349,3 +379,7 @@ fn adoption_notes(scan: &Scan, home: &Path) -> Vec<String> {
 #[cfg(test)]
 #[path = "flow_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "flow_install_tests.rs"]
+mod install_tests;

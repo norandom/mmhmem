@@ -40,13 +40,14 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::setup::record::{BackupPath, ManagedEntry, Scope, Sha256Hex, Target, UtcTimestamp};
+use crate::setup::user_path::PathValue;
 
 #[path = "plan_check.rs"]
 mod check;
 #[path = "plan_apply.rs"]
 mod engine;
 
-pub use engine::{apply, rollback_agent};
+pub use engine::{apply, apply_with, rollback_agent};
 
 /// The diff line shown instead of the contents of an owner-only file or a
 /// change with [`Change::hide_diff`].
@@ -83,11 +84,14 @@ pub struct Change {
     pub scope: Scope,
     /// The record entry this change adds, updates or removes.
     pub target: Target,
-    /// The file written; must be the file `target` names.
+    /// The file written; must be the file `target` names (for a
+    /// [`Target::PathEntry`]: the folder).
     pub file: PathBuf,
     /// What the change does.
     pub action: Action,
     /// The whole file as read at plan time (`None`: the file did not exist).
+    /// For a [`Target::PathEntry`]: the user's `PATH` value
+    /// ([`PathValue::encode`]).
     pub before: Option<Vec<u8>>,
     /// The exact whole file to write (`None`: delete the file; only for a
     /// [`Target::File`] or [`Target::Binary`] mmhmem owns).
@@ -134,6 +138,11 @@ impl Change {
         if self.before == self.after {
             return NO_DIFF.to_owned();
         }
+        match self.target {
+            Target::PathEntry { .. } => return path_diff(&self.before, &self.after),
+            Target::Binary { .. } => return BINARY_DIFF.to_owned(),
+            _ => {}
+        }
         let (Ok(old), Ok(new)) = (text_of(&self.before), text_of(&self.after)) else {
             return BINARY_DIFF.to_owned();
         };
@@ -153,6 +162,24 @@ impl Change {
             .header(old_name, new_name)
             .to_string()
     }
+}
+
+/// The `PATH` folders before and after, one per line.
+fn path_diff(before: &Option<Vec<u8>>, after: &Option<Vec<u8>>) -> String {
+    let lines = |b: &Option<Vec<u8>>| -> String {
+        b.as_deref()
+            .and_then(|b| PathValue::decode(b).ok())
+            .map(|v| v.entries())
+            .unwrap_or_default()
+            .iter()
+            .map(|p| format!("{}\n", p.display()))
+            .collect()
+    };
+    let (old, new) = (lines(before), lines(after));
+    similar::TextDiff::from_lines(&old, &new)
+        .unified_diff()
+        .header("PATH", "PATH")
+        .to_string()
 }
 
 /// The bytes as text (`""` when absent).
@@ -278,6 +305,9 @@ struct Applied {
     before_hash: Option<Sha256Hex>,
     after_hash: Option<Sha256Hex>,
     owner_only: bool,
+    /// For a `PATH` entry: the value to write back on rollback (`None`:
+    /// there was no value).
+    path_restore: Option<Option<PathValue>>,
 }
 
 /// The result for one agent (or the install-wide scope).

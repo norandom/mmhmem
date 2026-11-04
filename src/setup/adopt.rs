@@ -37,6 +37,13 @@ mod scan_files;
 #[path = "adopt_table.rs"]
 mod table;
 
+/// The program's permanent place, as the old installers chose it:
+/// Windows `%LOCALAPPDATA%\Programs\mmhmem\mmhmem.exe`, elsewhere
+/// `~/.local/bin/mmhmem`.
+pub fn installed_binary(env: &ScanEnv) -> std::path::PathBuf {
+    table::binary(env)
+}
+
 pub use plan_build::{adoption_plan, agent_label};
 
 /// The outside inputs of a scan, injectable so tests never read the real

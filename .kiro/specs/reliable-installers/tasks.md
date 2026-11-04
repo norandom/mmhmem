@@ -175,7 +175,7 @@ released.
   - _Requirements: 4.8, 4.9_
 
 - [ ] 7. Update and removal
-- [ ] 7.1 Update flow
+- [x] 7.1 Update flow
   - Let `self_update` replace the running binary (Windows file-in-use case included), record its hash and the `PATH` entry (`winreg` + `WM_SETTINGCHANGE` on Windows), re-plan all agents with the recorded selection, review, apply and check. An up-to-date install yields "Everything is current".
   - Done when tests update a temp-home install from a previous-release fixture to the current one, keep the user's choices, and show a second run reports no changes with byte-identical files.
   - _Depends: 5.4, 6.2_

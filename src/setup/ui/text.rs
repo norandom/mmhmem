@@ -84,10 +84,28 @@ pub const AGENT_UNAVAILABLE: &str = "{agent}: not found ({reason})";
 /// Contains `{path}`.
 pub const PROFILE_CHOICE: &str = "Use the Claude Desktop profile in {path}";
 pub const NOTHING_SELECTED: &str = "Choose at least one tool, or press q to quit.";
-pub const UPDATE_LATER: &str = "Updating from this menu is not available in this \
-build yet. Nothing was changed.";
 pub const REMOVE_LATER: &str = "Removing from this menu is not available in this \
 build yet. Nothing was changed.";
+pub const UPDATE_NO_KEY: &str = "Updates are turned off until the release signing key \
+is added to mmhmem, so nothing was downloaded. Nothing was changed.";
+pub const UPDATE_FAILED: &str = "The update did not finish; the reason is shown above.";
+pub const UPDATE_NO_PLATFORM: &str = "There are no mmhmem releases for this computer's \
+system, so mmhmem cannot update itself. Nothing was changed.";
+/// Contains `{version}`.
+pub const UPDATED: &str = "The mmhmem program was updated to {version}. Below is what \
+changes in your tools.";
+/// Contains `{sha}`.
+pub const CHANGE_BINARY_ADD: &str = "Install the mmhmem program here (SHA-256 {sha})";
+/// Contains `{sha}`.
+pub const CHANGE_BINARY_UPDATE: &str = "Replace the mmhmem program here with this \
+release's (SHA-256 {sha})";
+/// Contains `{folder}`.
+pub const CHANGE_PATH_ADD: &str = "Add {folder} to your PATH, so a terminal can start \
+mmhmem by name";
+/// Contains `{folder}`.
+pub const PATH_HINT: &str = "Terminal: to start mmhmem by name, add this line to your \
+shell's start-up file (for example ~/.profile), then open a new terminal: \
+export PATH=\"{folder}:$PATH\"";
 
 pub const RECORD_UNREADABLE: &str = "The file where setup keeps track of what it \
 installed could not be read, so setup looked for an earlier install instead. \
@@ -264,6 +282,32 @@ pub fn pending_short(step: PendingUserStep) -> &'static str {
     }
 }
 
+/// The line telling Linux and macOS users how to put `folder` on `PATH`.
+pub fn path_hint(folder: &str) -> String {
+    fill(PATH_HINT, &[("folder", folder)])
+}
+
+/// "The mmhmem program was updated to v1.2.3. …".
+pub fn updated(version: &str) -> String {
+    fill(UPDATED, &[("version", version)])
+}
+
+/// The review line of the program copy; `sha` is shortened to 12 digits.
+pub fn change_binary(update: bool, sha: &str) -> String {
+    let short = &sha[..sha.len().min(12)];
+    let template = if update {
+        CHANGE_BINARY_UPDATE
+    } else {
+        CHANGE_BINARY_ADD
+    };
+    fill(template, &[("sha", short)])
+}
+
+/// The review line of the `PATH` change.
+pub fn change_path(folder: &str) -> String {
+    fill(CHANGE_PATH_ADD, &[("folder", folder)])
+}
+
 /// "Update to v1.2.3".
 pub fn update_to(version: &str) -> String {
     fill(ACTION_UPDATE_TO, &[("version", version)])
@@ -356,7 +400,6 @@ pub const ALL: &[&str] = &[
     AGENT_UNAVAILABLE,
     PROFILE_CHOICE,
     NOTHING_SELECTED,
-    UPDATE_LATER,
     REMOVE_LATER,
     RECORD_UNREADABLE,
     RECOVERED,
@@ -374,4 +417,12 @@ pub const ALL: &[&str] = &[
     BACKUPS_IN,
     PATH_SETTING,
     NO_HOME,
+    UPDATE_NO_KEY,
+    UPDATE_FAILED,
+    UPDATE_NO_PLATFORM,
+    UPDATED,
+    CHANGE_BINARY_ADD,
+    CHANGE_BINARY_UPDATE,
+    CHANGE_PATH_ADD,
+    PATH_HINT,
 ];

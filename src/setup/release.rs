@@ -41,8 +41,9 @@
 //! # Production vs. tests
 //!
 //! [`ReleaseSource::github`] is the only production source. The base URL
-//! override ([`ReleaseSource::with_base_urls`]) exists for the offline tests
-//! and the CI harness.
+//! override ([`ReleaseSource::with_base_urls`]) exists for the offline tests,
+//! the CI harness and the maintainers' `--release-dir` folder
+//! ([`LocalRelease`], served on a loopback port so the same checks run).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -56,6 +57,8 @@ use crate::setup::record::{ReleaseTag, Sha256Hex};
 mod error;
 #[path = "release_latest.rs"]
 mod latest;
+#[path = "release_local.rs"]
+mod local;
 #[path = "release_sums.rs"]
 mod sums;
 #[path = "release_target.rs"]
@@ -63,6 +66,7 @@ mod target;
 
 pub use error::ReleaseError;
 pub use latest::{LatestRelease, LookupVia, latest_release};
+pub use local::LocalRelease;
 pub use target::Target;
 
 /// The checksum list published with every release.
@@ -411,7 +415,7 @@ impl ArchiveGate {
 
 #[cfg(test)]
 #[path = "release_fixtures.rs"]
-mod fixtures;
+pub(crate) mod fixtures;
 #[cfg(test)]
 #[path = "release_tests.rs"]
 mod tests;

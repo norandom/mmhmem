@@ -14,6 +14,7 @@ use crate::setup::record::{
     AgentId, Drift, ElementMatcher, HookHarness, InstallRecord, Observation, PendingChange, Probe,
     RecordStore, Recovery, SectionId, detect_drift, key_path, observe_in, recovery_scan,
 };
+use crate::setup::user_path::NoUserPath;
 
 pub(super) const CODEX: Scope = Scope::Agent(AgentId::Codex);
 pub(super) const CLAUDE: Scope = Scope::Agent(AgentId::ClaudeCode);
@@ -454,8 +455,8 @@ fn crash_after_journal_begin_before_write_is_recoverable() {
         Some(TOML_AFTER.as_bytes()),
     );
     let mut record = InstallRecord::new();
-    let applied =
-        begin(&c, &run(), &e.store, &mut record).unwrap_or_else(|f| panic!("{}", f.reason));
+    let applied = begin(&c, &run(), &e.store, &mut record, &NoUserPath)
+        .unwrap_or_else(|f| panic!("{}", f.reason));
     // "Crash" here: the backup and the applying record are on disk.
     let saved = e.store.load().unwrap().unwrap();
     let scan = recovery_scan(&saved, &Probe::default());
@@ -473,7 +474,7 @@ fn crash_after_journal_begin_before_write_is_recoverable() {
     );
     assert_eq!(applied.backup, Some(backup));
     // A crash after the write but before `done` is classified as applied.
-    write_change(&c).unwrap();
+    write_change(&c, &NoUserPath).unwrap();
     let scan = recovery_scan(&e.store.load().unwrap().unwrap(), &Probe::default());
     assert_eq!(scan[0].recovery, Recovery::Applied);
 }
