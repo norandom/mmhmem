@@ -360,7 +360,11 @@ visible: `↑↓ move · space select · enter continue · esc back · q quit`.
   `crossterm` can't enter raw mode or the alternate screen, or when
   `TERM=dumb`. It walks the same screens with numbered prompts.
 - **No terminal (4.9):** without a terminal, the default selection is
-  installed without prompts and the results are printed as lines.
+  installed without prompts and the results are printed as lines, but
+  only when setup was started by the install script (`--bootstrap <tag>`).
+  A plain `mmhmem setup` without a terminal changes nothing and tells the
+  user to run it in a terminal, so an AI agent running it in a
+  non-interactive shell cannot change configs unasked.
 - **Wording:** all text is in `ui/text.rs`, written for people who don't
   know the project (1.4).
 

@@ -93,7 +93,7 @@ my current setup and change it without typing answers or flags.
 6. Before changing anything, the menu shall show a review screen listing every file and entry it will add, change or remove, and shall change nothing until the user confirms it.
 7. When the user cancels or quits at any screen, the installer shall exit without changing anything.
 8. If the terminal cannot show the full menu, then the installer shall show the same choices as a numbered list.
-9. When run without a terminal, the installer shall install the default selection (all detected agents, no optional features), or stop without changes if no agent is detected.
+9. When run without a terminal from the install command (the bootstrap), the installer shall install the default selection (all detected agents, no optional features), or stop without changes if no agent is detected. When `mmhmem setup` is run without a terminal any other way (for example by an AI agent in a non-interactive shell), it shall change nothing and print the command to run in a terminal. (Amended 2026-11-04 by user decision.)
 
 ### Requirement 5: A real install record
 
