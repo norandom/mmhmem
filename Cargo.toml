@@ -12,8 +12,9 @@ publish = false
 # Official MCP Rust SDK; the Streamable HTTP server transport feature is
 # `transport-streamable-http-server` in rmcp 3.x; `transport-io` adds the
 # stdio transport for local mode (local-mode Req 2.1; design.md
-# "Technology Stack").
-rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server", "transport-io"] }
+# "Technology Stack"). `client` + `transport-child-process` drive the
+# installer's functional check (reliable-installers task 4.1).
+rmcp = { version = "=3.8.0", features = ["transport-streamable-http-server", "transport-io", "client", "transport-child-process"] }
 # Embedded SQLite (WAL + FTS5) compiled into the binary; no system libsqlite3.
 rusqlite = { version = "=0.41.1", features = ["bundled"] }
 # Async runtime.

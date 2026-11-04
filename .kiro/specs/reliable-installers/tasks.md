@@ -115,7 +115,7 @@ released.
   - _Requirements: 3.1, 3.4, 7.3_
 
 - [ ] 4. Prove each agent works
-- [ ] 4.1 MCP functional check
+- [x] 4.1 MCP functional check
   - Implement `src/setup/check.rs`: read back the registration as the agent will use it, start that exact command with the `rmcp` child-process client with a 20 s timeout, and run `initialize`, `tools/list` against the release's expected tools, and the tool chosen in 1.2.
   - Done when tests pass against the real binary and fail with plain reasons for a wrong path, a server that exits, a timeout and a missing tool.
   - _Depends: 1.2, 3.1_

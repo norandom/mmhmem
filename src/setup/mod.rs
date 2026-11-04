@@ -7,6 +7,7 @@
 pub mod adopt;
 pub mod agents;
 pub mod assets;
+pub mod check;
 pub mod edit;
 pub mod fsx;
 pub mod plan;
