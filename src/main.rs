@@ -40,8 +40,22 @@ fn main() -> ExitCode {
         }
         // Read-routing pre-tool hook; always exits 0 (read-routing-hooks Req 3).
         Some("hook") => mmhmem::cli::run_hook(std::env::args().nth(2).as_deref()),
+        Some("setup") => run_setup(),
         Some(other) => unknown_arg(other),
         None => run_daemon(),
+    }
+}
+
+/// `setup`: the installer. No user-facing flags; `--bootstrap <tag>` and
+/// `--release-dir <dir>` are internal (install script, maintainers, CI).
+fn run_setup() -> ExitCode {
+    let rest: Vec<String> = std::env::args().skip(2).collect();
+    match mmhmem::setup::ui::SetupArgs::parse(&rest) {
+        Ok(args) => ExitCode::from(mmhmem::setup::ui::run(args) as u8),
+        Err(_) => {
+            eprintln!("{}", mmhmem::setup::ui::text::BAD_ARGUMENT);
+            ExitCode::from(2)
+        }
     }
 }
 

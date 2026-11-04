@@ -36,6 +36,7 @@ pub fn help_text() -> String {
          \x20   {NAME} stdio\n\
          \x20   {NAME} stats [--json]\n\
          \x20   {NAME} prune [--dry-run]\n\
+         \x20   {NAME} setup\n\
          \x20   {NAME} hook <harness>\n\
          \x20   {NAME} healthcheck\n\
          \n\
@@ -54,6 +55,7 @@ pub fn help_text() -> String {
          \x20   prune [--dry-run]  Remove stale cache rows (missing file or changed\n\
          \x20                    content) from the local per-user store; --dry-run\n\
          \x20                    previews the grouped counts\n\
+         \x20   setup            Install or update mmhmem for your AI tools\n\
          \x20   hook <harness>   Read-routing pre-tool hook (claude, codex, opencode): reads\n\
          \x20                    one hook event on stdin and declines full reads of\n\
          \x20                    large files in favour of smart_read; always exits 0\n\

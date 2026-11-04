@@ -154,7 +154,7 @@ released.
   - _Requirements: 2.3, 2.4, 2.5, 2.6, 2.7_
 
 - [ ] 6. Build the menu
-- [ ] 6.1 Plain-language text and the `setup` entry point
+- [x] 6.1 Plain-language text and the `setup` entry point
   - Add `mmhmem setup` to the hand-parsed CLI in `src/main.rs` with no user-facing flags (only the internal `--bootstrap <tag>` and the maintainer `--release-dir <dir>`).
   - Put every user-facing string in `src/setup/ui/text.rs`, reviewed for users who don't know the project.
   - Done when `mmhmem setup` starts, the internal arguments are hidden from help, and a test asserts that no string in `text.rs` uses project-internal terms without an explanation.
