@@ -16,21 +16,37 @@ mkdir -p "$root/tmp"
 scratch="$(mktemp -d "$root/tmp/install-shell-tests.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/bin" "$scratch/home" "$scratch/temp"
-for script in install.sh deploy/install_local.sh lib.sh build-marketplace.sh; do bash -n "$root/$script"; done
+for script in install.sh scripts/fixtures/release-install.sh deploy/install_local.sh lib.sh build-marketplace.sh; do bash -n "$root/$script"; done
 cat > "$scratch/bin/uname" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in -s) echo "${TEST_OS:-Darwin}" ;; -m) echo "${TEST_ARCH:-arm64}" ;; esac
 EOF
+# The root install.sh is a transition delegator: it resolves the latest release tag and
+# runs that tag's own installer (scripts/fixtures/release-install.sh stands in for it),
+# rewritten to the tag. The curl stub below is the only "network"; the production script
+# has no URL override. TEST_TAG, FAIL_API and TEST_INSTALL_SCRIPT steer the stub (tests only).
 cat > "$scratch/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -eu
-out="$3"; url="$4"
+out=""; url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in -o) shift; out="$1" ;; -*) ;; *) url="$1" ;; esac
+  shift
+done
 printf '%s\n' "$url" >> "$TEST_LOG"
+tag="${TEST_TAG:-v9.9.9}"
+emit() { if [ -n "$out" ]; then cp "$1" "$out"; else cat "$1"; fi; }
 case "$url" in
-  */releases/latest/download/*)
+  https://api.github.com/repos/norandom/mmhmem/releases/latest)
+    [ "${FAIL_API:-0}" = 0 ] || exit 22
+    printf '{\n  "url": "x",\n  "tag_name": "%s",\n  "name": "release"\n}\n' "$tag" ;;
+  */releases/latest/*|*/HEAD|*/HEAD/*) echo "unpinned URL: $url" >&2; exit 24 ;;
+  */releases/download/"$tag"/*)
     [ "${FAIL_BINARY:-0}" = 0 ] || exit 22
     printf 'test binary: never execute\n' > "$out" ;;
-  */deploy/install_local.sh)
+  */mmhmem/"$tag"/install.sh)
+    emit "${TEST_INSTALL_SCRIPT:-$TEST_ROOT/scripts/fixtures/release-install.sh}" ;;
+  */mmhmem/"$tag"/deploy/install_local.sh)
     if [ "${TEST_REAL_ENGINE:-0}" = 1 ]; then
       cp "$TEST_ROOT/deploy/install_local.sh" "$out"
     else
@@ -52,7 +68,7 @@ if [ -n "$source_file" ]; then
 fi
 ENGINE
     fi ;;
-  */HEAD/*) cp "$TEST_ROOT/${url#*/HEAD/}" "$out" ;;
+  */mmhmem/"$tag"/*) emit "$TEST_ROOT/${url#*/mmhmem/$tag/}" ;;
   *) exit 23 ;;
 esac
 EOF
@@ -64,7 +80,43 @@ run_bootstrap() {
 }
 : > "$TEST_LOG"
 run_bootstrap --dry-run --agent codex
-! grep -q releases/latest "$TEST_LOG"
+# Delegator: tag resolution, pinning, refusals, argument pass-through, nothing written on failure.
+head -n 1 "$TEST_LOG" | grep -qx 'https://api.github.com/repos/norandom/mmhmem/releases/latest'
+sed -n 2p "$TEST_LOG" | grep -qx 'https://raw.githubusercontent.com/norandom/mmhmem/v9.9.9/install.sh'
+refuse() { # refuse WHAT PATTERN [env assignments...]
+  local what="$1" pattern="$2"; shift 2
+  : > "$TEST_LOG"; rm -f "$TEST_ARGS"
+  if env "$@" HOME="$scratch/home" TMPDIR="$scratch/temp" PATH="$scratch/bin:$PATH" bash "$root/install.sh" --dry-run --agent codex 2> "$scratch/refusal"; then
+    echo "$what accepted" >&2; exit 1
+  fi
+  grep -q "$pattern" "$scratch/refusal" || { echo "$what: unexpected message: $(cat "$scratch/refusal")" >&2; exit 1; }
+  grep -q 'Nothing was changed' "$scratch/refusal"
+  ! grep -q '/deploy/' "$TEST_LOG"
+  [ ! -e "$TEST_ARGS" ] && [ ! -e "$scratch/home/.local/bin/mmhmem" ]
+}
+refuse 'failed tag lookup' 'could not look up' FAIL_API=1
+for bad in v1.2 v1.2.3-rc1 latest x1.2.3; do refuse "tag $bad" 'not a stable version' TEST_TAG=$bad; done
+{ cat "$root/scripts/fixtures/release-install.sh"; echo "x=https://example.test/mmhmem/HEAD/y"; } > "$scratch/leftover-head.sh"
+refuse 'leftover HEAD' 'moving HEAD' TEST_INSTALL_SCRIPT="$scratch/leftover-head.sh"
+{ cat "$root/scripts/fixtures/release-install.sh"; echo "x=https://github.com/norandom/mmhmem/releases/latest/other"; } > "$scratch/leftover-latest.sh"
+refuse 'leftover releases/latest' 'latest release' TEST_INSTALL_SCRIPT="$scratch/leftover-latest.sh"
+{ echo '# mmhmem-transition-delegator'; cat "$root/scripts/fixtures/release-install.sh"; } > "$scratch/recursive.sh"
+refuse 'recursive delegator' 'recurse' TEST_INSTALL_SCRIPT="$scratch/recursive.sh"
+# Arguments and the rewritten text reach the tag's installer verbatim.
+cat > "$scratch/probe.sh" <<'PROBE'
+printf '%s\n' "$@" > "$TEST_ARGS"
+echo "raw=https://raw.githubusercontent.com/norandom/mmhmem/HEAD rel=https://github.com/norandom/mmhmem/releases/latest/download" > "$TEST_ARGS.text"
+PROBE
+: > "$TEST_LOG"
+env TEST_INSTALL_SCRIPT="$scratch/probe.sh" HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$root/install.sh" --agent codex --worker-model 'a b' --dry-run
+printf '%s\n' --agent codex --worker-model 'a b' --dry-run | cmp - "$TEST_ARGS"
+grep -qx 'raw=https://raw.githubusercontent.com/norandom/mmhmem/v9.9.9 rel=https://github.com/norandom/mmhmem/releases/download/v9.9.9' "$TEST_ARGS.text"
+rm -f "$TEST_ARGS" "$TEST_ARGS.text"
+: > "$TEST_LOG"
+run_bootstrap --dry-run --agent codex
+! grep -q releases/latest/ "$TEST_LOG"
+! grep -q '/HEAD' "$TEST_LOG"
+grep -q 'mmhmem/v9.9.9/install.sh' "$TEST_LOG"
 grep -q 'deploy/opencode/mmhmem-read-routing.js' "$TEST_LOG"
 [ ! -e "$scratch/home/.local/bin/mmhmem" ]
 grep -q -- --global "$TEST_ARGS"
@@ -100,7 +152,7 @@ if run_bootstrap --agent codex; then echo 'Unsupported Linux architecture accept
 export TEST_ARCH=x86_64
 : > "$TEST_LOG"
 run_bootstrap --remove --agent codex
-[ "$(wc -l < "$TEST_LOG")" -eq 4 ]
+[ "$(wc -l < "$TEST_LOG")" -eq 6 ]
 grep -q manage_hooks.py "$TEST_LOG"
 grep -q manage_routing.py "$TEST_LOG"
 grep -q routing_onboarding.py "$TEST_LOG"

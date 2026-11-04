@@ -1,4 +1,4 @@
-"""Exercise piped Bash bootstrap menus through a real pseudo-terminal (CI only)."""
+"""Exercise piped Bash bootstrap menus (via the transition delegator and the tag installer fixture) through a real pseudo-terminal (CI only)."""
 import errno
 import json
 import os

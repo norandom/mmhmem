@@ -67,7 +67,7 @@ def setup_fixture(workspace, binary, source):
     tools.mkdir()
     temporary = workspace.root / "temp"
     temporary.mkdir()
-    shutil.copy2(source / "install.sh", workspace.root / "bootstrap.sh")
+    shutil.copy2(source / "scripts/fixtures/release-install.sh", workspace.root / "bootstrap.sh")
     write_executable(tools / "uname", '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo "${TEST_ARCH:-x86_64}";; esac\n')
     # Ordinary Linux userlands are tested even when their CI host kernel is WSL.
     grep = shutil.which("grep")
