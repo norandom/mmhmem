@@ -97,6 +97,12 @@ zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
 # default in the plain release binary.
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 
+# Installer end-to-end job only (.github/workflows/installer-e2e.yml, task
+# 8.2): also trust the ephemeral release key given at build time in
+# MMHMEM_E2E_RELEASE_PUBLIC_KEY (64 hex characters). NEVER enabled for
+# release builds; scripts/publish-ci-release.ps1 refuses binaries built with it.
+e2e-release-key = []
+
 # Req 13.1/13.2: make the complexity cap BLOCKING under the canonical gate
 # command `cargo clippy --all-targets -- -D warnings`. On the pinned toolchain
 # (clippy 0.1.98) cognitive-complexity is allow-by-default (restriction group),

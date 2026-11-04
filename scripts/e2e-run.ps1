@@ -8,34 +8,44 @@ One phase per call, so each is a separate, readable CI step. State lives in
 -WorkDir (default $env:MMHMEM_E2E_WORKDIR, else <RUNNER_TEMP or TEMP>/mmhmem-e2e):
 
   site/<tag>/       archives, install.sh, install.ps1, SHA256SUMS(.sig): served
-  site/release.json tag, port, base URL and public key of this e2e release
+  site/release.json tag, folder, port, base URL, public key and binary hashes
+                    of this commit's e2e release; release-old.json the previous
+                    version's (same commit, older version number);
+                    release-badsig.json this version signed by another key
   home/             the clean user home (seeded)
-  seed-manifest.sha256, hkcu-path.json (Windows), state.json, logs/
+  seed-manifest.sha256, hkcu-path.json (Windows), state.json, snapshots/, logs/
 
-Phases (8.1 implements the first group; the second is task 8.2):
+Phases (harness, task 8.1):
 
   keygen            new ephemeral zipsign key pair (-KeyFile); prints and
                     exports (GITHUB_OUTPUT public_key) the public key hex
-  release           package, sign, render (-BaseUrl http://127.0.0.1:<port>/<tag>),
+  release           package, sign, render (-BaseUrl http://127.0.0.1:<port>/<folder>),
                     hash and sign SHA256SUMS with the SAME scripts the release
                     uses, from -BinaryDirectory (mmhmem.exe, mmhmem-linux-x86_64,
-                    mmhmem-macos-x86_64, mmhmem-macos-aarch64) and -KeyFile
-  seed              create and seed home/, write the SHA-256 manifest and, on
-                    Windows, snapshot HKCU\Environment\Path
+                    mmhmem-macos-x86_64, mmhmem-macos-aarch64) and -KeyFile.
+                    -Role current|old|badsig picks the metadata file and the
+                    folder (badsig: badsig-<tag>); -BreakHash renders a wrong
+                    SHA-256 into the bootstraps (proves the gate fails)
+  seed              create and seed home/, write the SHA-256 manifest and the
+                    'seeded' home snapshot; on Windows snapshot
+                    HKCU\Environment\Path once per job (a later seed restores it)
   serve             start a local HTTP server (python -m http.server) on site/
   install           run the exact user one-liner without a terminal:
                       curl -fsSL <url>/install.sh | sh
                       irm <url>/install.ps1 | iex
                     in the isolated environment of home/ (default path,
                     amended Requirement 4.9: the bootstrap passes --bootstrap)
-  assert-installed  exit 0, install record and program in place, and every
+  assert-installed  for -Run (install, default, or menu-install): exit 0,
+                    install record and program in place, every agent's check
+                    passed with its own CLI (agent_command=pass), and every
                     seeded file not managed by mmhmem byte-identical
   compare-seed      compare home/ (and HKCU Path) with the manifest;
                     -AllowChanged lists seeded paths that may differ
   stop              stop the server; restore HKCU Path if it changed
 
-  menu-install rerun update remove cancel-at-review download-404 bad-hash
-  bad-signature invalid-config      -> task 8.2 (stubs; they fail loudly)
+Scenarios (task 8.2, scripts/e2e-scenarios.ps1, which describes each):
+  pty-selftest cancel-at-review download-404 bad-hash rerun remove
+  menu-install install-old bad-signature update invalid-config
 
 Isolation (see the workflow header): Linux/macOS get a fresh HOME and TMPDIR,
 with XDG_*, CLAUDE_CONFIG_DIR and CODEX_HOME removed so every tool derives its
@@ -52,7 +62,8 @@ Windows PowerShell 5.1 and PowerShell 7 (Windows, Linux, macOS) compatible.
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('keygen','release','seed','serve','install','assert-installed','compare-seed','stop',
-        'menu-install','rerun','update','remove','cancel-at-review','download-404','bad-hash','bad-signature','invalid-config')]
+        'pty-selftest','menu-install','rerun','install-old','update','remove','cancel-at-review','download-404',
+        'bad-hash','bad-signature','invalid-config')]
     [string]$Phase,
     [string]$WorkDir,
     [string]$Tag,
@@ -60,6 +71,11 @@ param(
     [string]$BinaryDirectory,
     [string]$KeyFile,
     [string[]]$AllowChanged=@(),
+    [ValidateSet('current','old','badsig')]
+    [string]$Role='current',
+    [ValidateSet('install','menu-install')]
+    [string]$Run='install',
+    [switch]$BreakHash,
     [int]$TimeoutSeconds=900
 )
 $ErrorActionPreference='Stop'
@@ -86,7 +102,10 @@ $script:Logs=Join-Path $WorkDir 'logs'
 $script:Manifest=Join-Path $WorkDir 'seed-manifest.sha256'
 $script:RegistrySnapshot=Join-Path $WorkDir 'hkcu-path.json'
 $script:StateFile=Join-Path $WorkDir 'state.json'
+$script:WorkDirectory=$WorkDir
 New-Item -ItemType Directory -Path $script:Logs -Force | Out-Null
+. (Join-Path $PSScriptRoot 'e2e-home-state.ps1')
+. (Join-Path $PSScriptRoot 'e2e-scenarios.ps1')
 
 function Write-Utf8([string]$Path,[string]$Text) {[IO.File]::WriteAllText($Path,$Text,(New-Object Text.UTF8Encoding($false)))}
 function Read-Json([string]$Path) {
@@ -123,14 +142,33 @@ function Write-E2EKeyList([string]$PublicHex,[string]$Path) {
     $bytes=for ($i=0;$i -lt 64;$i+=2) {'0x'+$PublicHex.Substring($i,2)}
     Write-Utf8 $Path ("pub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[`n    [$($bytes -join ', ')],`n];`n")
 }
+# A deliberately broken release (workflow input sabotage=wrong-hash): the
+# bootstraps carry a wrong SHA-256 for every archive, so the job must fail.
+function Write-WrongBootstrapHashes([string]$ReleaseTag,[string]$Directory) {
+    foreach ($name in @('install.sh','install.ps1')) {
+        $path=Join-Path $Directory $name
+        $text=[IO.File]::ReadAllText($path)
+        foreach ($t in (Get-ReleaseArchiveTargets $ReleaseTag)) {
+            $hash=(Get-FileHash -LiteralPath (Join-Path $Directory $t.Archive) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $text=$text.Replace($hash,$(if ($hash[0] -ceq '0') {'1'} else {'0'})+$hash.Substring(1))
+        }
+        Write-Utf8 $path $text
+    }
+    Write-Host '::warning::SABOTAGE: the bootstraps were rendered with wrong SHA-256 values; this run must fail'
+}
 function Invoke-ReleasePhase {
     if (-not $Tag -or -not $BinaryDirectory -or -not $KeyFile) {throw '-Tag, -BinaryDirectory and -KeyFile are required'}
     $names=[ordered]@{'windows'='mmhmem.exe';'linux'='mmhmem-linux-x86_64';'macos-x86_64'='mmhmem-macos-x86_64';'macos-aarch64'='mmhmem-macos-aarch64'}
-    $sources=@{}
-    foreach ($key in $names.Keys) {$sources[$key]=Join-Path $BinaryDirectory $names[$key]}
-    $baseUrl="http://127.0.0.1:$Port/$Tag"
-    $tagDir=Join-Path $script:Site $Tag
-    if (Test-Path -LiteralPath $script:Site) {Remove-Item -LiteralPath $script:Site -Recurse -Force}
+    $sources=@{};$binaries=[ordered]@{}
+    foreach ($key in $names.Keys) {
+        $sources[$key]=Join-Path $BinaryDirectory $names[$key]
+        if (Test-Path -LiteralPath $sources[$key] -PathType Leaf) {$binaries[$key]=(Get-FileHash -LiteralPath $sources[$key] -Algorithm SHA256).Hash.ToLowerInvariant()}
+    }
+    $folder=if ($Role -ceq 'badsig') {"badsig-$Tag"} else {$Tag}
+    $meta=Join-Path $script:Site $(if ($Role -ceq 'current') {'release.json'} else {"release-$Role.json"})
+    $baseUrl="http://127.0.0.1:$Port/$folder"
+    $tagDir=Join-Path $script:Site $folder
+    if (Test-Path -LiteralPath $tagDir) {Remove-Item -LiteralPath $tagDir -Recurse -Force}
     $scratch=Join-Path $WorkDir ('signing-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $scratch | Out-Null
     $signing=$null
@@ -145,14 +183,15 @@ function Invoke-ReleasePhase {
         $archives=New-ReleaseArchives $Tag $sources $tagDir
         Invoke-ReleaseSigning $archives $signing
         $scripts=Write-RenderedBootstraps $Tag $tagDir $tagDir $baseUrl
+        if ($BreakHash) {Write-WrongBootstrapHashes $Tag $tagDir}
         $null=Write-ReleaseChecksums $tagDir
         $null=Write-ReleaseChecksumSignature $tagDir $signing
         $files=[ordered]@{}
         foreach ($f in (Get-ChildItem -LiteralPath $tagDir -File | Sort-Object Name)) {
             $files[$f.Name]=(Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        Write-Json (Join-Path $script:Site 'release.json') ([ordered]@{tag=$Tag;port=$Port;base_url=$baseUrl;public_key=$publicHex;files=$files})
-        Write-Host "Release $Tag staged in $tagDir ($(@($archives).Count) signed archives, $($scripts -join ', '), SHA256SUMS, SHA256SUMS.sig)"
+        Write-Json $meta ([ordered]@{tag=$Tag;role=$Role;folder=$folder;port=$Port;base_url=$baseUrl;public_key=$publicHex;binaries=$binaries;files=$files})
+        Write-Host "Release $Tag ($Role) staged in $tagDir ($(@($archives).Count) signed archives, $($scripts -join ', '), SHA256SUMS, SHA256SUMS.sig)"
         Write-Host "Base URL: $baseUrl"
     } finally {
         Close-ReleaseSigning $signing
@@ -168,16 +207,41 @@ function Get-UserPathSnapshot {
         return [ordered]@{exists=$true;kind=[string]$key.GetValueKind('Path');value=[string]$key.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)}
     } finally {if ($key) {$key.Close()}}
 }
+# Programs still running from the home (mmhmem stdio started by a check, an
+# agent CLI) would keep files open; a new seed starts without them.
+function Stop-HomeProcesses {
+    $prefix=$script:SeedHome.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
+    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue | Where-Object {$_.Path -and $_.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)})) {
+        Write-Host "Stopping $($p.Path) (pid $($p.Id)) left from an earlier scenario"
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    }
+}
 function Invoke-SeedPhase {
-    if (Test-Path -LiteralPath $script:SeedHome) {Remove-Item -LiteralPath $script:SeedHome -Recurse -Force}
+    $first=-not (Test-Path -LiteralPath $script:StateFile)
+    if (Test-Path -LiteralPath $script:SeedHome) {
+        Stop-HomeProcesses
+        # An agent CLI's helper may still hold a log file for a moment.
+        for ($try=1;;$try++) {
+            try {Remove-Item -LiteralPath $script:SeedHome -Recurse -Force -ErrorAction Stop;break}
+            catch {if ($try -ge 30) {throw};Start-Sleep -Seconds 1}
+        }
+    }
     & (Join-Path $PSScriptRoot 'e2e-seed-home.ps1') -Destination $script:SeedHome -Manifest $script:Manifest
     $state=[ordered]@{home=$script:SeedHome;os=$(if ($script:OnWindows) {'windows'} elseif ($script:OnMac) {'macos'} else {'linux'})
         orig_home=$env:HOME;orig_userprofile=$env:USERPROFILE;orig_appdata=$env:APPDATA;orig_localappdata=$env:LOCALAPPDATA}
+    # A later seed keeps the runner's original profile variables.
+    if (-not $first) {$state=Read-Json $script:StateFile}
     if ($script:OnWindows) {
-        Write-Json $script:RegistrySnapshot (Get-UserPathSnapshot)
-        Write-Host 'Snapshotted HKCU\Environment\Path (the runner''s; Windows cannot get a fresh profile without admin rights)'
+        if (Test-Path -LiteralPath $script:RegistrySnapshot) {
+            # A later seed in the same job starts from the PATH before the job.
+            Restore-UserPath
+        } else {
+            Write-Json $script:RegistrySnapshot (Get-UserPathSnapshot)
+            Write-Host 'Snapshotted HKCU\Environment\Path (the runner''s; Windows cannot get a fresh profile without admin rights)'
+        }
     }
     Write-Json $script:StateFile $state
+    $null=Get-HomeState 'seeded'
 }
 
 # ----------------------------------------------------------------- serve ---
@@ -292,7 +356,7 @@ function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments) {
 # harness (install.ps1 never calls exit itself, so a terminal stays open).
 function Get-OneLiner([string]$BaseUrl) {
     if ($script:OnWindows) {
-        $shell=(Get-Process -Id $PID).Path   # same edition as this step: powershell.exe 5.1 or pwsh
+        $shell=Get-ShellPath   # same edition as this step: powershell.exe 5.1 or pwsh
         return @{File=$shell;Arguments="-NoProfile -NonInteractive -Command `"irm '$BaseUrl/install.ps1' | iex; exit `$LASTEXITCODE`""}
     }
     $line="curl -fsSL '$BaseUrl/install.sh' | sh"
@@ -323,36 +387,55 @@ function Get-ExpectedLayout {
 $script:ManagedSeedFiles=@('.claude.json','.codex/config.toml','.config/opencode/opencode.jsonc')
 # Install record keys of the agents the job installs (claude, codex, opencode).
 $script:ExpectedAgents=@('claude_code','codex','opencode')
+# What each agent's own CLI must answer in the check (the agent_command
+# step). The real CLIs are on PATH, so every one must confirm mmhmem:
+# `claude mcp get mmhmem` (a stdio server needs no login), `codex mcp get
+# mmhmem`, `opencode mcp list`. Change an entry only after reading a runner's
+# logs shows that a CLI cannot confirm without an account, and then name the
+# reason here; never to make a run pass.
+$script:AgentCommandExpectation=@{claude_code='pass';codex='pass';opencode='pass'}
+$script:AgentLabels=@{claude_code='Claude Code';codex='Codex';opencode='OpenCode'}
 function Invoke-AssertInstalledPhase {
-    $exitFile=Join-Path $script:Logs 'install.exit'
-    if (-not (Test-Path -LiteralPath $exitFile)) {throw 'No install run recorded'}
+    $exitFile=Join-Path $script:Logs "$Run.exit"
+    if (-not (Test-Path -LiteralPath $exitFile)) {throw "No $Run run recorded"}
     $failures=New-Object System.Collections.Generic.List[string]
-    if (([IO.File]::ReadAllText($exitFile)).Trim() -ne '0') {$failures.Add('install exit code is not 0')}
+    if (([IO.File]::ReadAllText($exitFile)).Trim() -ne '0') {$failures.Add("$Run exit code is not 0")}
     $layout=Get-ExpectedLayout
     if (-not (Test-Path -LiteralPath $layout.Record -PathType Leaf)) {$failures.Add("no install record at $($layout.Record)")}
     if (-not (Test-Path -LiteralPath $layout.Binary -PathType Leaf)) {$failures.Add("no program at $($layout.Binary)")}
     if (-not $failures.Count) {
         $record=Read-Json $layout.Record
         $hash=(Get-FileHash -LiteralPath $layout.Binary -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($record.binary -and $record.binary.sha256 -and ([string]$record.binary.sha256).ToLowerInvariant() -cne $hash) {$failures.Add('the program does not match the SHA-256 in the install record')}
-        $tag=(Get-Release).tag
-        if ([IO.File]::ReadAllText($layout.Record) -notmatch [regex]::Escape($tag)) {$failures.Add("the install record does not name $tag")}
+        if (-not $record.binary -or ([string]$record.binary.sha256).ToLowerInvariant() -cne $hash) {$failures.Add('the program does not match the SHA-256 in the install record')}
+        $release=Get-Release
+        if ([string]$record.release -cne $release.tag) {$failures.Add("the install record names $($record.release), not $($release.tag)")}
+        if ($release.binaries -and $hash -cne [string]$release.binaries.(Get-PlatformKey)) {$failures.Add('the installed program is not the released build')}
+        $output=Read-Log $Run
         foreach ($agent in $script:ExpectedAgents) {
             $entry=$null
             if ($record.agents) {$entry=$record.agents.$agent}
             if (-not $entry) {$failures.Add("the install record has no $agent entry");continue}
             if (-not $entry.last_check -or [string]$entry.last_check.result -cne 'pass') {$failures.Add("$agent did not pass its check")}
-            $steps=@($entry.last_check.details | ForEach-Object {"$($_.step)=$($_.outcome)"}) -join ' '
+            $details=@($entry.last_check.details)
+            $steps=@($details | ForEach-Object {"$($_.step)=$($_.outcome)"}) -join ' '
             Write-Host "$agent check: $($entry.last_check.result) ($steps)"
+            foreach ($d in $details) {if ([string]$d.outcome -ceq 'fail') {$failures.Add("$agent check step $($d.step) failed")}}
+            $own=@($details | Where-Object {[string]$_.step -ceq 'agent_command'} | ForEach-Object {[string]$_.outcome})
+            $want=$script:AgentCommandExpectation[$agent]
+            if ($own.Count -ne 1 -or $own[0] -cne $want) {$failures.Add("$agent's own CLI check (agent_command) is '$($own -join ',')', expected '$want'")}
+            # U+2714 then U+2014, as the results print them.
+            $line=[string][char]0x2714+' '+$script:AgentLabels[$agent]+' '+[char]0x2014+' mmhmem connected'
+            if (-not $output.Contains($line)) {$failures.Add("the output has no line '$line'")}
         }
     }
-    # TODO(8.2): with the real CLIs on PATH the agents' own commands must run,
-    # so also require details step agent_command=pass (a local run without the
-    # CLIs shows it as skipped), and one passing line per agent in install.out.
     $compare=Compare-Seed ($script:ManagedSeedFiles+$AllowChanged) $true
     foreach ($f in $compare) {$failures.Add($f)}
+    # Claude Code may rewrite ~/.claude.json itself: compared parsed.
+    $seeded=Read-HomeState 'seeded'
+    foreach ($f in (Compare-ClaudeJson $seeded.claude_json (Get-HomeState "after-$Run").claude_json 'installed')) {$failures.Add($f)}
+    $failures.AddRange([string[]]@(Get-BootstrapLeftovers | ForEach-Object {"the bootstrap left $_"}))
     if ($failures.Count) {foreach ($f in $failures) {Write-Host "FAIL: $f"};throw "assert-installed: $($failures.Count) failure(s)"}
-    Write-Host 'assert-installed: OK'
+    Write-Host "assert-installed ($Run): OK"
 }
 
 # ---------------------------------------------------------- compare-seed ---
@@ -371,7 +454,14 @@ function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry) {
         }
         $hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($hash -ceq $expected[$rel]) {$same++;continue}
-        if ($allowedHere) {Write-Host "allowed-changed  $rel"} else {$failures.Add("seeded file changed: $rel")}
+        if ($allowedHere) {Write-Host "allowed-changed  $rel";continue}
+        if ($rel -ceq '.claude.json') {
+            # Claude Code rewrites this file itself (e2e-home-state.ps1): parsed.
+            $claude=@(Compare-ClaudeJson ([IO.File]::ReadAllText((Join-Path (Join-Path $script:Root 'ci/e2e/seed/home') $rel))) ([IO.File]::ReadAllText($path)) 'unchanged')
+            if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}} else {Write-Host "claude-owned     $rel (rewritten by Claude Code; every unrelated setting equal, parsed)"}
+            continue
+        }
+        $failures.Add("seeded file changed: $rel")
     }
     if ($script:OnWindows -and (Test-Path -LiteralPath $script:RegistrySnapshot)) {
         $before=Read-Json $script:RegistrySnapshot
@@ -400,33 +490,27 @@ function Invoke-StopPhase {
         if ($p) {Stop-Process -Id $id -Force;Write-Host "Stopped the server (pid $id)"}
         Remove-Item -LiteralPath $pidFile -Force
     }
-    if ($script:OnWindows -and (Test-Path -LiteralPath $script:RegistrySnapshot)) {
-        $before=Read-Json $script:RegistrySnapshot
-        $now=Get-UserPathSnapshot
-        if ($before.exists -ne $now.exists -or $before.kind -cne $now.kind -or $before.value -cne $now.value) {
-            $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true)
-            try {
-                if ($before.exists) {$key.SetValue('Path',[string]$before.value,[Microsoft.Win32.RegistryValueKind]$before.kind)}
-                else {$key.DeleteValue('Path',$false)}
-            } finally {$key.Close()}
-            Write-Host 'Restored HKCU\Environment\Path to the snapshot taken by seed'
-        }
-    }
+    if ($script:OnWindows) {Restore-UserPath}
 }
-
-# ------------------------------------------------------- 8.2 scenarios ---
-function Invoke-PendingScenario([string]$Name) {
-    # TODO(8.2): menu path through a pseudo-terminal (script / ConPTY), rerun
-    # ("Everything is current", byte-identical home), update from the previous
-    # release, remove (seeded files byte-identical), cancel at Review, archive
-    # 404, wrong hash, bad signature on update, already-invalid opencode.json.
-    throw "Phase '$Name' is not implemented yet (reliable-installers task 8.2)"
+# Puts HKCU\Environment\Path back to the snapshot taken by the first seed.
+function Restore-UserPath {
+    if (-not (Test-Path -LiteralPath $script:RegistrySnapshot)) {return}
+    $before=Read-Json $script:RegistrySnapshot
+    $now=Get-UserPathSnapshot
+    if ($before.exists -ne $now.exists -or $before.kind -cne $now.kind -or $before.value -cne $now.value) {
+        $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true)
+        try {
+            if ($before.exists) {$key.SetValue('Path',[string]$before.value,[Microsoft.Win32.RegistryValueKind]$before.kind)}
+            else {$key.DeleteValue('Path',$false)}
+        } finally {$key.Close()}
+        Write-Host 'Restored HKCU\Environment\Path to the snapshot taken by seed'
+    }
 }
 
 # Phases that run the real installer change machine-wide state that a temp
 # home cannot isolate (on Windows the user PATH lives in HKCU). They run only
 # on a disposable CI runner, or when a maintainer explicitly opts in.
-$machinePhases = @('install','menu-install','rerun','update','remove','cancel-at-review',
+$machinePhases = @('install','menu-install','rerun','install-old','update','remove','cancel-at-review',
     'download-404','bad-hash','bad-signature','invalid-config')
 if ($machinePhases -contains $Phase -and $env:GITHUB_ACTIONS -ne 'true' -and
     $env:MMHMEM_E2E_ALLOW_LOCAL -ne 'I understand this changes my user PATH') {
@@ -444,7 +528,17 @@ switch ($Phase) {
     'assert-installed' {Invoke-AssertInstalledPhase}
     'compare-seed' {Invoke-CompareSeedPhase}
     'stop' {Invoke-StopPhase}
-    default {Invoke-PendingScenario $Phase}
+    'pty-selftest' {Invoke-PtySelfTestPhase}
+    'cancel-at-review' {Invoke-CancelAtReviewPhase}
+    'download-404' {Invoke-Download404Phase}
+    'bad-hash' {Invoke-BadHashPhase}
+    'rerun' {Invoke-RerunPhase}
+    'remove' {Invoke-RemovePhase}
+    'menu-install' {Invoke-MenuInstallPhase}
+    'install-old' {Invoke-InstallOldPhase}
+    'bad-signature' {Invoke-BadSignaturePhase}
+    'update' {Invoke-UpdatePhase}
+    'invalid-config' {Invoke-InvalidConfigPhase}
 }
 # A phase that returns has passed. Native helpers (py, uname, zipsign) leave
 # their own exit codes behind, and the Actions PowerShell wrappers exit with

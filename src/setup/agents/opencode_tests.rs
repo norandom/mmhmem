@@ -150,6 +150,31 @@ fn both_files_edit_the_one_holding_the_entry_else_the_jsonc() {
 }
 
 #[test]
+fn an_existing_file_without_the_entry_says_add_not_update() {
+    let fx = fx();
+    fx.put("opencode.jsonc", JSONC_SEED);
+    let add = fx.plan(&mcp_only()).unwrap();
+    assert_eq!(add[0].action, Action::Add);
+    assert!(
+        add[0]
+            .summary
+            .starts_with("Let OpenCode use mmhmem (adds mmhmem"),
+        "{}",
+        add[0].summary
+    );
+    let old =
+        "{\"mcp\":{\"servers\":{\"mmhmem\":{\"type\":\"local\",\"command\":[\"old\",\"stdio\"]}}}}";
+    fx.put("opencode.jsonc", old);
+    let update = fx.plan(&mcp_only()).unwrap();
+    assert_eq!(update[0].action, Action::Update);
+    assert!(
+        update[0]
+            .summary
+            .starts_with("Update mmhmem in OpenCode's server list")
+    );
+}
+
+#[test]
 fn an_entry_in_both_files_is_a_duplicate_problem() {
     let fx = fx();
     let entry =

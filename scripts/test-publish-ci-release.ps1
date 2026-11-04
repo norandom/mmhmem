@@ -82,6 +82,13 @@ if ($sumLines.Count -ne 11) {throw 'SHA256SUMS must list the bootstrap scripts'}
 foreach ($name in @('install.sh','install.ps1')) {
     if ($sumLines -cnotcontains ((Get-FileHash -LiteralPath (Join-Path $staging $name) -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$name)) {throw "SHA256SUMS missing $name"}
 }
+# An installer e2e build (feature e2e-release-key) is never published.
+Assert-NoE2EBuildMarker (Join-Path $staging 'mmhmem.exe')
+$e2eBinary=Join-Path $scratch 'windows/mmhmem.exe'
+[IO.File]::WriteAllBytes($e2eBinary,[byte[]](@(0,1,2)+[Text.Encoding]::ASCII.GetBytes('mmhmem-e2e-release-key-build')+@(255)))
+Assert-Rejected {Assert-NoE2EBuildMarker $e2eBinary}
+Assert-Rejected {Initialize-CiReleaseAssets 'v0.3.0' (Get-CiNativeAssets $scratch) $bundle (Join-Path $scratch 'assets-e2e')}
+[IO.File]::WriteAllText($e2eBinary,'synthetic fixture')
 $winHash=(Get-FileHash -LiteralPath (Join-Path $staging 'mmhmem-v0.3.0-x86_64-pc-windows-msvc.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not [IO.File]::ReadAllText((Join-Path $staging 'install.ps1')).Contains($winHash)) {throw 'install.ps1 does not embed the staged archive hash'}
-Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets and SHA256SUMS'
+Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets, SHA256SUMS and no e2e-key builds'

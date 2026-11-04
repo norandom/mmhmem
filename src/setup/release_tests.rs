@@ -107,9 +107,10 @@ fn empty_key_list_is_refused_before_any_request() {
 #[test]
 fn the_embedded_key_list_is_used_as_is() {
     // Empty until the owner adds the release key: then setup must refuse.
-    if crate::setup::release_keys::RELEASE_PUBLIC_KEYS.is_empty() {
+    let keys = crate::setup::release_keys::trusted_release_keys();
+    if keys.is_empty() {
         let fake = FakeRelease::good(Target::WindowsX64, b"NEW");
-        let err = refused(&fake, crate::setup::release_keys::RELEASE_PUBLIC_KEYS);
+        let err = refused(&fake, &keys);
         assert_eq!(err, ReleaseError::NoTrustedKeys);
     }
 }

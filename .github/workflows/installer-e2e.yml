@@ -1,4 +1,5 @@
-# Installer end-to-end gate (reliable-installers task 8.1; Requirement 10).
+# Installer end-to-end gate (reliable-installers tasks 8.1 and 8.2;
+# Requirement 10).
 #
 # Proves the installer like a real user install: the commit's binaries are
 # packaged, signed, hashed and rendered into install.sh / install.ps1 by the
@@ -11,10 +12,15 @@
 # Jobs
 #   keygen  ephemeral zipsign key pair for this run only (never a release
 #           key; the private half lives one day as an artifact of this run)
-#   build   the commit's four binaries, built in-job (see "Binaries" below)
-#   package archives -> signatures -> bootstraps -> SHA256SUMS(.sig)
+#   build   the commit's four binaries, built in-job (see "Binaries" below),
+#           and the same commit built as the previous version (Cargo version
+#           minus one patch) for the update scenario
+#   package archives -> signatures -> bootstraps -> SHA256SUMS(.sig) for this
+#           version, the previous version, and this version signed by a
+#           second throwaway key (the bad-signature scenario)
 #   e2e     ubuntu-latest, macos-15 (arm64), macos-15-intel (x86_64),
-#           windows-latest x {Windows PowerShell 5.1, PowerShell 7}
+#           windows-latest x {Windows PowerShell 5.1, PowerShell 7}: every
+#           scenario of scripts/e2e-scenarios.ps1, one step each, in order
 #   installer-e2e  one required status for branch protection and for the
 #           release gate (task 8.3 calls this workflow via workflow_call)
 #
@@ -28,12 +34,24 @@
 #     another run's artifacts.
 #   The price is a second build per commit, softened by the cargo caches.
 #
-# Test-key mechanism (the Rust half is task 8.2; nothing here changes Rust):
+# Test-key mechanism (src/setup/release_keys.rs):
 #   cargo feature `e2e-release-key` (off by default) makes the binary trust
 #   one extra key, read at compile time from MMHMEM_E2E_RELEASE_PUBLIC_KEY
-#   (64 hex characters; env! so a missing value is a compile error). Until
-#   Cargo.toml has the feature, `build` warns and builds without it; the
-#   default install path does not verify signatures, so install still runs.
+#   (64 hex characters; env! so a missing value is a compile error, and a
+#   const decode so a malformed one is too). Such a build carries the marker
+#   bytes "mmhmem-e2e-release-key-build"; `build` checks they are there, and
+#   scripts/publish-ci-release.ps1 refuses to publish any binary with them.
+#
+# Menu path: ci/e2e/pty-driver, a small test-only Rust program built on each
+#   e2e runner, runs the one-liner (or `mmhmem setup`) in a pseudo-terminal
+#   (openpty on Linux/macOS, ConPTY on Windows, via portable-pty), keeps a
+#   vt100 model of the screen and follows a script of "expect this text,
+#   press these keys" steps, so the real full-screen menu is driven exactly
+#   as a user would and its exit code is the program's.
+#
+# Proving the gate: run this workflow by hand (workflow_dispatch) with
+#   sabotage=wrong-hash. The bootstraps are then rendered with a wrong
+#   SHA-256 and the job must fail.
 #
 # Isolation
 #   Linux/macOS: fresh HOME and TMPDIR under $RUNNER_TEMP; XDG_*,
@@ -58,6 +76,13 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      sabotage:
+        description: 'none, or wrong-hash: render the bootstraps with a wrong SHA-256 (the job must then fail)'
+        type: choice
+        options: [none, wrong-hash]
+        default: none
 
 permissions:
   contents: read
@@ -76,9 +101,9 @@ env:
   OPENCODE_VERSION: '2.2.5'        # npm @opencode/cli (OpenCode 2.x, research.md section 8)
   # The bootstraps are rendered once (job `package`) for this loopback port.
   E2E_PORT: '47801'
-  # Task 8.2 sets this to 'true' once its scenarios exist; until then only
-  # the harness steps (seed, serve) block, and install/assert report.
-  E2E_SCENARIOS_ENFORCED: 'false'
+  # Every scenario blocks. 'false' (only for an emergency, with a reason in
+  # the commit) would let the install/assert steps report without blocking.
+  E2E_SCENARIOS_ENFORCED: 'true'
 
 jobs:
   keygen:
@@ -88,6 +113,8 @@ jobs:
     outputs:
       public_key: ${{ steps.key.outputs.public_key }}
       tag: ${{ steps.meta.outputs.tag }}
+      old_version: ${{ steps.meta.outputs.old_version }}
+      old_tag: ${{ steps.meta.outputs.old_tag }}
       e2e_feature: ${{ steps.meta.outputs.e2e_feature }}
     steps:
       # actions/checkout v7.0.1
@@ -101,6 +128,13 @@ jobs:
           version=$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' Cargo.toml | head -n 1)
           test -n "$version"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          # The previous version: one patch lower (x.y.0 -> x.(y-1).999).
+          IFS=. read -r major minor patch <<< "$version"
+          if [ "$patch" -gt 0 ]; then old="$major.$minor.$((patch - 1))"
+          elif [ "$minor" -gt 0 ]; then old="$major.$((minor - 1)).999"
+          else old="$((major - 1)).999.999"; fi
+          echo "old_version=$old" >> "$GITHUB_OUTPUT"
+          echo "old_tag=v$old" >> "$GITHUB_OUTPUT"
           if grep -Eq '^e2e-release-key[[:space:]]*=' Cargo.toml; then
             echo "e2e_feature=true" >> "$GITHUB_OUTPUT"
           else
@@ -163,6 +197,7 @@ jobs:
       CARGO_INCREMENTAL: '0'
       MMHMEM_E2E_RELEASE_PUBLIC_KEY: ${{ needs.keygen.outputs.public_key }}
       E2E_FEATURE: ${{ needs.keygen.outputs.e2e_feature }}
+      OLD_VERSION: ${{ needs.keygen.outputs.old_version }}
       TARGET: ${{ matrix.target }}
     steps:
       # actions/checkout v7.0.1
@@ -198,20 +233,50 @@ jobs:
       - name: Release build with the ephemeral key trusted
         shell: bash
         run: |
-          features=()
-          if [ "$E2E_FEATURE" = true ]; then
-            features=(--features e2e-release-key)
-          else
-            echo "::warning::Cargo.toml has no e2e-release-key feature yet (task 8.2); this build trusts no release key, so update scenarios cannot pass."
+          if [ "$E2E_FEATURE" != true ]; then
+            echo "::error::Cargo.toml has no e2e-release-key feature; the update scenarios need it."
+            exit 1
           fi
-          cargo build --release --locked --target "$TARGET" "${features[@]}"
+          cargo build --release --locked --target "$TARGET" --features e2e-release-key
           mkdir -p dist
           cp "target/$TARGET/release/${{ matrix.exe }}" "dist/${{ matrix.asset }}"
+          # The marker the publisher refuses (src/setup/release_keys.rs).
+          grep -aq 'mmhmem-e2e-release-key-build' "dist/${{ matrix.asset }}"
+      # Same commit, older version number: the update scenario installs this
+      # one first. Only the mmhmem crate itself is rebuilt.
+      - name: Release build of the previous version (Cargo version ${{ needs.keygen.outputs.old_version }})
+        shell: pwsh
+        run: |
+          $toml = [IO.File]::ReadAllText('Cargo.toml')
+          $current = [regex]::Match($toml, '(?m)^version = "([0-9.]+)"').Groups[1].Value
+          if (-not $current -or -not $env:OLD_VERSION) { throw 'no version' }
+          $toml = ([regex]'(?m)^version = "[0-9.]+"').Replace($toml, "version = `"$env:OLD_VERSION`"", 1)
+          $lock = [IO.File]::ReadAllText('Cargo.lock')
+          $entry = [regex]('(name = "mmhmem"\r?\nversion = ")' + [regex]::Escape($current) + '"')
+          if (-not $entry.IsMatch($lock)) { throw 'mmhmem is not in Cargo.lock' }
+          $lock = $entry.Replace($lock, '${1}' + $env:OLD_VERSION + '"', 1)
+          [IO.File]::WriteAllText('Cargo.toml', $toml)
+          [IO.File]::WriteAllText('Cargo.lock', $lock)
+          try {
+            cargo build --release --locked --target $env:TARGET --features e2e-release-key
+            if ($LASTEXITCODE -ne 0) { throw 'the previous-version build failed' }
+          } finally {
+            git checkout -- Cargo.toml Cargo.lock
+          }
+          New-Item -ItemType Directory -Path dist-old -Force | Out-Null
+          Copy-Item "target/$env:TARGET/release/${{ matrix.exe }}" "dist-old/${{ matrix.asset }}"
       # actions/upload-artifact v7.0.2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: e2e-bin-${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
+          retention-days: 3
+          if-no-files-found: error
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: e2e-oldbin-${{ matrix.asset }}
+          path: dist-old/${{ matrix.asset }}
           retention-days: 3
           if-no-files-found: error
       # actions/cache/save v6.1.0 - push only, so pull requests cannot
@@ -244,6 +309,13 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/e2e-bin
       # actions/download-artifact v8.0.2
+      - name: Download the four previous-version binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: e2e-oldbin-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/e2e-bin-old
+      # actions/download-artifact v8.0.2
       - name: Download the ephemeral key
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -264,14 +336,25 @@ jobs:
         shell: pwsh
         env:
           TAG: ${{ needs.keygen.outputs.tag }}
+          OLD_TAG: ${{ needs.keygen.outputs.old_tag }}
+          SABOTAGE: ${{ inputs.sabotage }}
         run: |
           $env:ZIPSIGN = Join-Path $HOME '.cache/mmhmem-e2e/zipsign/bin/zipsign'
           $key = Join-Path $env:RUNNER_TEMP 'e2e-key/ephemeral.key'
+          # A second throwaway key, never trusted by any build: bad-signature.
+          $other = Join-Path $env:RUNNER_TEMP 'e2e-other-key/other.key'
+          $bin = Join-Path $env:RUNNER_TEMP 'e2e-bin'
+          $port = [int]$env:E2E_PORT
           try {
-            ./scripts/e2e-run.ps1 -Phase release -Tag $env:TAG -Port ([int]$env:E2E_PORT) `
-              -BinaryDirectory (Join-Path $env:RUNNER_TEMP 'e2e-bin') -KeyFile $key
+            ./scripts/e2e-run.ps1 -Phase release -Role current -Tag $env:TAG -Port $port `
+              -BinaryDirectory $bin -KeyFile $key -BreakHash:($env:SABOTAGE -eq 'wrong-hash')
+            ./scripts/e2e-run.ps1 -Phase release -Role old -Tag $env:OLD_TAG -Port $port `
+              -BinaryDirectory (Join-Path $env:RUNNER_TEMP 'e2e-bin-old') -KeyFile $key
+            ./scripts/e2e-run.ps1 -Phase keygen -KeyFile $other
+            ./scripts/e2e-run.ps1 -Phase release -Role badsig -Tag $env:TAG -Port $port `
+              -BinaryDirectory $bin -KeyFile $other
           } finally {
-            Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $key, $other -Force -ErrorAction SilentlyContinue
           }
       # actions/upload-artifact v7.0.2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -285,7 +368,7 @@ jobs:
     name: e2e ${{ matrix.name }}
     needs: package
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -317,6 +400,9 @@ jobs:
       npm_config_allow_scripts: '@anthropic-ai/claude-code,@opencode/cli'
       DISABLE_AUTOUPDATER: '1'
       OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      # The pty driver's toolchain (same value as env.RUST_TOOLCHAIN; it also
+      # overrides rust-toolchain.toml's channel).
+      RUSTUP_TOOLCHAIN: '1.98.1'
     steps:
       # actions/checkout v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -328,6 +414,31 @@ jobs:
         run: |
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "MMHMEM_E2E_WORKDIR=$(Join-Path $env:RUNNER_TEMP 'mmhmem-e2e')"
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "AGENT_CLI_PREFIX=$(Join-Path $env:RUNNER_TEMP 'agent-clis')"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PTY_TARGET=$(Join-Path $env:RUNNER_TEMP 'pty-target')"
+      - name: Harness logic tests (no installer)
+        run: ./scripts/test-e2e-harness.ps1
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }} for the pty driver
+        shell: bash
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      # actions/cache v6.1.0
+      - name: Restore the pty driver build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ${{ env.PTY_TARGET }}
+          key: e2e-pty-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('ci/e2e/pty-driver/Cargo.lock', 'ci/e2e/pty-driver/src/**') }}
+          restore-keys: |
+            e2e-pty-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_TOOLCHAIN }}-
+      - name: Build the pty driver (ci/e2e/pty-driver)
+        shell: pwsh
+        run: |
+          cargo build --release --locked --manifest-path ci/e2e/pty-driver/Cargo.toml --target-dir $env:PTY_TARGET
+          if ($LASTEXITCODE -ne 0) { throw 'the pty driver did not build' }
+          cargo test --release --locked --manifest-path ci/e2e/pty-driver/Cargo.toml --target-dir $env:PTY_TARGET
+          if ($LASTEXITCODE -ne 0) { throw 'the pty driver tests failed' }
+          $exe = Join-Path $env:PTY_TARGET ('release/mmhmem-e2e-pty' + $(if ($IsWindows) { '.exe' } else { '' }))
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MMHMEM_E2E_PTY=$exe"
       # actions/setup-node v7.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -370,16 +481,45 @@ jobs:
         run: ./scripts/e2e-run.ps1 -Phase seed
       - name: Serve the release on 127.0.0.1
         run: ./scripts/e2e-run.ps1 -Phase serve
+      - name: The pseudo-terminal types into a shell and reads the answer
+        run: ./scripts/e2e-run.ps1 -Phase pty-selftest
+      # Failure cases first, on the fresh home: each leaves it unchanged.
+      - name: Cancel at the Review screen (menu, q) changes nothing
+        run: ./scripts/e2e-run.ps1 -Phase cancel-at-review
+      - name: A missing archive (HTTP 404) changes nothing
+        run: ./scripts/e2e-run.ps1 -Phase download-404
+      - name: A wrong built-in SHA-256 changes nothing
+        run: ./scripts/e2e-run.ps1 -Phase bad-hash
       - name: Install with the exact one-liner, no terminal (default choices)
         continue-on-error: ${{ env.E2E_SCENARIOS_ENFORCED != 'true' }}
         run: ./scripts/e2e-run.ps1 -Phase install
-      - name: Installed, and unrelated seeded files byte-identical
+      - name: Installed, every check passed, unrelated seeded files byte-identical
         continue-on-error: ${{ env.E2E_SCENARIOS_ENFORCED != 'true' }}
         run: ./scripts/e2e-run.ps1 -Phase assert-installed
-      # Task 8.2 adds, in this order, each followed by compare-seed:
-      #   menu-install (pseudo-terminal: script / ConPTY), rerun, update,
-      #   remove, cancel-at-review, download-404, bad-hash, bad-signature,
-      #   invalid-config. The phases exist in scripts/e2e-run.ps1 as stubs.
+      - name: Run again - Everything is current, home unchanged
+        run: ./scripts/e2e-run.ps1 -Phase rerun
+      - name: Remove through the menu - program, record and PATH entry gone, memories kept
+        run: ./scripts/e2e-run.ps1 -Phase remove
+      - name: After removal the seeded files are byte-identical to the seed
+        run: ./scripts/e2e-run.ps1 -Phase compare-seed
+      - name: Fresh home for the menu install
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Install through the full-screen menu in a pseudo-terminal
+        run: ./scripts/e2e-run.ps1 -Phase menu-install
+      - name: Menu install - every check passed, unrelated seeded files byte-identical
+        run: ./scripts/e2e-run.ps1 -Phase assert-installed -Run menu-install
+      - name: Fresh home for the update
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Install the previous version with its one-liner
+        run: ./scripts/e2e-run.ps1 -Phase install-old
+      - name: An update signed by another key is refused and changes nothing
+        run: ./scripts/e2e-run.ps1 -Phase bad-signature
+      - name: Update through the menu - new program recorded, choices kept, checks pass
+        run: ./scripts/e2e-run.ps1 -Phase update
+      - name: Fresh home with an invalid opencode.json
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Invalid opencode.json - only OpenCode skipped, the others installed
+        run: ./scripts/e2e-run.ps1 -Phase invalid-config
       - name: Stop the server
         if: always()
         run: ./scripts/e2e-run.ps1 -Phase stop

@@ -41,7 +41,7 @@ use std::sync::Arc;
 use super::{Flow, Next, text};
 use crate::setup::record::{BinaryInfo, InstallRecord, ReleaseTag, Target};
 use crate::setup::release::{self, LocalRelease, ReleaseSource};
-use crate::setup::release_keys::RELEASE_PUBLIC_KEYS;
+use crate::setup::release_keys::trusted_release_keys;
 
 /// Where updates come from and the keys that must have signed them.
 #[derive(Debug, Clone)]
@@ -61,7 +61,7 @@ impl Releases {
     pub fn github() -> Self {
         Self {
             source: ReleaseSource::github(),
-            keys: RELEASE_PUBLIC_KEYS.to_vec(),
+            keys: trusted_release_keys(),
             target: release::Target::current().ok(),
             local: None,
         }

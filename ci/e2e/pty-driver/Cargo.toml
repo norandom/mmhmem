@@ -1,0 +1,25 @@
+# Test-only helper of the installer end-to-end job (reliable-installers task
+# 8.2): runs one program in a pseudo-terminal (Unix pty, Windows ConPTY),
+# keeps a model of the screen and follows a small script of expectations
+# and key presses. Never part of the mmhmem binary or of a release; built
+# only by .github/workflows/installer-e2e.yml.
+[package]
+name = "mmhmem-e2e-pty"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Pseudo-terminal driver for the mmhmem installer end-to-end job"
+
+# Its own workspace: never a member of the mmhmem package's build.
+[workspace]
+
+[dependencies]
+# The pty layer of wezterm: openpty on Linux/macOS, ConPTY on Windows.
+portable-pty = "=0.9.0"
+# A terminal screen model, so expectations match what a user would see
+# rather than ratatui's partial redraw byte stream.
+vt100 = "=0.18.1"
+regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode"] }
+
+[profile.release]
+debug = false

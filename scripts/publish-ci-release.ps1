@@ -48,6 +48,16 @@ function Get-CiNativeAssets([string]$Root) {
     }
     return @{'mmhmem.exe'=$windows[0].FullName;'mmhmem-macos-x86_64'=$intel[0].FullName;'mmhmem-macos-aarch64'=$arm[0].FullName}
 }
+# A binary built with the installer e2e feature (`e2e-release-key`) trusts a
+# throwaway key and must never be published; such a build carries this
+# marker (src/setup/release_keys.rs, E2E_BUILD_MARKER).
+$script:E2EBuildMarker='mmhmem-e2e-release-key-build'
+function Assert-NoE2EBuildMarker([string]$Path) {
+    $latin1=[Text.Encoding]::GetEncoding(28591)
+    if ($latin1.GetString([IO.File]::ReadAllBytes($Path)).IndexOf($script:E2EBuildMarker,[StringComparison]::Ordinal) -ge 0) {
+        throw "Refusing to publish $(Split-Path -Leaf $Path): it is an installer e2e build (e2e-release-key) that trusts a test key"
+    }
+}
 function Send-CiReleaseAsset([string]$ReleaseTag,[string]$Path,[string]$Scratch) {
     $name=Split-Path -Leaf $Path
     $expected=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
@@ -68,6 +78,7 @@ function Initialize-CiReleaseAssets([string]$ReleaseTag,[hashtable]$Native,[stri
     New-Item -ItemType Directory -Path $Staging -Force | Out-Null
     $linux=Get-ReleaseBundleFile $LinuxBundle $script:LinuxAssetName
     $bare=@{'mmhmem.exe'=$Native['mmhmem.exe'];'mmhmem-macos-x86_64'=$Native['mmhmem-macos-x86_64'];'mmhmem-macos-aarch64'=$Native['mmhmem-macos-aarch64'];($script:LinuxAssetName)=$linux;'verification.json'=(Get-ReleaseBundleFile $LinuxBundle 'verification.json')}
+    foreach ($binary in @($Native['mmhmem.exe'],$Native['mmhmem-macos-x86_64'],$Native['mmhmem-macos-aarch64'],$linux)) {Assert-NoE2EBuildMarker $binary}
     foreach ($name in $bare.Keys) {Copy-Item -LiteralPath $bare[$name] -Destination (Join-Path $Staging $name)}
     $archives=New-ReleaseArchives $ReleaseTag @{'windows'=$Native['mmhmem.exe'];'linux'=$linux;'macos-x86_64'=$Native['mmhmem-macos-x86_64'];'macos-aarch64'=$Native['mmhmem-macos-aarch64']} $Staging
     $names=[string[]]@(@($bare.Keys)+@($archives | ForEach-Object {Split-Path -Leaf $_}))
@@ -114,6 +125,7 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
         $null=Invoke-ReleaseGh @('run','download',$id,'--repo',$script:ReleaseRepository,'--name',$entry[1],'--dir',$destination)
     }
     $native=Get-CiNativeAssets $scratch
+    foreach ($binary in $native.Values) {Assert-NoE2EBuildMarker $binary}
     $releases=Get-ReleaseApi 'releases?per_page=100'
     $existing=@($releases | Where-Object {$_.tag_name -ceq $ReleaseTag})
     if ($existing.Count -gt 1) {throw 'Duplicate release records'}
@@ -121,6 +133,7 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if (-not $existing.Count) {$null=Invoke-ReleaseGh @('release','create',$ReleaseTag,'--repo',$script:ReleaseRepository,'--verify-tag','--draft','--title',"mmhmem $ReleaseTag",'--generate-notes')}
     $context=Invoke-LinuxReleaseValidation -Tag $ReleaseTag -RunId $id -SupersededAssets @('SHA256SUMS')
     if ($context.Manifest.package_version -cne $ReleaseTag.Substring(1)) {throw 'Tag does not match verified binary package version'}
+    Assert-NoE2EBuildMarker (Get-ReleaseBundleFile $context.BundleDirectory $script:LinuxAssetName)
     $null=Invoke-LinuxReleaseDelivery $context
     $staging=Join-Path $scratch 'assets'
     $staged=Initialize-CiReleaseAssets $ReleaseTag $native $context.BundleDirectory $staging

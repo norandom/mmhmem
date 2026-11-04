@@ -34,7 +34,7 @@ use crate::setup::assets;
 use crate::setup::edit::json as jedit;
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change, target_file};
-use crate::setup::record::{ManagedEntry, Scope, Target, key_path, observe_in};
+use crate::setup::record::{ManagedEntry, Observation, Scope, Target, key_path, observe_in};
 use crate::setup::ui::text::changes::{self as say, What};
 
 const SCOPE: Scope = Scope::Agent(AgentId::OpenCode);
@@ -152,10 +152,15 @@ impl<'a> Planner<'a> {
             .expect("an OpenCode entry has a file")
             .to_path_buf();
         let label = AgentId::OpenCode.label();
-        let (action, after, summary) = match (&before, same) {
-            (None, _) => (Action::Add, after, say::add(what, label, &file)),
-            (Some(b), true) => (Action::Update, b.clone(), say::keep(what, label, &file)),
-            (Some(_), false) => (Action::Update, after, say::update(what, label, &file)),
+        // An existing file without mmhmem's entry gets the entry added
+        // ("Let OpenCode use mmhmem ..."), not "Update ...".
+        let present = before
+            .as_ref()
+            .is_some_and(|b| matches!(observe_in(&target, b), Observation::Present(_)));
+        let (action, after, summary) = match (&before, same, present) {
+            (Some(b), true, _) => (Action::Update, b.clone(), say::keep(what, label, &file)),
+            (Some(_), false, true) => (Action::Update, after, say::update(what, label, &file)),
+            _ => (Action::Add, after, say::add(what, label, &file)),
         };
         self.chain.push(Change {
             scope: SCOPE,
