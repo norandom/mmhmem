@@ -1,0 +1,13 @@
+{
+  "mcp": {
+    "servers": {
+      "mmhmemprobe": {
+        "type": "local",
+        "command": [
+          "C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe",
+          "stdio"
+        ]
+      }
+    }
+  }
+}

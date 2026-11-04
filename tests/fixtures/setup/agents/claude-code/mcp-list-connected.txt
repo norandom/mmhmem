@@ -1,0 +1,6 @@
+Checking MCP server health…
+
+claude.ai Example: https://example.invalid/mcp - ✔ Connected
+plugin:example:remote: https://example.invalid/mcp (HTTP) - ! Needs authentication
+plugin:example:unset:  (HTTP) - - Not configured
+mmhmem: C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe stdio - ✔ Connected

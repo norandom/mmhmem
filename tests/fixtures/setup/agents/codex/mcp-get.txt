@@ -1,0 +1,8 @@
+mmhmem
+  enabled: true
+  transport: stdio
+  command: C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe
+  args: stdio
+  cwd: -
+  env: -
+  remove: codex mcp remove mmhmem

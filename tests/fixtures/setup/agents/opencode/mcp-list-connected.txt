@@ -1,0 +1,2 @@
+✓ mmhmem       connected
+✓ mmhmemprobe  connected

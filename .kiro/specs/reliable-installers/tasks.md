@@ -1,0 +1,228 @@
+# Implementation Plan
+
+All tasks are required. Each executable task is sized for approximately 1–3 hours.
+Order: settle the open points, then the safe-write foundation, then agents and
+the functional check, then release assets and bootstraps, then the menu,
+update and removal, then the CI end-to-end gate, and finally migration and
+deletion of the old scripts. Every commit must pass the project pre-commit gate
+(fmt, size caps, clippy default and `otel`). New dependencies are pinned to an
+exact version, as `tech.md` requires. Do not push `main` until task 9.2 is
+released.
+
+- [ ] 1. Settle the open points
+- [x] 1.1 Confirm each agent's config format and check command
+  - From each agent's current official documentation and its installed CLI, record the exact MCP server shape and file location for Claude Code (`claude mcp add/get/list/remove --scope user`), Claude Desktop (`claude_desktop_config.json`, MSIX and non-MSIX profiles), Codex (`config.toml` `[mcp_servers.*]`, `codex mcp list/get`, `hooks.json`) and OpenCode (`mcp.<name>` shape, `opencode.json` vs `.jsonc`, `opencode mcp list`).
+  - Capture real output of each list/get command, connected and not connected, as test fixtures.
+  - Done when `research.md` has a confirmed table with sources and versions, the OpenCode `mcp.servers` defect is confirmed or refuted, and the fixtures are committed under `tests/fixtures/setup/agents/`.
+  - _Requirements: 3.1, 6.2_
+
+- [x] 1.2 (P) Choose the side-effect-free check call
+  - Check whether `mem_search_breadcrumbs` writes to the store or creates a session when called.
+  - If it writes anything, add a read-only `status` tool that returns the version and store health, with tests.
+  - Done when a test calls the chosen tool against a temporary store and shows the store's row counts and files are unchanged afterwards.
+  - _Requirements: 6.1_
+
+- [x] 1.3 (P) Trace the Windows `.tgz` report
+  - Search the release history, `deploy/`, `scripts/`, workflow logs and agent marketplace/plugin build scripts (`build-marketplace.*`) for any `.tgz` or `.tar.gz` used on Windows.
+  - Done when `research.md` names the source, or records that none exists in this repository and which external tool was the likely origin.
+  - _Requirements: 2.8_
+
+- [ ] 1.4 Pin and vet the adopted libraries
+  - Add the libraries from `research.md` §6 with exact versions, including `self_update` with `default-features = false` and rustls, `archive-zip`, `archive-tar`, `compression-zip-deflate`, `compression-flate2` and `signatures`.
+  - Check with `cargo tree -d` that no second `reqwest`, `rustls` or TLS stack is pulled in, and that the default release build and the `otel` build still pass the pre-commit gate.
+  - Record each crate's version, licence and last release date in `research.md`.
+  - Done when the pinned set builds on Linux, macOS and Windows, `cargo tree -d` shows no unexplained duplicates, and a spike updates a test binary from an `httpmock` release with a `zipsign`-signed archive and rejects an unsigned one.
+  - _Requirements: 2.4, 8.3_
+
+- [x] 2. Build the safe-write foundation
+- [x] 2.1 Atomic write, backup and owner-only files
+  - Implement `src/setup/fsx.rs`: atomic replace via a same-folder temp file and rename (`tempfile`), backup copy into the record's backup folder, and owner-only creation (Unix mode `0600` at open; Windows security descriptor granting only the current user SID at `CreateFileW`).
+  - Done when tests show an interrupted write leaves the old file, backups are byte-identical, and a new key file is owner-only from creation on each OS (ACL read back on Windows, mode on Unix).
+  - _Boundary: fsx_
+  - _Requirements: 3.2, 3.3, 9.1_
+
+- [x] 2.2 (P) JSON and JSONC entry editing
+  - Implement `src/setup/edit/json.rs` on `jsonc-parser` CST: set, read and remove the value at a pointer, keeping comments, whitespace, key order, trailing commas, CRLF and a BOM if present.
+  - Re-parse the result and reject output that does not parse.
+  - Done when golden tests with comments, odd formatting, CRLF, BOM and deep nesting show add followed by remove is byte-identical to the input, and an invalid input is reported with line and column.
+  - _Boundary: edit-json_
+  - _Requirements: 3.1, 3.2, 3.4, 8.3_
+
+- [x] 2.3 (P) TOML table editing
+  - Implement `src/setup/edit/toml.rs` on `toml_edit`: set, read and remove one table, keeping comments and formatting.
+  - Recognise and convert the old `# BEGIN mmhmem` marker block into a plain table, and detect a duplicate `[mcp_servers.mmhmem]`.
+  - Done when golden tests show add/remove is byte-identical, the marker block converts cleanly, and invalid TOML is reported without changes.
+  - _Boundary: edit-toml_
+  - _Requirements: 3.1, 3.2, 3.4, 8.3_
+
+- [x] 2.4 Install record with journaling
+  - Implement `src/setup/record.rs`: the schema from the design, per-OS location, entry-level normalized hashes, `applying`/`done` states, atomic save, drift detection against disk, and the guarantee that no field can hold a secret.
+  - Done when tests cover save/load, drift on a changed entry versus unrelated edits in the same file, recovery after a simulated crash at each step, and an unreadable record.
+  - _Boundary: record_
+  - _Depends: 2.1_
+  - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.7_
+
+- [x] 2.5 Plan, apply and rollback
+  - Implement `src/setup/plan.rs`: `Plan`/`Change` types, apply exactly the planned bytes in order with backup and journaling, per-agent rollback in reverse order, and a plain-language summary plus diff per change.
+  - Done when tests show applied bytes equal planned bytes, a failure mid-agent restores that agent's files byte-identically and leaves other agents intact, and the record matches the disk afterwards.
+  - _Depends: 2.1, 2.4_
+  - _Requirements: 3.2, 3.5, 8.5_
+
+- [x] 2.6 Record rebuild and adoption of old installs
+  - When the record is missing or unreadable, scan each agent's known locations for mmhmem entries, files and the old Codex marker block, and produce an adoption plan that requires confirmation.
+  - Done when tests seeded with homes produced by the old PowerShell and Bash installers yield the expected adoption plan and change nothing until it is confirmed.
+  - _Depends: 2.3, 2.4, 2.5_
+  - _Requirements: 5.4, 5.6_
+
+- [ ] 3. Integrate the agents
+- [ ] 3.1 Agent trait, environment and embedded assets
+  - Rule for every agent module (from the 2.2/2.3 reviews): edit leaf keys of mmhmem's own entry (e.g. `mcp.servers.mmhmem.command`), never replace a whole user-visible object or array. Use the JSON array element functions for shared arrays (Claude Code `hooks.PreToolUse`), and keep user-added keys inside mmhmem's entry. Record `missing_parents` before a `set` so removal prunes only parents mmhmem created.
+  - Implement `src/setup/agents/mod.rs` (trait, registry, `Env` with home, OS and `PATH`) and `src/setup/assets.rs`, embedding skills, commands, routing instructions and the OpenCode plugin moved to `assets/setup/`.
+  - Add test doubles for the `claude`, `codex` and `opencode` CLIs that record arguments and edit files the way the confirmed real CLIs do.
+  - Done when a test home can be constructed and each double replays the fixtures from task 1.1.
+  - _Depends: 1.1_
+  - _Requirements: 2.1, 8.1, 8.4_
+
+- [ ] 3.2 (P) Claude Code
+  - Decide (from the 2.5 review): `plan.rs` applies file bytes only. Either plan the `~/.claude.json` `mcpServers.mmhmem` edit as file bytes with `edit::json` (reviewable, journaled, rollback-safe), or treat `claude mcp add/remove` as a separate non-file step with its own record and rollback. Prefer file bytes unless 1.1 fixtures show Claude Code rewrites the file in a way that conflicts.
+  - Detect the CLI, plan MCP registration through `claude mcp add --scope user`, the skill, the recap command, the delimited section in `CLAUDE.md` and the optional hook entry in `settings.json`, and plan removal of only those.
+  - Done when temp-home tests cover install, re-plan with no changes, the hook on and off, removal leaving unrelated settings byte-identical, and an invalid `settings.json` skipping only Claude Code.
+  - _Boundary: agent-claude-code_
+  - _Depends: 2.2, 2.5, 3.1_
+  - _Requirements: 3.1, 3.4, 7.3_
+
+- [ ] 3.3 (P) Claude Desktop
+  - Detect MSIX and non-MSIX profiles. Several profiles become a choice for the user, not an abort.
+  - Plan `mcpServers.mmhmem` and the skill folder, and add "restart Claude Desktop" as a pending user step.
+  - Done when tests cover each profile layout, several profiles, install, removal and an invalid config.
+  - _Boundary: agent-claude-desktop_
+  - _Depends: 2.2, 2.5, 3.1_
+  - _Requirements: 3.1, 3.4, 6.6, 7.3_
+
+- [ ] 3.4 (P) Codex
+  - Plan `[mcp_servers.mmhmem]` with `toml_edit`, the skills, the recap prompt and the optional `hooks.json` entry. Mark hook approval as a pending user step.
+  - Done when tests cover install, the old marker block, an existing duplicate table, removal and an invalid `config.toml`.
+  - _Boundary: agent-codex_
+  - _Depends: 2.3, 2.5, 3.1_
+  - _Requirements: 3.1, 3.4, 6.6, 7.3_
+
+- [ ] 3.5 (P) OpenCode and Antigravity
+  - OpenCode: plan the confirmed `mcp.servers.mmhmem` shape in the right one of `opencode.json` / `opencode.jsonc` (design §5 rule; report an entry present in both), plus the skill, the plural `commands/` folder and the optional plugin file. Adopt an existing correct entry written by the old installer instead of rewriting it.
+  - Antigravity: detect it, and show the import snippet as a user step.
+  - Done when tests cover both file names, comments kept in `.jsonc`, cleanup of the old entry, removal and an invalid file.
+  - _Boundary: agent-opencode_
+  - _Depends: 1.1, 2.2, 2.5, 3.1_
+  - _Requirements: 3.1, 3.4, 7.3_
+
+- [ ] 4. Prove each agent works
+- [ ] 4.1 MCP functional check
+  - Implement `src/setup/check.rs`: read back the registration as the agent will use it, start that exact command with the `rmcp` child-process client with a 20 s timeout, and run `initialize`, `tools/list` against the release's expected tools, and the tool chosen in 1.2.
+  - Done when tests pass against the real binary and fail with plain reasons for a wrong path, a server that exits, a timeout and a missing tool.
+  - _Depends: 1.2, 3.1_
+  - _Requirements: 6.1, 6.5_
+
+- [ ] 4.2 Agent checks, hook sample and rollback on failure
+  - Per agent, run its list/get command and parse the confirmed output, validate that the agent still loads its config, and run the hook sample when the hook is selected.
+  - Wire a failed check to per-agent rollback, and store `last_check` and pending user steps in the record.
+  - Done when tests with the CLI doubles cover pass, not connected, invalid config after write (rolled back) and hook mismatch, and the result lines match the design's wording.
+  - _Depends: 2.5, 3.2, 3.3, 3.4, 3.5, 4.1_
+  - _Requirements: 3.5, 6.2, 6.3, 6.4, 6.5, 6.6_
+
+- [ ] 5. Publish verifiable releases
+- [ ] 5.1 Archive assets per target
+  - Change the release build to publish `mmhmem-<tag>-<target>.zip` for Windows and `.tar.gz` for Linux and macOS, plus the existing bare binaries for one transition release, and include all of them in `SHA256SUMS`.
+  - Done when `publish-ci-release.ps1` tests show the asset set and that every asset is listed and re-verified after upload.
+  - _Requirements: 2.3, 2.8_
+
+- [ ] 5.2 (P) Sign checksums and publish attestations
+  - Generate the ed25519 key pair with `zipsign`. Store the secret only in the GitHub `release` environment with required reviewers, and embed the public key list in the binary.
+  - Sign each archive with `zipsign`, then compute `SHA256SUMS` over the signed archives, sign it as `SHA256SUMS.sig` with the same key, run the existing remote byte verification, and add `actions/attest-build-provenance` for every archive.
+  - Done when a dry-run publish produces archives and a `SHA256SUMS.sig` that the embedded keys verify, and a modified archive or `SHA256SUMS` fails verification in a test.
+  - _Requirements: 2.4_
+
+- [ ] 5.3 Render the bootstraps per release
+  - Write `deploy/bootstrap/install.sh.tmpl` (POSIX sh) and `install.ps1.tmpl` (Windows PowerShell 5.1 compatible) as the design describes. Write `scripts/render-bootstraps.ps1` to fill in the tag, base URL and archive hashes, and publish both rendered scripts as release assets.
+  - Done when shell tests (`sh`, `bash`, `dash`, PowerShell 5.1 and 7) show the scripts contain no agent logic, verify the hash, stop on a 404 or mismatch with plain messages and no changes, unpack with `tar` or `Expand-Archive`, start setup with `/dev/tty` on Unix, and clean up the temp folder.
+  - _Depends: 5.1_
+  - _Requirements: 1.1, 1.3, 2.1, 2.2, 2.3, 2.5, 2.7, 2.8, 8.2_
+
+- [ ] 5.4 Release verification inside setup
+  - Implement `src/setup/release.rs` as a thin wrapper around `self_update`'s GitHub backend: latest-release lookup, asset choice by target triple, download, `zipsign` signature check with the embedded `verifying_keys`, and unpack. Add the detached `SHA256SUMS.sig` check (`zipsign-api` / `ed25519-dalek`), the archive hash check, and a re-hash of the installed binary for status. Run the blocking calls in `spawn_blocking`.
+  - Refuse to build an updater with an empty key set (self_update silently disables signature checks then; research §11), and use `checksum_from_asset("SHA256SUMS")` for the hash check.
+  - Done when tests against a local HTTP server (the `self_update` base URL pointed at `httpmock`) cover success, an empty key set, a bad archive signature, a bad `SHA256SUMS` signature, a bad hash, a missing asset and an unsupported platform, each leaving nothing changed.
+  - _Depends: 1.4, 5.2_
+  - _Requirements: 2.3, 2.4, 2.5, 2.6, 2.7_
+
+- [ ] 6. Build the menu
+- [ ] 6.1 Plain-language text and the `setup` entry point
+  - Add `mmhmem setup` to the hand-parsed CLI in `src/main.rs` with no user-facing flags (only the internal `--bootstrap <tag>` and the maintainer `--release-dir <dir>`).
+  - Put every user-facing string in `src/setup/ui/text.rs`, reviewed for users who don't know the project.
+  - Done when `mmhmem setup` starts, the internal arguments are hidden from help, and a test asserts that no string in `text.rs` uses project-internal terms without an explanation.
+  - _Requirements: 1.3, 1.4, 1.5_
+
+- [ ] 6.2 Full-screen menu
+  - Set `ratatui` to `default-features = false, features = ["crossterm"]` and record the release binary size before and after (research §11).
+  - Implement `src/setup/ui/app.rs` on `ratatui` + `crossterm`: Home with state from the record plus live detection and the newest release, Agents, Features (hook off by default), Review with diff, and Progress with check results. Show only applicable actions and keep a visible key legend.
+  - Done when `TestBackend` snapshot tests cover each screen and state (fresh, installed, update available, drift, pending user step), and key-sequence tests show cancel or quit at every screen before confirm changes nothing.
+  - _Depends: 2.5, 4.2, 6.1_
+  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 1.5_
+
+- [ ] 6.3 (P) Numbered fallback and no-terminal default
+  - Implement `src/setup/ui/fallback.rs` with the same screens as numbered prompts, used when raw mode or the alternate screen is unavailable or `TERM=dumb`. Without a terminal, install the default selection, or stop without changes when no agent is detected.
+  - Done when tests drive the fallback through install and cancel, and the no-terminal path installs the defaults with plain result lines.
+  - _Boundary: ui-fallback_
+  - _Depends: 6.1_
+  - _Requirements: 4.8, 4.9_
+
+- [ ] 7. Update and removal
+- [ ] 7.1 Update flow
+  - Let `self_update` replace the running binary (Windows file-in-use case included), record its hash and the `PATH` entry (`winreg` + `WM_SETTINGCHANGE` on Windows), re-plan all agents with the recorded selection, review, apply and check. An up-to-date install yields "Everything is current".
+  - Done when tests update a temp-home install from a previous-release fixture to the current one, keep the user's choices, and show a second run reports no changes with byte-identical files.
+  - _Depends: 5.4, 6.2_
+  - _Requirements: 7.1, 7.2_
+
+- [ ] 7.2 (P) Removal flow
+  - Reverse only recorded entries with the same parsers, remove the binary, the `PATH` entry and the record last, and keep the store unless "Also delete my saved memories" is ticked.
+  - Done when tests show unrelated settings, including later user edits to shared files, are byte-identical after removal and the store survives by default.
+  - _Depends: 6.2_
+  - _Requirements: 7.3, 7.4_
+
+- [ ] 8. Gate releases on real installs
+- [ ] 8.1 End-to-end harness
+  - Write the CI job `.github/workflows/installer-e2e.yml`: build the commit's archives, render the bootstraps with a local base URL using the same renderer, serve them over local HTTP, and create a clean home seeded with agent configs that contain unrelated settings, comments and odd formatting. Install the real `claude`, `codex` and `opencode` CLIs from their official packages.
+  - Drive the menu path with `expectrl` (pseudo-terminal on Unix, ConPTY on Windows), and serve assets with `httpmock` or `tiny_http`.
+  - Done when the job runs green on `ubuntu-latest`, `macos-14`, `macos-13` and `windows-latest` (PowerShell 5.1 and 7) through the seeding step.
+  - _Depends: 5.3_
+  - _Requirements: 10.1, 10.2_
+
+- [ ] 8.2 End-to-end scenarios
+  - Run the exact user one-liner with a pseudo-terminal (`script` / ConPTY) for the menu path and without a terminal for the default path. Require exit 0 and every agent passing.
+  - Then run again (byte-identical home and "Everything is current"), update from the previous published release, remove, and compare the seeded files byte-for-byte.
+  - Add the failure cases: cancel at Review, a 404 on the archive, a wrong hash, a bad signature on update, and an already-invalid `opencode.json`. Each must leave the home byte-identical.
+  - Done when all scenarios pass on every matrix entry, and a deliberately broken commit (wrong hash rendered) fails the job.
+  - _Depends: 7.1, 7.2, 8.1_
+  - _Requirements: 10.3, 10.4_
+
+- [ ] 8.3 Block publishing on the gate
+  - Make the release workflow require a green `installer-e2e` run for the exact tag commit, in the same way it already requires main CI.
+  - Done when `test-publish-ci-release.ps1` shows publishing refuses a commit without a green installer run.
+  - _Depends: 8.2_
+  - _Requirements: 10.5_
+
+- [ ] 9. Migrate and remove the old installers
+- [ ] 9.1 README and release page
+  - Put the two one-liners first in `README.md` and in the release notes template, followed by one plain paragraph on what the installer does and the optional `gh attestation verify` command. Remove all checkout-based install instructions from user docs.
+  - Done when a docs check asserts the one-liners are the first install text and point at release URLs only.
+  - _Requirements: 1.1, 1.2, 2.2_
+
+- [ ] 9.2 Transition release
+  - Replace the root `install.ps1` / `install.sh` with stubs that print the new one-liner and exit without downloading. Publish the first release with `mmhmem setup`, then push `main`.
+  - Done when the release passes the installer gate and the published one-liners install it on all matrix platforms.
+  - _Depends: 8.3, 9.1_
+  - _Requirements: 2.2_
+
+- [ ] 9.3 Delete the replaced scripts
+  - In the following release, delete `lib.ps1`, `lib.sh`, `deploy/install_local.*`, `deploy/manage_*`, `deploy/*_onboarding.*`, `deploy/check_worker.*`, `deploy/install_binary.ps1`, the root stubs, and their `scripts/test-*` / `test_*.py` files. Before deleting, port any still-relevant test case to the Rust suites.
+  - Done when the repository has no installer logic outside `src/setup/` and `deploy/bootstrap/`, `rg` finds no reference to the deleted files, and CI including the installer gate is green.
+  - _Depends: 9.2_
+  - _Requirements: 8.6_
