@@ -483,6 +483,9 @@ pub fn convert_marker_block(input: &str, path: &[&str]) -> Result<String, TomlEd
 #[path = "toml_json.rs"]
 mod json_view;
 pub use json_view::get_item_json;
+#[path = "toml_keys.rs"]
+mod keys;
+pub use keys::remove_keys;
 
 #[cfg(test)]
 #[path = "toml_tests.rs"]

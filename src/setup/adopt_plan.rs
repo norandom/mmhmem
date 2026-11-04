@@ -47,6 +47,7 @@ fn agent_changes(agent: &AgentScan, record: Option<&InstallRecord>) -> Vec<Chang
             before: Some(a.before.clone()),
             after: Some(a.after.clone()),
             owner_only: false,
+            hide_diff: false,
             missing_parents: None,
             summary: a.summary(agent.agent),
         })

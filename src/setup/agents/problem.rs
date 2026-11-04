@@ -13,6 +13,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::setup::edit::json::JsonEditError;
+use crate::setup::edit::markdown::{AMBIGUOUS_MARKERS, AmbiguousMarkers};
 use crate::setup::edit::toml::TomlEditError;
 use crate::setup::plan::Change;
 
@@ -39,6 +40,13 @@ pub enum AgentProblem {
         file: PathBuf,
         /// What is wrong (never contains file text).
         error: TomlEditError,
+    },
+    /// mmhmem's Markdown section cannot be found unambiguously.
+    Markdown {
+        /// The file.
+        file: PathBuf,
+        /// Fixed reason, e.g. [`AMBIGUOUS_MARKERS`] (never file text).
+        reason: &'static str,
     },
     /// mmhmem's entry is in more than one file the agent loads (OpenCode's
     /// `opencode.json` and `opencode.jsonc`); the user keeps one.
@@ -73,6 +81,7 @@ impl fmt::Display for AgentProblem {
             }
             Self::Json { file, error } => write!(f, "{}: {error}", file.display()),
             Self::Toml { file, error } => write!(f, "{}: {error}", file.display()),
+            Self::Markdown { file, reason } => write!(f, "{}: {reason}", file.display()),
             Self::DuplicateEntry { files } => write!(
                 f,
                 "mmhmem is set up in more than one file: {}; keep only one",
@@ -88,6 +97,17 @@ impl fmt::Display for AgentProblem {
 }
 
 impl std::error::Error for AgentProblem {}
+
+impl AgentProblem {
+    /// The problem for ambiguous section markers in `file`.
+    pub fn markdown(file: &Path) -> impl Fn(AmbiguousMarkers) -> Self + use<> {
+        let file = file.to_path_buf();
+        move |_| Self::Markdown {
+            file: file.clone(),
+            reason: AMBIGUOUS_MARKERS,
+        }
+    }
+}
 
 /// Reads a whole file; `Ok(None)` when it does not exist.
 pub fn read_optional(file: &Path) -> Result<Option<Vec<u8>>, AgentProblem> {

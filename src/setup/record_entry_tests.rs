@@ -81,6 +81,42 @@ fn toml_user_key_inside_table_is_unchanged_and_managed_key_is_changed() {
     assert!(matches!(only_drift(&record), Drift::Changed { .. }));
 }
 
+#[test]
+fn an_entry_left_with_only_user_keys_is_missing() {
+    let json = opencode_target(Path::new("/h/opencode.json"));
+    let user_only = "{\"mcp\": {\"servers\": {\"mmhmem\": {\"enabled\": false}}}}";
+    assert_eq!(
+        observe_in(&json, user_only.as_bytes()),
+        Observation::Missing
+    );
+    let empty = "{\"mcp\": {\"servers\": {\"mmhmem\": {}}}}";
+    assert_eq!(observe_in(&json, empty.as_bytes()), Observation::Missing);
+    let one_left = "{\"mcp\": {\"servers\": {\"mmhmem\": {\"type\": \"local\", \"x\": 1}}}}";
+    assert!(matches!(
+        observe_in(&json, one_left.as_bytes()),
+        Observation::Present(_)
+    ));
+    let toml = Target::TomlTable {
+        file: Path::new("/h/config.toml").to_path_buf(),
+        key: key_path(&["mcp_servers", "mmhmem"]).unwrap(),
+        managed_keys: Some(key_path(&["command", "args"]).unwrap()),
+    };
+    let user_only = "[mcp_servers.mmhmem]\ntool_timeout_sec = 60\n";
+    assert_eq!(
+        observe_in(&toml, user_only.as_bytes()),
+        Observation::Missing
+    );
+    let whole = Target::JsonEntry {
+        file: Path::new("/h/opencode.json").to_path_buf(),
+        pointer: key_path(&["mcp", "servers", "mmhmem"]).unwrap(),
+        managed_keys: None,
+    };
+    assert!(matches!(
+        observe_in(&whole, empty.as_bytes()),
+        Observation::Present(_)
+    ));
+}
+
 const OURS: &str = r#"{ "matcher": "Read", "hooks": [ { "type": "command", "command": "C:\\bin\\mmhmem.exe", "args": ["hook", "claude"], "timeout": 5 } ] }"#;
 
 fn settings(user_a: &str, ours: &[&str]) -> String {

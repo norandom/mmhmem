@@ -74,6 +74,7 @@ pub(super) fn change(
         before: before.map(<[u8]>::to_vec),
         after: after.map(<[u8]>::to_vec),
         owner_only: false,
+        hide_diff: false,
         missing_parents: None,
         summary: "test change".to_owned(),
     }

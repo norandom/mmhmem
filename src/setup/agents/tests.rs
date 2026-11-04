@@ -37,6 +37,7 @@ impl FakeAgent {
             before,
             after: Some(after),
             owner_only: false,
+            hide_diff: false,
             missing_parents: None,
             summary: format!("append {add}"),
         }
@@ -343,10 +344,8 @@ fn registry_sorts_into_display_order_and_rejects_duplicates() {
         AgentId::Codex,
     ]));
     assert_eq!(dup.unwrap_err().to_string(), "Codex is registered twice");
-    let builtin = Registry::builtin().ids();
-    let mut sorted = builtin.clone();
-    sorted.sort_by_key(|id| id.display_position());
-    assert_eq!(builtin, sorted);
+    let builtin = Registry::builtin(std::path::Path::new("mmhmem")).ids();
+    assert_eq!(builtin, DISPLAY_ORDER);
 }
 
 #[test]

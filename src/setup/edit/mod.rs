@@ -2,4 +2,5 @@
 //! whitespace and key order, and its result is re-parsed before use.
 
 pub mod json;
+pub mod markdown;
 pub mod toml;

@@ -125,13 +125,44 @@ fn managed_keys_follow_the_agent_rule() {
             other => panic!("not an entry: {other:?}"),
         }
     };
-    assert_eq!(managed(AgentId::ClaudeCode), ["command", "args"]);
+    assert_eq!(managed(AgentId::ClaudeCode), ["type", "command", "args"]);
     assert_eq!(managed(AgentId::ClaudeDesktop), ["command", "args"]);
     assert_eq!(managed(AgentId::Codex), ["command", "args"]);
     assert_eq!(managed(AgentId::OpenCode), ["type", "command"]);
     let features = scan.agent(AgentId::Codex).unwrap().features();
     assert_eq!(features.len(), 4);
     assert!(features.contains(&Feature::ReadHook));
+}
+
+#[test]
+fn codex_home_and_xdg_config_home_are_followed_like_the_agents() {
+    let mut home = fx::bash();
+    let root = home.root.clone();
+    let (codex, xdg) = (root.join("codex-home"), root.join("xdg"));
+    std::fs::create_dir_all(&xdg).unwrap();
+    std::fs::rename(home.home().join(".codex"), &codex).unwrap();
+    std::fs::rename(home.home().join(".config/opencode"), xdg.join("opencode")).unwrap();
+    // Without the overrides the moved files are not found.
+    let unset = scan(&home.env);
+    assert_eq!(kinds(&unset, AgentId::Codex), [ArtefactKind::Skill; 2]);
+    assert!(unset.agent(AgentId::OpenCode).is_none());
+    home.env.codex_home = Some(codex.clone());
+    home.env.xdg_config_home = Some(xdg.clone());
+    let found = check_expected_scan(&home);
+    let files = |agent| -> Vec<std::path::PathBuf> {
+        let a = found.agent(agent).unwrap().artefacts.iter();
+        a.map(|a| a.file.clone()).collect()
+    };
+    let codex_files = files(AgentId::Codex);
+    assert_eq!(
+        codex_files.iter().filter(|f| f.starts_with(&codex)).count(),
+        3
+    );
+    assert!(codex_files.contains(&codex.join("config.toml")));
+    assert!(codex_files.contains(&codex.join("prompts").join("mmhmem-recap.md")));
+    let opencode = files(AgentId::OpenCode);
+    assert!(opencode.iter().all(|f| f.starts_with(xdg.join("opencode"))));
+    assert_eq!(adoption_plan(&found, None, run()).changes.len(), 17);
 }
 
 #[test]

@@ -51,11 +51,11 @@ pub struct ScanEnv {
     pub appdata: Option<PathBuf>,
     /// `%LOCALAPPDATA%` (Windows): MSIX profiles and the binary folder.
     pub local_app_data: Option<PathBuf>,
-    /// `XDG_CONFIG_HOME`: where the old hook helper put the OpenCode plugin.
+    /// `XDG_CONFIG_HOME`: OpenCode's config folder is in it.
     pub xdg_config_home: Option<PathBuf>,
     /// `CLAUDE_CONFIG_DIR`: where the old hook helper found `settings.json`.
     pub claude_config_dir: Option<PathBuf>,
-    /// `CODEX_HOME`: where the old hook helper found `hooks.json`.
+    /// `CODEX_HOME`: Codex's config folder.
     pub codex_home: Option<PathBuf>,
     /// The folders on the user's `PATH` (`None`: not inspected).
     pub user_path: Option<Vec<PathBuf>>,
@@ -95,6 +95,27 @@ impl ScanEnv {
             codex_home: var("CODEX_HOME"),
             user_path: std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()),
         })
+    }
+
+    /// `XDG_CONFIG_HOME`, or `~/.config` (OpenCode's folder is in it).
+    pub fn config_home(&self) -> PathBuf {
+        self.xdg_config_home
+            .clone()
+            .unwrap_or_else(|| self.home.join(".config"))
+    }
+
+    /// `CLAUDE_CONFIG_DIR`, or `~/.claude`.
+    pub fn claude_config_dir(&self) -> PathBuf {
+        self.claude_config_dir
+            .clone()
+            .unwrap_or_else(|| self.home.join(".claude"))
+    }
+
+    /// `CODEX_HOME`, or `~/.codex`.
+    pub fn codex_home(&self) -> PathBuf {
+        self.codex_home
+            .clone()
+            .unwrap_or_else(|| self.home.join(".codex"))
     }
 }
 

@@ -48,7 +48,8 @@ mod engine;
 
 pub use engine::{apply, rollback_agent};
 
-/// The diff line shown instead of the contents of an owner-only file.
+/// The diff line shown instead of the contents of an owner-only file or a
+/// change with [`Change::hide_diff`].
 pub const HIDDEN_DIFF: &str = "contents hidden (contains a key)";
 /// The diff line shown for content that is not UTF-8 text.
 pub const BINARY_DIFF: &str = "contents not shown (not text)";
@@ -94,6 +95,9 @@ pub struct Change {
     /// Write with [`crate::setup::fsx::write_owner_only`] (key files). Its
     /// contents are never shown or logged.
     pub owner_only: bool,
+    /// Never show the contents in the diff, but keep the file's permissions
+    /// (a shared file holding account data or other tools' secrets).
+    pub hide_diff: bool,
     /// Parent keys the change creates (JSON/TOML), stored in the record so
     /// removal prunes only those.
     pub missing_parents: Option<u32>,
@@ -112,6 +116,7 @@ impl fmt::Debug for Change {
             .field("before_len", &len(&self.before))
             .field("after_len", &len(&self.after))
             .field("owner_only", &self.owner_only)
+            .field("hide_diff", &self.hide_diff)
             .field("missing_parents", &self.missing_parents)
             .field("summary", &self.summary)
             .finish()
@@ -120,10 +125,10 @@ impl fmt::Debug for Change {
 
 impl Change {
     /// A unified diff of `before` → `after` for the review screen. Owner-only
-    /// files give [`HIDDEN_DIFF`], non-text content [`BINARY_DIFF`] and
-    /// identical bytes [`NO_DIFF`].
+    /// and hidden-diff files give [`HIDDEN_DIFF`], non-text content
+    /// [`BINARY_DIFF`] and identical bytes [`NO_DIFF`].
     pub fn diff(&self) -> String {
-        if self.owner_only {
+        if self.owner_only || self.hide_diff {
             return HIDDEN_DIFF.to_owned();
         }
         if self.before == self.after {

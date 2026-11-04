@@ -23,13 +23,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::setup::adopt::agent_label;
 use crate::setup::plan::Change;
 use crate::setup::record::{CheckDetail, CheckResult, InstallRecord, LastCheck, UtcTimestamp};
 
+pub mod antigravity;
+pub mod claude_code;
+pub mod claude_desktop;
+pub mod codex;
 mod env;
+pub mod opencode;
 mod problem;
 
 pub use crate::setup::adopt::ScanEnv;
@@ -44,6 +49,8 @@ pub use problem::{AgentProblem, FileChain, read_optional};
 pub(crate) mod doubles;
 #[cfg(test)]
 pub(crate) mod doubles_cli;
+#[cfg(test)]
+mod registry_tests;
 #[cfg(test)]
 mod tests;
 
@@ -251,6 +258,14 @@ pub trait Agent: Send + Sync {
 
     /// The changes that take out everything `rec` lists for this agent.
     fn plan_remove(&self, env: &Env, rec: &AgentRecord) -> Vec<Change>;
+
+    /// The steps only the user can do after installing `want` (approve the
+    /// Codex hook, restart Claude Desktop, import the Antigravity snippet);
+    /// the caller stores them in the agent's record. None by default.
+    fn pending_steps(&self, want: &Selection) -> Vec<PendingUserStep> {
+        let _ = want;
+        Vec::new()
+    }
 }
 
 /// The same agent was registered twice.
@@ -286,9 +301,28 @@ impl Registry {
         Ok(Self { agents })
     }
 
-    /// The agents built into this release. Tasks 3.2–3.5 add theirs here.
-    pub fn builtin() -> Self {
-        Self { agents: Vec::new() }
+    /// The agents built into this release, in [`DISPLAY_ORDER`], each wired
+    /// to the installed mmhmem `binary`.
+    pub fn builtin(binary: &Path) -> Self {
+        Self {
+            agents: vec![
+                Box::new(claude_code::ClaudeCode::new(binary)),
+                Box::new(claude_desktop::ClaudeDesktop::new(binary)),
+                Box::new(codex::Codex::new(binary)),
+                Box::new(opencode::OpenCode::new(binary)),
+                Box::new(antigravity::Antigravity::new(binary)),
+            ],
+        }
+    }
+
+    /// Each selected agent's [`Agent::pending_steps`] for `want`, in display
+    /// order; agents without steps are left out.
+    pub fn pending_steps(&self, want: &Selection) -> Vec<(AgentId, Vec<PendingUserStep>)> {
+        self.agents()
+            .filter(|a| want.agents().contains(&a.id()))
+            .map(|a| (a.id(), a.pending_steps(want)))
+            .filter(|(_, steps)| !steps.is_empty())
+            .collect()
     }
 
     /// The agents, in display order.

@@ -14,7 +14,8 @@
 //!   ignored.
 //! - With `managed_keys` set, a `json_entry` or `toml_table` object is cut
 //!   down to those top-level keys first (an absent key stays absent), so
-//!   keys the user adds inside mmhmem's entry are not drift.
+//!   keys the user adds inside mmhmem's entry are not drift. An object that
+//!   holds none of those keys is `Missing` (only user keys are left).
 //! - `json_array_element`: the one array element its `ElementMatcher`
 //!   accepts, in canonical JSON. No match is `Missing`; more than one is
 //!   `Unreadable`.
@@ -171,20 +172,27 @@ fn write_canonical(value: &Value, out: &mut String) {
 
 /// Keep only `managed` top-level keys of an object entry (absent keys stay
 /// absent, so they are part of the hash as absent). Non-objects and `None`
-/// are returned whole.
-fn managed_view(value: Value, managed: Option<&[KeySegment]>) -> Value {
+/// are returned whole. An object that holds none of the `managed` keys is
+/// `None`: only the user's own keys are left, so mmhmem's entry is gone.
+fn managed_view(value: Value, managed: Option<&[KeySegment]>) -> Option<Value> {
     match (value, managed) {
-        (Value::Object(mut map), Some(keys)) => Value::Object(
-            keys.iter()
+        (Value::Object(mut map), Some(keys)) => {
+            let kept: serde_json::Map<String, Value> = keys
+                .iter()
                 .filter_map(|k| map.remove_entry(k.as_str()))
-                .collect(),
-        ),
-        (value, _) => value,
+                .collect();
+            (!kept.is_empty()).then_some(Value::Object(kept))
+        }
+        (value, _) => Some(value),
     }
 }
 
 fn hash_value(value: &Value) -> Observation {
     Observation::Present(Sha256Hex::of(normalize_json(value).as_bytes()))
+}
+
+fn hash_managed(value: Value, managed: Option<&[KeySegment]>) -> Observation {
+    managed_view(value, managed).map_or(Observation::Missing, |v| hash_value(&v))
 }
 
 /// The hash recorded for a `path_entry` target.
@@ -256,7 +264,7 @@ fn segments(path: &[KeySegment]) -> Vec<&str> {
 
 fn observe_json(text: &str, pointer: &[KeySegment], managed: Option<&[KeySegment]>) -> Observation {
     match edit::json::get(text, &segments(pointer)) {
-        Ok(Some(value)) => hash_value(&managed_view(value, managed)),
+        Ok(Some(value)) => hash_managed(value, managed),
         Ok(None) => Observation::Missing,
         Err(e) => Observation::Unreadable(e.to_string()),
     }
@@ -264,7 +272,7 @@ fn observe_json(text: &str, pointer: &[KeySegment], managed: Option<&[KeySegment
 
 fn observe_toml(text: &str, key: &[KeySegment], managed: Option<&[KeySegment]>) -> Observation {
     match edit::toml::get_item_json(text, &segments(key)) {
-        Ok(Some(value)) => hash_value(&managed_view(value, managed)),
+        Ok(Some(value)) => hash_managed(value, managed),
         Ok(None) => Observation::Missing,
         Err(e) => Observation::Unreadable(e.to_string()),
     }

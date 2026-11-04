@@ -310,26 +310,17 @@ impl Env {
 
     /// `XDG_CONFIG_HOME`, or `~/.config`.
     pub fn config_home(&self) -> PathBuf {
-        self.dirs
-            .xdg_config_home
-            .clone()
-            .unwrap_or_else(|| self.home().join(".config"))
+        self.dirs.config_home()
     }
 
     /// `CLAUDE_CONFIG_DIR`, or `~/.claude`.
     pub fn claude_config_dir(&self) -> PathBuf {
-        self.dirs
-            .claude_config_dir
-            .clone()
-            .unwrap_or_else(|| self.home().join(".claude"))
+        self.dirs.claude_config_dir()
     }
 
     /// `CODEX_HOME`, or `~/.codex`.
     pub fn codex_home(&self) -> PathBuf {
-        self.dirs
-            .codex_home
-            .clone()
-            .unwrap_or_else(|| self.home().join(".codex"))
+        self.dirs.codex_home()
     }
 
     /// Finds `name` in [`Env::path_dirs`] only (never the process `PATH`),

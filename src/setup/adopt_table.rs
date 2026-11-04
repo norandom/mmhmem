@@ -4,12 +4,17 @@
 //! `deploy/manage_hooks.{ps1,py}` and `deploy/manage_routing.{ps1,py}`; the
 //! line references are in the doc comment of each function.
 //!
-//! Nothing here touches the disk except [`desktop_profiles`], which lists
-//! folders to find the Claude Desktop profiles.
+//! The folders follow the same overrides the agents use (`CLAUDE_CONFIG_DIR`,
+//! `CODEX_HOME`, `XDG_CONFIG_HOME`; see [`ScanEnv`]), and the managed keys of
+//! each entry are the agent's, so an adopted entry and a planned one are the
+//! same record [`Target`]. Nothing here touches the disk except the Claude
+//! Desktop profile discovery shared with the agent
+//! ([`claude_desktop::profiles`]), which lists folders.
 
 use std::path::{Path, PathBuf};
 
 use super::{ArtefactKind, ScanEnv};
+use crate::setup::agents::claude_desktop;
 use crate::setup::record::{
     AgentId, ElementMatcher, HookHarness, KeySegment, Os, SectionId, Target, key_path,
 };
@@ -91,13 +96,13 @@ fn hook(agent: AgentId, file: PathBuf, harness: HookHarness) -> Spec {
 fn claude_code(env: &ScanEnv) -> Vec<Spec> {
     let id = AgentId::ClaudeCode;
     let dir = join(&env.home, &[".claude"]);
-    let settings_dir = env.claude_config_dir.clone().unwrap_or_else(|| dir.clone());
+    let settings_dir = env.claude_config_dir();
     vec![
         json_entry(
             id,
             join(&env.home, &[".claude.json"]),
             &["mcpServers", "mmhmem"],
-            &["command", "args"],
+            &["type", "command", "args"],
         ),
         file(
             id,
@@ -119,15 +124,15 @@ fn claude_code(env: &ScanEnv) -> Vec<Spec> {
 }
 
 /// Codex: `[mcp_servers.mmhmem]` (plain, or inside the `# BEGIN mmhmem` block)
-/// in `~/.codex/config.toml` (ps1:314-316,354-358, sh:451-455); skills
+/// in `config.toml` (ps1:314-316,354-358, sh:451-455); skills
 /// `~/.agents/skills/unified-memory` and `~/.agents/skills/mmhmem-recap`
-/// (ps1:608-609, sh:819-820); prompt `~/.codex/prompts/mmhmem-recap.md`
-/// (ps1:610, sh:821); hook in `<CODEX_HOME or ~/.codex>/hooks.json`
-/// (`manage_hooks.ps1:225,533`).
+/// (ps1:608-609, sh:819-820); prompt `prompts/mmhmem-recap.md` (ps1:610,
+/// sh:821); hook in `hooks.json` (`manage_hooks.ps1:225,533`). The old
+/// installers used `~/.codex`; like the agent, `CODEX_HOME` is honoured
+/// for all three.
 fn codex(env: &ScanEnv) -> Vec<Spec> {
     let id = AgentId::Codex;
-    let dir = join(&env.home, &[".codex"]);
-    let hooks_dir = env.codex_home.clone().unwrap_or_else(|| dir.clone());
+    let dir = env.codex_home();
     let skills = join(&env.home, &[".agents", "skills"]);
     let table = Target::TomlTable {
         file: join(&dir, &["config.toml"]),
@@ -151,30 +156,25 @@ fn codex(env: &ScanEnv) -> Vec<Spec> {
             ArtefactKind::RecapCommand,
             join(&dir, &["prompts", "mmhmem-recap.md"]),
         ),
-        hook(id, join(&hooks_dir, &["hooks.json"]), HookHarness::Codex),
+        hook(id, join(&dir, &["hooks.json"]), HookHarness::Codex),
     ]
 }
 
-/// OpenCode: `mcp.servers.mmhmem` in `~/.config/opencode/opencode.json`
-/// (ps1:288,560, sh:434,767); `opencode.jsonc` is also scanned because
-/// OpenCode loads both (research 8); skill (ps1:563, sh:771); command in
-/// `command/` (ps1:564, sh:772) and, for current OpenCode, `commands/`;
-/// routing section in `~/.config/opencode/AGENTS.md`
-/// (`routing_onboarding.ps1:33`); plugin
-/// `<XDG_CONFIG_HOME or ~/.config>/opencode/plugins/mmhmem-read-routing.js`
+/// OpenCode, all in `<XDG_CONFIG_HOME or ~/.config>/opencode` like the
+/// agent: `mcp.servers.mmhmem` in `opencode.json` (ps1:288,560, sh:434,767);
+/// `opencode.jsonc` is also scanned because OpenCode loads both (research
+/// 8); skill (ps1:563, sh:771); command in `command/` (ps1:564, sh:772) and,
+/// for current OpenCode, `commands/`; routing section in `AGENTS.md`
+/// (`routing_onboarding.ps1:33`); plugin `plugins/mmhmem-read-routing.js`
 /// (`manage_hooks.ps1:476-478`).
 fn opencode(env: &ScanEnv) -> Vec<Spec> {
     let id = AgentId::OpenCode;
-    let dir = join(&env.home, &[".config", "opencode"]);
-    let plugin_dir = env
-        .xdg_config_home
-        .as_ref()
-        .map_or_else(|| dir.clone(), |x| x.join("opencode"));
+    let dir = env.config_home().join("opencode");
     let mcp = ["mcp", "servers", "mmhmem"];
     let mut plugin = file(
         id,
         ArtefactKind::ReadPlugin,
-        join(&plugin_dir, &["plugins", "mmhmem-read-routing.js"]),
+        join(&dir, &["plugins", "mmhmem-read-routing.js"]),
     );
     plugin.signature = Some(PLUGIN_SIGNATURE);
     vec![
@@ -205,64 +205,20 @@ fn opencode(env: &ScanEnv) -> Vec<Spec> {
 fn claude_desktop(env: &ScanEnv) -> Vec<Spec> {
     let id = AgentId::ClaudeDesktop;
     let mut specs = Vec::new();
-    for (config_dir, skill_dir) in desktop_profiles(env) {
+    for profile in claude_desktop::profiles(env) {
         specs.push(json_entry(
             id,
-            config_dir.join("claude_desktop_config.json"),
+            profile.config_dir.join(claude_desktop::CONFIG_FILE),
             &["mcpServers", "mmhmem"],
             &["command", "args"],
         ));
         specs.push(file(
             id,
             ArtefactKind::Skill,
-            join(&skill_dir, &["unified-memory", "SKILL.md"]),
+            join(&profile.skill_dir, &["unified-memory", "SKILL.md"]),
         ));
     }
     specs
-}
-
-/// The Claude Desktop folders that exist, as (config folder, skills folder).
-///
-/// Windows (ps1:290-303): `%APPDATA%\Claude` and every MSIX profile
-/// `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`; skills go in
-/// `<config>\skills`. Other systems (sh:438-441, 786-790):
-/// `~/Library/Application Support/Claude` (skills in `~/Library/Claude/skills`)
-/// and `~/.config/Claude` (skills in `~/.config/Claude/skills`).
-fn desktop_profiles(env: &ScanEnv) -> Vec<(PathBuf, PathBuf)> {
-    let mut found = Vec::new();
-    if env.os == Os::Windows {
-        let mut dirs = msix_profiles(env);
-        dirs.extend(env.appdata.iter().map(|a| a.join("Claude")));
-        for dir in dirs.into_iter().filter(|d| d.is_dir()) {
-            found.push((dir.clone(), dir.join("skills")));
-        }
-    } else {
-        let mac = join(&env.home, &["Library", "Application Support", "Claude"]);
-        let linux = join(&env.home, &[".config", "Claude"]);
-        if mac.is_dir() {
-            found.push((mac, join(&env.home, &["Library", "Claude", "skills"])));
-        }
-        if linux.is_dir() {
-            found.push((linux.clone(), linux.join("skills")));
-        }
-    }
-    found
-}
-
-fn msix_profiles(env: &ScanEnv) -> Vec<PathBuf> {
-    let Some(local) = &env.local_app_data else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(local.join("Packages")) else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().starts_with("Claude_"))
-        .map(|e| join(&e.path(), &["LocalCache", "Roaming", "Claude"]))
-        .collect();
-    dirs.sort();
-    dirs
 }
 
 /// Every place an old installer may have written, in agent order.
