@@ -1,0 +1,24 @@
+{
+	"numStartups": 42,
+	"installMethod": "npm-global",
+	"autoUpdates": false,
+	"theme": "dark-daltonized",
+	"hasCompletedOnboarding": true,
+	"tipsHistory": {"memory-command": 3, "shift-tab": 7},
+	"mcpServers": {
+		"user-notes": {
+			"type": "stdio",
+			"command": "node",
+			"args": ["-e", "/* the user's own server; the e2e never starts it */"],
+			"env": {"NOTES_DIR": "~/Notes — Ünïcode ✓"}
+		},
+		"remote-docs": {   "type": "http",   "url": "http://127.0.0.1:9/mcp" }
+	},
+	"projects": {
+		"/work/example": {
+			"allowedTools": ["Bash(git status)"],
+			"mcpServers": {},
+			"hasTrustDialogAccepted": true
+		}
+	}
+}

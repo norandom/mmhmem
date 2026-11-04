@@ -1,0 +1,17 @@
+// OpenCode settings the user already had (seeded by the mmhmem installer e2e).
+{
+  "$schema": "https://opencode.ai/config.json",
+  /* the user's preferred model */
+  "model": "anthropic/claude-sonnet-4-5",
+  "autoupdate": false,
+  "mcp": {
+    "servers": {
+      // a server the user added earlier; disabled, so it is never started
+      "user-docs": {
+        "type": "local",
+        "command": ["node", "-e", "/* placeholder */"],
+        "enabled": false,
+      },
+    },
+  },
+}

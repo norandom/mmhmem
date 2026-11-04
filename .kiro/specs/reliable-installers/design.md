@@ -424,7 +424,7 @@ visible: `↑↓ move · space select · enter continue · esc back · q quit`.
   machine, including cancel at every screen.
 - **CI end-to-end** (`.github/workflows/installer-e2e.yml`, required for
   `publish`):
-  - Matrix: `ubuntu-latest`, `macos-14`, `macos-13`, `windows-latest`. On
+  - Matrix: `ubuntu-latest`, `macos-15` (arm64), `macos-15-intel` (x86_64; the macos-13/14 images were retired in 2026), `windows-latest`. On
     Windows it runs under both `powershell.exe` 5.1 and `pwsh`.
   - Release artifacts are built from the commit, the bootstraps are
     rendered, and both are served from a local HTTP server. The test

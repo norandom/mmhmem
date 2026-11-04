@@ -189,9 +189,10 @@ released.
 
 - [ ] 8. Gate releases on real installs
 - [ ] 8.1 End-to-end harness
+  - Status 2026-11-04: workflow defined (actionlint clean) and every local step verified on Windows under PowerShell 7 and 5.1; open until the job runs green on GitHub after the first push. Phases that run the real installer refuse to run outside GitHub Actions unless MMHMEM_E2E_ALLOW_LOCAL is set.
   - Write the CI job `.github/workflows/installer-e2e.yml`: build the commit's archives, render the bootstraps with a local base URL using the same renderer, serve them over local HTTP, and create a clean home seeded with agent configs that contain unrelated settings, comments and odd formatting. Install the real `claude`, `codex` and `opencode` CLIs from their official packages.
   - Drive the menu path with `expectrl` (pseudo-terminal on Unix, ConPTY on Windows), and serve assets with `httpmock` or `tiny_http`.
-  - Done when the job runs green on `ubuntu-latest`, `macos-14`, `macos-13` and `windows-latest` (PowerShell 5.1 and 7) through the seeding step.
+  - Done when the job runs green on `ubuntu-latest`, `macos-15` (arm64), `macos-15-intel` (x86_64; the macos-13/14 images were retired in 2026) and `windows-latest` (PowerShell 5.1 and 7) through the seeding step.
   - _Depends: 5.3_
   - _Requirements: 10.1, 10.2_
 

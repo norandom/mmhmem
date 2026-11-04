@@ -1,0 +1,19 @@
+# Codex settings the user already had (seeded by the mmhmem installer e2e).
+model = "gpt-5-codex"   # trailing comment on a key
+approval_policy="on-request"
+	sandbox_mode = "workspace-write"
+
+# another MCP server the user added earlier
+[mcp_servers.user_docs]
+command = "node"
+args = [ "-e" , "/* placeholder, never started */" , ]   # odd spacing, trailing comma
+env = { DOCS_DIR = "~/docs", LANG = "de_DE.UTF-8" }
+startup_timeout_sec = 15
+enabled = false
+
+[profiles.slow]
+	model = "o3"
+	model_reasoning_effort = "high"
+
+[shell_environment_policy]
+inherit = "core"   #   keep the core variables

@@ -1,0 +1,5 @@
+# The seeded home must reach every runner byte for byte: CRLF, tabs, a BOM
+# and missing final newlines are deliberate. Never normalise these files.
+seed/** -text -whitespace
+# The seed files' reference manifest is compared byte for byte, too.
+seed.sha256 -text
