@@ -11,6 +11,7 @@ pub mod config;
 pub mod hook;
 pub mod mcp;
 pub mod services;
+pub mod setup;
 pub mod storage;
 pub mod telemetry;
 

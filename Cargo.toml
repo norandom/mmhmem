@@ -47,8 +47,45 @@ opentelemetry = { version = "=0.33.1", optional = true }
 opentelemetry_sdk = { version = "=0.33.1", optional = true, features = ["experimental_async_runtime", "rt-tokio"] }
 opentelemetry-otlp = { version = "=0.33.1", optional = true, default-features = false, features = ["trace", "metrics", "logs", "http-proto", "reqwest-client", "reqwest-rustls"] }
 
+# `mmhmem setup` (reliable-installers; research.md §6 has the per-task table).
+# Same-folder temp file + rename for atomic config writes (task 2.1).
+tempfile = "=3.27.0"
+# IO errors that name the file (task 2.1).
+fs-err = "=3.3.2"
+# Comment- and format-preserving JSON/JSONC edits (task 2.2).
+jsonc-parser = { version = "=0.34.0", features = ["cst"] }
+# Format-preserving TOML edits for Codex config.toml (task 2.3).
+toml_edit = "=0.25.18"
+# Review-screen diffs (task 2.5).
+similar = "=3.2.1"
+# Agent detection and per-OS state/config folders (task 3.1).
+which = "=8.0.6"
+etcetera = "=0.11.0"
+# Release download, zipsign signature check, unpack and self-replace
+# (tasks 5.4, 7.1). rustls only, no default features, no progress bar
+# (indicatif is pinned separately).
+self_update = { version = "=1.3.3", default-features = false, features = ["reqwest", "rustls", "github", "archive-tar", "compression-tar-gz", "archive-zip", "compression-zip-deflate", "signatures", "checksums"] }
+# Detached SHA256SUMS signature (task 5.4), same key format as the archives.
+zipsign-api = { version = "=0.2.2", default-features = false, features = ["verify-tar", "verify-zip"] }
+# Full-screen menu (task 6.2).
+ratatui = "=0.30.2"
+crossterm = "=0.29.0"
+indicatif = "=0.18.6"
+
+[target.'cfg(windows)'.dependencies]
+# Current-user PATH entry (task 7.1).
+winreg = "=0.56.0"
+# Owner-only key file: CreateFileW with a current-user-only DACL (task 2.1).
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+
 [dev-dependencies]
 tempfile = "=3.27.0"
+insta = "=1.49.0"
+assert_fs = "=1.1.4"
+httpmock = "=0.9.0"
+# Signing side of the update spike (task 1.4); production only verifies.
+zipsign-api = { version = "=0.2.2", default-features = false, features = ["sign-zip", "sign-tar"] }
+zip = { version = "=9.3.0", default-features = false, features = ["deflate"] }
 
 [features]
 # Optional OTel export (Req 11.2): compiled only into the Docker image, off by
