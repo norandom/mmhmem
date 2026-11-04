@@ -4,7 +4,7 @@
       "mmhmemprobe": {
         "type": "local",
         "command": [
-          "C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe",
+          "C:\\Users\\user\\AppData\\Local\\Programs\\mmhmem\\mmhmem.exe",
           "stdio"
         ]
       }

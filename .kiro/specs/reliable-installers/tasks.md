@@ -75,7 +75,7 @@ released.
   - _Requirements: 5.4, 5.6_
 
 - [ ] 3. Integrate the agents
-- [ ] 3.1 Agent trait, environment and embedded assets
+- [x] 3.1 Agent trait, environment and embedded assets
   - Rule for every agent module (from the 2.2/2.3 reviews): edit leaf keys of mmhmem's own entry (e.g. `mcp.servers.mmhmem.command`), never replace a whole user-visible object or array. Use the JSON array element functions for shared arrays (Claude Code `hooks.PreToolUse`), and keep user-added keys inside mmhmem's entry. Record `missing_parents` before a `set` so removal prunes only parents mmhmem created.
   - Implement `src/setup/agents/mod.rs` (trait, registry, `Env` with home, OS and `PATH`) and `src/setup/assets.rs`, embedding skills, commands, routing instructions and the OpenCode plugin moved to `assets/setup/`.
   - Add test doubles for the `claude`, `codex` and `opencode` CLIs that record arguments and edit files the way the confirmed real CLIs do.
