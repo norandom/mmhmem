@@ -74,7 +74,7 @@ released.
   - _Depends: 2.3, 2.4, 2.5_
   - _Requirements: 5.4, 5.6_
 
-- [ ] 3. Integrate the agents
+- [x] 3. Integrate the agents
 - [x] 3.1 Agent trait, environment and embedded assets
   - Rule for every agent module (from the 2.2/2.3 reviews): edit leaf keys of mmhmem's own entry (e.g. `mcp.servers.mmhmem.command`), never replace a whole user-visible object or array. Use the JSON array element functions for shared arrays (Claude Code `hooks.PreToolUse`), and keep user-added keys inside mmhmem's entry. Record `missing_parents` before a `set` so removal prunes only parents mmhmem created.
   - Implement `src/setup/agents/mod.rs` (trait, registry, `Env` with home, OS and `PATH`) and `src/setup/assets.rs`, embedding skills, commands, routing instructions and the OpenCode plugin moved to `assets/setup/`.
@@ -83,7 +83,7 @@ released.
   - _Depends: 1.1_
   - _Requirements: 2.1, 8.1, 8.4_
 
-- [ ] 3.2 (P) Claude Code
+- [x] 3.2 (P) Claude Code
   - Decide (from the 2.5 review): `plan.rs` applies file bytes only. Either plan the `~/.claude.json` `mcpServers.mmhmem` edit as file bytes with `edit::json` (reviewable, journaled, rollback-safe), or treat `claude mcp add/remove` as a separate non-file step with its own record and rollback. Prefer file bytes unless 1.1 fixtures show Claude Code rewrites the file in a way that conflicts.
   - Detect the CLI, plan MCP registration through `claude mcp add --scope user`, the skill, the recap command, the delimited section in `CLAUDE.md` and the optional hook entry in `settings.json`, and plan removal of only those.
   - Done when temp-home tests cover install, re-plan with no changes, the hook on and off, removal leaving unrelated settings byte-identical, and an invalid `settings.json` skipping only Claude Code.
@@ -91,7 +91,7 @@ released.
   - _Depends: 2.2, 2.5, 3.1_
   - _Requirements: 3.1, 3.4, 7.3_
 
-- [ ] 3.3 (P) Claude Desktop
+- [x] 3.3 (P) Claude Desktop
   - Detect MSIX and non-MSIX profiles. Several profiles become a choice for the user, not an abort.
   - Plan `mcpServers.mmhmem` and the skill folder, and add "restart Claude Desktop" as a pending user step.
   - Done when tests cover each profile layout, several profiles, install, removal and an invalid config.
@@ -99,14 +99,14 @@ released.
   - _Depends: 2.2, 2.5, 3.1_
   - _Requirements: 3.1, 3.4, 6.6, 7.3_
 
-- [ ] 3.4 (P) Codex
+- [x] 3.4 (P) Codex
   - Plan `[mcp_servers.mmhmem]` with `toml_edit`, the skills, the recap prompt and the optional `hooks.json` entry. Mark hook approval as a pending user step.
   - Done when tests cover install, the old marker block, an existing duplicate table, removal and an invalid `config.toml`.
   - _Boundary: agent-codex_
   - _Depends: 2.3, 2.5, 3.1_
   - _Requirements: 3.1, 3.4, 6.6, 7.3_
 
-- [ ] 3.5 (P) OpenCode and Antigravity
+- [x] 3.5 (P) OpenCode and Antigravity
   - OpenCode: plan the confirmed `mcp.servers.mmhmem` shape in the right one of `opencode.json` / `opencode.jsonc` (design §5 rule; report an entry present in both), plus the skill, the plural `commands/` folder and the optional plugin file. Adopt an existing correct entry written by the old installer instead of rewriting it.
   - Antigravity: detect it, and show the import snippet as a user step.
   - Done when tests cover both file names, comments kept in `.jsonc`, cleanup of the old entry, removal and an invalid file.
