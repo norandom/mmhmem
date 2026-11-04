@@ -199,3 +199,75 @@ prompt itself names the Read tool and asks for a broad summary (B4).
 - **R5. The worker adds latency.** A full-outline summary took 6.5-12.9 s,
   against a native read that is near-instant. Token savings are real
   (est. 5654-6279 per read), but turn time goes up.
+
+## Task 4.1 — Codex implementation and fresh live check (2026-11-04)
+
+Status: **INCOMPLETE — manual approval and trust-persistence validation pending.**
+
+Implemented the Codex shell adapter, canonical `codex` audit identity, both
+hook-management helpers, and explicit installer opt-in on Windows and Unix.
+The helpers manage only the user hooks JSON file, preserve neighbouring bytes,
+keep a repeated declaration unchanged, respect disabled hooks/managed-only
+policy, and read but never write Codex trust and enablement state. Changing the
+binary path reports that re-approval is needed. Unix commands quote the binary
+with POSIX shell quoting; Windows commands quote it for PowerShell.
+
+Fresh checks:
+
+- Windows Codex helper tests passed (install, exact removal, idempotence,
+  neighbouring hooks/state, policies, user scope, status, changed-path notice).
+- Extended Windows onboarding tests passed, including default-off Codex,
+  dry-run, opt-in, repeated opt-in and hook-only removal.
+- Unix helper contract tests on Python 3.12 passed (2 cases with multiple
+  assertions/policy variants). Existing helper suite passed on Windows with
+  3 POSIX-only skips. Canonical Linux distribution checks are tracked by the
+  parent run; host Python checks do not replace those results.
+- Parent independently ran Rust hook unit tests (49), hook CLI integration
+  tests (10), and strict Clippy successfully against the current adapter.
+- Initial Windows bootstrap test expected Codex to be unavailable; updated it
+  to assert the real opt-in entry and approval text. Interactive Unix menu
+  fixtures now decline the new Codex hook prompt before answering worker setup.
+
+Live routing evidence: installed **codex-cli 0.166.0**, disposable
+`tmp/codex-hooks-live-20261104/home`, scratch 600-line `project/big.rs`, current
+`target/debug/mmhmem.exe`. No real Codex settings were changed. At
+**2026-11-04 06:29:08 UTC**, a real headless Codex session attempted
+`Get-Content -LiteralPath big.rs`; the pre-tool hook denied it and returned the
+`smart_read` call with project `project`, agent_harness `codex`, and the exact
+file path. The agent reported the denial and did not retry. Evidence:
+`tmp/codex-hooks-live-20261104/bypass.jsonl` and `bypass.stderr`.
+
+This session used Codex's **per-invocation `--dangerously-bypass-hook-trust`**
+automation option. It proves adapter routing but does **not** prove normal
+approval or persisted trust. `config.toml` included an unrelated inline
+`[hooks.state.'other-hook']`; no coexistence warning appeared in the captured
+exec stderr. Subsequent helper status reported the mmhmem entry **not yet
+trusted**. The hooks JSON SHA-256 was
+`A4E68B586406A655130705DC1E7D798757924DCF64DDEC03374D2015A11AA273`.
+
+A normal, untrusted headless session attempted a ranged read at 06:29:45 UTC,
+but the host's command approval policy rejected shell execution. That result
+is not evidence of successful ranged-read execution. Interactive `/hooks`
+verification could not run: the host tool failed PTY creation with Windows
+`CreateProcessW` access denied for its PowerShell launcher; one explicit native
+PowerShell alternative failed the same way. No approval was selected and no
+trust record was created or edited. The temporary auth-file copy was deleted
+and its absence verified after both sessions finished.
+
+Still required before task 4.1 can be checked complete: a user approves this
+entry in Codex `/hooks`, observes the redirect without the bypass option,
+updates the binary at the same path, and verifies the entry stays trusted.
+This live evidence is separate from Requirement 7's normal-work measurement.
+
+### Task 4.1 review remediation — quoted TOML policy keys
+
+Independent review found valid quoted TOML policy keys were not recognised:
+`["features"]`, `[features] "hooks"`, and `features."hooks"` could bypass the
+installer refusal. Added regressions first: Python failed its policy case and
+PowerShell failed six quoted-policy checks. Both helpers now canonicalise bare,
+basic quoted and literal quoted dotted-key components, including escaped basic
+strings; inline feature tables receive the same key handling. Unsupported
+PowerShell key escapes/read errors refuse installation instead of skipping the
+policy source. Regression assertions cover both absent hooks files and exact
+preservation of an existing hooks file under refusal. The manual approval and
+binary-update trust check above remains pending independently.

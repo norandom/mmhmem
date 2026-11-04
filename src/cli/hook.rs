@@ -62,6 +62,7 @@ fn guarded(answer: impl FnOnce() -> String, on_error: impl FnOnce()) -> String {
 fn parse_harness(name: &str) -> Option<Harness> {
     match name {
         "claude" => Some(Harness::Claude),
+        "codex" => Some(Harness::Codex),
         _ => None,
     }
 }
@@ -140,7 +141,7 @@ fn decide_call(
 fn record(writer: &AuditWriter, call: &ParsedCall, req: &ReadRequest, decision: &Decision) {
     let (event, details) = audit_details(req, decision);
     let project = project_name(&call.cwd);
-    let _ = writer.write_event(event, call.harness.name(), project, details);
+    let _ = writer.write_event(event, call.harness.agent_harness(), project, details);
 }
 
 /// Event type and `{"decision","reason","tool","file_path","lines"}`.
@@ -200,7 +201,7 @@ fn audit_internal_error(harness: Option<&str>) {
     };
     let name = harness
         .and_then(parse_harness)
-        .map_or("unknown", Harness::name);
+        .map_or("unknown", Harness::agent_harness);
     let details = json!({"component": "hook", "error": "panic", "decision": "pass"});
     let _ = AuditWriter::from_config(&config).write_event(
         AuditEventType::Error,
@@ -277,6 +278,14 @@ mod tests {
     fn harness_names_and_reason_names_are_stable() {
         assert_eq!(parse_harness("claude"), Some(Harness::Claude));
         assert_eq!(parse_harness("Claude"), None);
+        assert_eq!(parse_harness("codex"), Some(Harness::Codex));
+        assert_eq!(parse_harness("Codex"), None);
+        assert_eq!(parse_harness("opencode"), None);
+        // The CLI argument stays (Req 4.8); audit records carry the
+        // agent_harness each harness passes to smart_read (task 5.2 joins them).
+        assert_eq!(Harness::Claude.agent_harness(), "claude-code");
+        assert_eq!(Harness::Codex.agent_harness(), "codex");
+        assert_eq!(Harness::Claude.name(), "claude");
         assert_eq!(
             reason_name(PassReason::SecurityCritical),
             "security_critical"

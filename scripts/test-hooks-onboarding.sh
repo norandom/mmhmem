@@ -18,8 +18,8 @@ cp "$settings" "$scratch/original"
 fail() { echo "hooks onboarding: $*" >&2; exit 1; }
 run_engine() {
   env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SIMPLE -u CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS \
-    HOME="$scratch/home" PATH="$scratch/bin:$PATH" \
-    bash "$root/deploy/install_local.sh" --global --agent claude --binary "$scratch/bin/mmhmem" "$@" < /dev/null 2>&1
+    HOME="$scratch/home" CODEX_HOME="$scratch/home/.codex" PATH="$scratch/bin:$PATH" \
+    bash "$root/deploy/install_local.sh" --global --agent "${TEST_AGENT:-claude}" --binary "$scratch/bin/mmhmem" "$@" < /dev/null 2>&1
 }
 same_as() { cmp -s "$settings" "$1" || fail "settings changed: $2"; }
 entries() { grep -o 'local/bin/mmhmem"' "$settings" | wc -l | tr -d ' '; }
@@ -68,6 +68,25 @@ run_engine --hooks claude > /dev/null
 [ "$(entries)" = 1 ] || fail 'second opt-in missing'
 out="$(run_engine --remove)" || fail "full removal failed: $out"
 same_as "$scratch/original" 'full removal'
+
+# Codex opt-in is separate, defaults off, and never approves the hook.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$scratch/bin/codex"
+chmod +x "$scratch/bin/codex"
+TEST_AGENT=codex
+hooks_file="$scratch/home/.codex/hooks.json"
+out="$(run_engine)" || fail "Codex default install: $out"
+[ ! -e "$hooks_file" ] || fail 'Codex default added hook'
+out="$(run_engine --hooks codex --dry-run)" || fail "Codex dry run: $out"
+[ ! -e "$hooks_file" ] || fail 'Codex dry run wrote hook'
+printf '%s' "$out" | grep -q -- '--harness codex' || fail 'Codex removal command has wrong harness'
+out="$(run_engine --hooks codex)" || fail "Codex install: $out"
+printf '%s' "$out" | grep -q '/hooks' || fail 'Codex approval step missing'
+cp "$hooks_file" "$scratch/codex-installed"
+run_engine --hooks codex > /dev/null
+cmp -s "$hooks_file" "$scratch/codex-installed" || fail 'Codex repeat changed entry'
+run_engine --remove-hooks > /dev/null
+if grep -q 'hook codex' "$hooks_file"; then fail 'Codex removal left entry'; fi
+TEST_AGENT=claude
 
 # Refusals happen before any write.
 if out="$(run_engine --remove --remove-hooks)"; then fail '--remove --remove-hooks accepted'; fi

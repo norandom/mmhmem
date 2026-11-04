@@ -84,6 +84,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
 
 - [ ] 4. Extend coverage to Codex and OpenCode
 - [ ] 4.1 Route Codex shell reads
+  - _Blocked: Live Codex `/hooks` approval and trust persistence across a binary update require user verification in a functioning interactive terminal. The invocation-only trust bypass proves routing but does not establish persisted approval (2026-11-04)._
   - Map Codex pre-tool input (shell command string or array) and output, and manage the Codex entry in the user hooks file in both helpers, with feature-flag and managed-policy checks and never writing trust state.
   - Verify with the real Codex CLI that a user hooks file coexists with the existing inline hook state without warnings, that the hook asks for approval in `/hooks`, and that an mmhmem binary update keeps it trusted; use a disposable Codex home for the live test.
   - Done when Codex adapter and installer tests pass and the validation report records the live redirect, approval prompt and trust persistence.

@@ -158,7 +158,8 @@ fn large_full_read_is_redirected_once_then_passes_on_repeat() {
 
 /// Harness, project, exactly the five detail keys, no content, no secret.
 fn assert_record_shape(rec: &Value, project: &str) {
-    assert_eq!(rec["agent_harness"], "claude");
+    // Task 4.1 / 5.1 review: the smart_read agent_harness, not the CLI name.
+    assert_eq!(rec["agent_harness"], "claude-code");
     assert_eq!(rec["project"], project);
     let details = rec["details"].as_object().expect("details object");
     let mut keys: Vec<&str> = details.keys().map(String::as_str).collect();
@@ -230,6 +231,34 @@ fn shell_whole_file_read_is_redirected() {
     let audit = env.audit();
     assert_eq!(audit.len(), 1);
     assert_eq!(audit[0]["details"]["tool"], "Bash");
+}
+
+/// Task 4.1 (Req 6.2): the Codex event shape observed from codex-cli
+/// 0.166.0 is redirected once, then passes on repeat; ranged and
+/// non-shell calls pass; records carry the `codex` harness.
+#[test]
+fn codex_shell_read_is_redirected_once_then_passes() {
+    let env = Env::new();
+    let _ = env.file("big.rs", 400);
+    let codex = |tool: &str, command: Value| {
+        let event = json!({"session_id": "cx-1", "turn_id": "t", "cwd": env.project,
+            "hook_event_name": "PreToolUse", "model": "m", "tool_name": tool,
+            "tool_input": {"command": command}, "tool_use_id": "exec-1"});
+        env.run_raw("codex", true, event.to_string().as_bytes())
+    };
+    let first = codex("Bash", json!("Get-Content big.rs"));
+    let reason = deny_reason(&first);
+    assert!(reason.contains("agent_harness \"codex\""), "{reason}");
+    assert!(first.stdout.is_ascii());
+    assert_no_secret(&first);
+    assert_pass(&codex("Bash", json!(["bash", "-lc", "cat big.rs"])));
+    assert_pass(&codex("Bash", json!("Get-Content big.rs -TotalCount 40")));
+    assert_pass(&codex("apply_patch", json!("cat big.rs")));
+    let audit = env.audit();
+    assert_eq!(audit.len(), 2, "{audit:?}");
+    assert_eq!(audit[0]["event_type"], "HOOK_REDIRECT");
+    assert_eq!(audit[1]["details"]["reason"], "repeat");
+    assert!(audit.iter().all(|r| r["agent_harness"] == "codex"));
 }
 
 #[test]

@@ -6,6 +6,7 @@
 //! network, configuration or secrets (the caller passes [`HookSettings`]).
 
 pub mod adapters;
+mod codex;
 pub mod shell;
 pub mod state;
 

@@ -29,7 +29,7 @@
 #                 playbook copies and the copied binary. Store and audit
 #                 files stay untouched.
 #   -DryRun       print actions, change nothing.
-#   -Hooks LIST   opt in to the read-routing hook (claude, or all; global
+#   -Hooks LIST   opt in to the read-routing hook (claude, codex, or all; global
 #                 scope only). Shows the exact entry first, adds it to the
 #                 user settings file, and leaves Claude Code's own review
 #                 (/hooks) to you. A default install adds no hook.
@@ -438,21 +438,25 @@ foreach ($harness in @('claude','opencode')) {
 }
 
 # --- read-routing hook opt-in (before any write; nothing is added by default) ---------
-$HookClaude = $HookHarnesses -contains 'claude'
-$HookCandidate = (-not $Remove) -and $Global -and (Want-Agent 'claude') -and $HasClaude
-if ($HookClaude -and -not $HookCandidate) {
-    Die '-Hooks claude needs a global install (-Global) with the claude agent selected and detected; no hook was added'
-}
-if ($HookCandidate -and ($HookClaude -or ($Interactive -and -not $Hooks))) {
-    Write-Host "`n  Optional: Claude Code read-routing hook`n  ----------------------------------------"
-    if ((Show-ReadRoutingHook $HookSource $UserBin $HookDestination) -ne 0) { Die 'cannot show the read-routing hook; no hook was added' }
-    if (-not $HookClaude) {
-        $addHook = Read-Host '  Add this hook to Claude Code? [y/N]'
-        $HookClaude = $addHook -match '^(?i)y(es)?$'
+$HookSelected = @()
+$HookCandidates = @()
+foreach ($harness in @('claude', 'codex')) {
+    $detected = if ($harness -eq 'claude') { $HasClaude } else { $HasCodex }
+    $candidate = (-not $Remove) -and $Global -and (Want-Agent $harness) -and $detected
+    $selected = $HookHarnesses -contains $harness
+    if ($candidate) { $HookCandidates += $harness }
+    if ($selected -and -not $candidate) {
+        Die "-Hooks $harness needs a global install (-Global) with the $harness agent selected and detected; no hook was added"
     }
-    if ($HookClaude -and -not (Test-ReadRoutingHookAllowed $HookSource $UserBin)) {
-        Die 'the read-routing hook was not added and nothing was changed'
+    if ($candidate -and ($selected -or ($Interactive -and -not $Hooks))) {
+        Write-Host "`n  Optional: $harness read-routing hook`n  ----------------------------------------"
+        if ((Show-ReadRoutingHook $HookSource $UserBin $HookDestination $harness) -ne 0) { Die 'cannot show the read-routing hook; no hook was added' }
+        if (-not $selected) { $selected = (Read-Host "  Add this hook to $harness ? [y/N]") -match '^(?i)y(es)?$' }
+        if ($selected -and -not (Test-ReadRoutingHookAllowed $HookSource $UserBin $harness)) {
+            Die 'the read-routing hook was not added and nothing was changed'
+        }
     }
+    if ($selected) { $HookSelected += $harness }
 }
 
 # --- optional worker setup -------------------------------------------------
@@ -635,16 +639,18 @@ if ($Global) {
 }
 
 # --- read-routing hook (after the binary copy it points to) -----------------------------------
-if ($Remove -and $Global -and (Want-Agent 'claude')) {
-    if ((Remove-ReadRoutingHook $HookSource $HookDestination -DryRun:$DryRun) -ne 0) {
-        $HookProblem = $true
-        Info 'the read-routing hook entry could not be removed; see the message above and remove it by hand'
+foreach ($harness in @('claude', 'codex')) {
+    if ($Remove -and $Global -and (Want-Agent $harness)) {
+        if ((Remove-ReadRoutingHook $HookSource $HookDestination -DryRun:$DryRun -Harnesses @($harness)) -ne 0) {
+            $HookProblem = $true
+            Info 'the read-routing hook entry could not be removed; see the message above and remove it by hand'
+        }
+    } elseif ($HookSelected -contains $harness) {
+        if ((Add-ReadRoutingHook $HookSource $HookDestination $UserBin -DryRun:$DryRun -Harness $harness) -eq 0) { Write-HookAdvisory $harness }
+        else { $HookProblem = $true; Info 'the read-routing hook was not added; see the message above' }
+    } elseif ($HookCandidates -contains $harness) {
+        Info "read-routing hook not added (opt-in): re-run with -Hooks $harness to review and add it"
     }
-} elseif ($HookClaude) {
-    if ((Add-ReadRoutingHook $HookSource $HookDestination $UserBin -DryRun:$DryRun) -eq 0) { Write-HookAdvisory }
-    else { $HookProblem = $true; Info 'the read-routing hook was not added; see the message above' }
-} elseif ($HookCandidate) {
-    Info 'read-routing hook not added (opt-in): re-run with -Hooks claude to review and add it'
 }
 
 # --- summary ---------------------------------------------------------------------------------

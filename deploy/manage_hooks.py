@@ -294,6 +294,111 @@ HARNESSES = {
     },
 }
 
+HARNESSES['codex'] = {
+    'label': 'Codex', 'matcher': '^(Bash|shell)$', 'args': ['hook', 'codex'], 'timeout': 10,
+    'approval': 'Start Codex and review the hook in /hooks. Until you trust the new entry, '
+                'Codex skips it. mmhmem never writes Codex trust or enablement state.',
+    'sees': 'Before each shell command, Codex passes the hook the shell command text and working '
+            'directory. Only single whole-file reads of large non-security-critical text files '
+            'are declined with a smart_read suggestion while a worker is configured. Other '
+            'commands and hook errors pass; no file content or secrets are recorded and no network is used.',
+}
+
+
+def codex_command(binary):
+    return shlex.quote(binary) + ' hook codex'
+
+
+def codex_binary(handler):
+    command = member(handler, 'command')
+    if command is None or command.value.kind != 's':
+        return None
+    try:
+        words = shlex.split(command.value.value)
+    except ValueError:
+        return None
+    if len(words) == 3 and words[1:] == ['hook', 'codex'] and posixpath.basename(words[0]) in ('mmhmem', 'mmhmem.exe'):
+        return words[0]
+    return None
+
+
+def codex_managed_path():
+    # Official Codex managed configuration path on both Linux and macOS.
+    return '/etc/codex/requirements.toml'
+
+
+TOML_KEY = r'''(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|'[^']*')'''
+
+
+def toml_key(text):
+    """Canonicalise bare/basic/literal dotted keys without rewriting user TOML."""
+    if not re.fullmatch(r'\s*' + TOML_KEY + r'(?:\s*\.\s*' + TOML_KEY + r')*\s*', text):
+        return None
+    parts = []
+    for match in re.finditer(TOML_KEY, text):
+        token = match.group(0)
+        parts.append(json.loads(token) if token.startswith('"') else
+                     token[1:-1] if token.startswith("'") else token)
+    return '.'.join(parts)
+
+
+def inline_hooks_off(value):
+    for match in re.finditer(r'(?:^|[{,])\s*(' + TOML_KEY + r')\s*=\s*false\b', value):
+        if toml_key(match.group(1)) == 'hooks':
+            return True
+    return False
+
+
+def toml_lines(path):
+    """Read only policy/state keys, without ever rewriting the TOML file."""
+    if not os.path.isfile(path):
+        return [], []
+    try:
+        with open(path, encoding='utf-8-sig') as stream:
+            lines = stream.readlines()
+    except OSError:
+        sys.stderr.write('[mmhmem] note: %s cannot be read; it was not checked.\n' % path)
+        return [], []
+    table, tables, keys = '', [], []
+    for raw in lines:
+        line = re.match(r'''^(?:[^"'#]|"(?:[^"\\]|\\.)*"|'[^']*')*''', raw).group(0).strip()
+        if line.startswith('['):
+            table = line.strip('[] \t')
+            tables.append(table)
+        elif '=' in line:
+            key, value = line.split('=', 1)
+            keys.append((table, toml_key('.'.join(x for x in (table, key.strip()) if x)), value.strip()))
+    return tables, keys
+
+
+def codex_blocks(config, managed):
+    blocks = []
+    for path, label in ((config, 'user config'), (managed, 'managed requirements')):
+        _, keys = toml_lines(path)
+        for _, full, value in keys:
+            if (full == 'features.hooks' and value == 'false') or (path == managed and full == 'hooks' and value == 'false') or (full == 'features' and inline_hooks_off(value)):
+                blocks.append('[features] hooks = false in %s %s' % (label, path))
+            if path == managed and full == 'allow_managed_hooks_only' and value == 'true':
+                blocks.append('allow_managed_hooks_only = true in managed requirements %s' % path)
+    return blocks
+
+
+def codex_trust(config, target, group, index):
+    tables, keys = toml_lines(config)
+    want = '%s:pre_tool_use:%s:%s' % (target, group, index)
+    for table in tables:
+        match = re.fullmatch(r'''hooks\s*\.\s*state\s*\.\s*("(?:[^"\\]|\\.)*"|'[^']*')''', table)
+        if not match:
+            continue
+        value = match.group(1)
+        name = json.loads(value) if value.startswith('"') else value[1:-1]
+        if name == want:
+            if any(t == table and key and key.endswith('.enabled') and value == 'false' for t, key, value in keys):
+                return 'disabled in Codex /hooks'
+            return 'trust recorded in Codex (Codex re-checks it against the entry)'
+    return 'not yet trusted: approve it in Codex /hooks'
+
+
 # Managed settings locations: code.claude.com/docs/en/managed-settings ("Where each mechanism
 # stores the policy"): /Library/Application Support/ClaudeCode/ on macOS, /etc/claude-code/ on
 # Linux and WSL, each with an optional managed-settings.d/ drop-in directory.
@@ -322,7 +427,10 @@ def managed_preference_paths(platform=None, user=None):
     return paths
 
 
-def user_config_dir():
+def user_config_dir(harness='claude'):
+    if harness == 'codex':
+        return os.path.abspath(os.environ.get('CODEX_HOME') or
+                               os.path.join(os.environ.get('HOME') or os.path.expanduser('~'), '.codex'))
     configured = os.environ.get('CLAUDE_CONFIG_DIR')
     if configured:
         return os.path.abspath(configured)
@@ -330,6 +438,9 @@ def user_config_dir():
 
 
 def make_entry(definition, binary):
+    if definition['label'] == 'Codex':
+        return {'matcher': definition['matcher'], 'hooks': [
+            {'type': 'command', 'command': codex_command(binary), 'timeout': 10}]}
     handler = {'type': 'command', 'command': binary, 'args': list(definition['args']),
                'timeout': definition['timeout']}
     return {'matcher': definition['matcher'], 'hooks': [handler]}
@@ -338,6 +449,8 @@ def make_entry(definition, binary):
 def is_own_handler(handler, definition):
     if handler.kind != 'o':
         return False
+    if definition['label'] == 'Codex':
+        return codex_binary(handler) is not None
     command, args = member(handler, 'command'), member(handler, 'args')
     if command is None or command.value.kind != 's' or args is None or args.value.kind != 'a':
         return False
@@ -659,23 +772,27 @@ def current_user():
 def run(options):
     definition = HARNESSES[options.harness]
     label = definition['label']
-    user_dir = user_config_dir()
-    target = os.path.abspath(options.settings_path) if options.settings_path else os.path.join(user_dir, 'settings.json')
+    is_codex = options.harness == 'codex'
+    user_dir = user_config_dir(options.harness)
+    target = os.path.abspath(options.settings_path) if options.settings_path else os.path.join(user_dir, 'hooks.json' if is_codex else 'settings.json')
+    config = os.path.join(os.path.dirname(target), 'config.toml')
     if options.managed_settings_path:
         managed_path = os.path.abspath(options.managed_settings_path)
         preferences = []  # an explicit managed path replaces every OS policy source
     else:
-        managed_path = default_managed_path()
-        preferences = managed_preference_paths(sys.platform, current_user())
+        managed_path = codex_managed_path() if is_codex else default_managed_path()
+        preferences = [] if is_codex else managed_preference_paths(sys.platform, current_user())
     prefix = '[dry-run] ' if options.dry_run else ''
 
     # User scope only: a project's .claude directory or a local settings file is never a target.
     target_dir = os.path.dirname(target)
     if os.path.basename(target).lower() == 'settings.local.json' or (
-            os.path.basename(target_dir).lower() == '.claude'
+            os.path.basename(target_dir).lower() == ('.codex' if is_codex else '.claude')
             and os.path.normcase(target_dir.rstrip('/\\')) != os.path.normcase(user_dir.rstrip('/\\'))):
         return fail('%s looks like project settings; mmhmem only adds hooks to the user settings file. '
                     'Nothing was changed.' % target)
+    if is_codex and os.path.basename(target).lower() != 'hooks.json':
+        return fail('Codex target must be hooks.json; config.toml and trust state are never written.')
 
     binary = options.binary
     if options.command in ('show', 'install'):
@@ -705,6 +822,8 @@ def run(options):
         return fail('%s cannot be edited safely: %s. Nothing was changed.' % (target, error))
 
     def blocks():
+        if is_codex:
+            return codex_blocks(config, managed_path)
         found = []
         user_block = policy_block(plain(state.root) if state.root is not None else None,
                                   'user settings %s' % target, False)
@@ -718,6 +837,7 @@ def run(options):
         say('Entry appended to hooks.PreToolUse:')
         say(json_text(entry, '', Style()))
         say('What it sees and decides: %s' % definition['sees'])
+        say('Approval: %s' % definition['approval'])
         say('Remove it with: %s' % remove_command)
         return 0
 
@@ -730,6 +850,8 @@ def run(options):
         elif present:
             say('%s: installed in %s (%s)' % (options.harness, target,
                                               member(own.found[0][3], 'command').value.value))
+            if is_codex:
+                say(codex_trust(config, target, own.found[0][0], own.found[0][2]))
         else:
             say('%s: not installed (%s)' % (options.harness, target))
         return 0
@@ -755,9 +877,13 @@ def run(options):
             message = 'added the read-routing hook to %s' % target
         else:
             command = member(own.found[0][3], 'command').value
-            if command.value != binary:
-                text = text[:command.start] + json_string(binary) + text[command.end:]
+            installed = codex_binary(own.found[0][3]) if is_codex else command.value
+            if installed != binary:
+                new_command = codex_command(binary) if is_codex else binary
+                text = text[:command.start] + json_string(new_command) + text[command.end:]
                 message = "replaced the hook's binary path %s with %s in %s" % (command.value, binary, target)
+                if is_codex:
+                    message += '; re-approval is needed in Codex /hooks'
             # Duplicates (from manual edits) are removed so exactly one entry remains.
             while len(find_own(parse_json(text), definition).found) > 1:
                 text = remove_own_handler(text, definition, 'last')
@@ -774,6 +900,10 @@ def run(options):
         if state.exists and not options.dry_run:
             say('[mmhmem] backup: %s.mmhmem.bak' % target)
         say('[mmhmem] %s' % definition['approval'])
+        if is_codex:
+            tables, keys = toml_lines(config)
+            if any(re.match(r'^hooks\.(?!state(?:\.|$))', re.sub(r'\s', '', key)) for key in tables + [k for _, k, _ in keys if k]):
+                say('[mmhmem] note: config.toml defines hooks inline too; Codex loads both and warns at startup.')
         say('[mmhmem] Remove it with: %s' % remove_command)
         return 0
 

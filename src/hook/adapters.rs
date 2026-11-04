@@ -2,9 +2,9 @@
 //! "adapters (`src/hook/adapters.rs`)", Req 2.6, 2.7, 5.5, 6.1).
 //!
 //! Input is untrusted: unknown fields are ignored and anything missing or of
-//! the wrong type means "not a read", so the hook passes. Only Claude Code is
-//! mapped so far; other harnesses add a [`Harness`] variant and a branch in
-//! [`parse`] and [`render`].
+//! the wrong type means "not a read", so the hook passes. Claude Code is mapped
+//! here, Codex in [`super::codex`]; another harness adds a [`Harness`] variant
+//! and a branch in [`parse`] and [`render`].
 
 use super::{Decision, ReadRequest};
 use serde_json::{Value, json};
@@ -17,6 +17,7 @@ pub const MAX_INPUT_BYTES: usize = 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Harness {
     Claude,
+    Codex,
 }
 
 impl Harness {
@@ -24,6 +25,17 @@ impl Harness {
     pub fn name(self) -> &'static str {
         match self {
             Harness::Claude => "claude",
+            Harness::Codex => "codex",
+        }
+    }
+
+    /// The `agent_harness` this harness passes to `smart_read` (per the
+    /// installed routing guidance), recorded in audit events so hook
+    /// decisions and summaries share one `mmhmem stats` row.
+    pub fn agent_harness(self) -> &'static str {
+        match self {
+            Harness::Claude => "claude-code",
+            Harness::Codex => "codex",
         }
     }
 }
@@ -44,6 +56,7 @@ pub struct ParsedCall {
 pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
     match harness {
         Harness::Claude => parse_claude(input),
+        Harness::Codex => super::codex::parse(input),
     }
 }
 
@@ -51,17 +64,31 @@ pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
 pub fn render(harness: Harness, decision: &Decision, path: &Path, project: &str) -> String {
     match harness {
         Harness::Claude => render_claude(decision, path, project),
+        Harness::Codex => super::codex::render(decision, path, project),
     }
+}
+
+/// The event as JSON; `Null` when over [`MAX_INPUT_BYTES`] or malformed.
+pub(super) fn load_input(input: &[u8]) -> Value {
+    if input.len() > MAX_INPUT_BYTES {
+        return Value::Null;
+    }
+    serde_json::from_slice(input).unwrap_or(Value::Null)
+}
+
+/// The documented `PreToolUse` deny (Claude Code and Codex share it).
+pub(super) fn deny_output(reason: String) -> Value {
+    json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }})
 }
 
 /// Claude Code `PreToolUse` input: `tool_name`, `tool_input`, `cwd`,
 /// `session_id`; every other field is ignored.
 fn parse_claude(input: &[u8]) -> ParsedCall {
-    let value: Value = if input.len() > MAX_INPUT_BYTES {
-        Value::Null
-    } else {
-        serde_json::from_slice(input).unwrap_or(Value::Null)
-    };
+    let value = load_input(input);
     let text = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or("");
     let (session_id, cwd, tool) = (text("session_id"), text("cwd"), text("tool_name"));
     let tool_input = value.get("tool_input").unwrap_or(&Value::Null);
@@ -134,12 +161,7 @@ fn render_claude(decision: &Decision, path: &Path, project: &str) -> String {
          enough, repeat this full read within 2 minutes.",
         path = path.display()
     );
-    json!({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
-        "permissionDecisionReason": reason,
-    }})
-    .to_string()
+    deny_output(reason).to_string()
 }
 
 #[cfg(test)]

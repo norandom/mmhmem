@@ -56,8 +56,8 @@ Single self-hosted daemon on a Linux host, exposed to agent harnesses as a remot
 ## Key Technical Decisions
 
 - **Compiled language: Rust (recommended).** The daemon is network-facing, multi-tenant, and security-grade (path handling on untrusted input, secret redaction, concurrent sessions) — Rust's ownership model eliminates whole bug classes and yields one static binary for trivial systemd deployment. Precedent: ai-memory ships exactly this shape in Rust. Go is the fallback if team velocity outweighs memory-safety rigor; Zig rejected (immature HTTP/MCP/SQLite server ecosystem).
-- **Protocol-native integration only**: MCP Streamable HTTP + Agent Skills; client hooks and LLM API proxies are explicitly rejected (fail-open hooks, OAuth breakage).
-- **Shunt logic lives server-side**, not in client hooks, making it harness-neutral; security-critical path regex always bypasses the worker model; threshold tuned to ~150 lines from empirical median read sizes.
+- **Protocol-native memory integration**: MCP Streamable HTTP or stdio + Agent Skills. The approved read-routing-hooks spec adds optional pre-tool hooks with explicit consent, harness policy checks and harness-owned approval. Hooks fail open and never proxy LLM APIs.
+- **Shunt summaries and cache remain in the service**, making them harness-neutral. Optional hooks mirror eligibility rules to suggest `smart_read`; security-critical paths and exact ranges bypass redirection. The default threshold is ~150 lines from empirical median read sizes.
 - **Two-tier storage**: ephemeral live session bus + durable progressive-disclosure store; content-addressed cache for shunted summaries.
 - **No SaaS, no telemetry**: fully self-hosted; audit stays local (optional batch ship to self-hosted OpenObserve).
 

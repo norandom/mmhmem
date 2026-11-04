@@ -56,32 +56,32 @@ def terminal_case(answers, dry_run=True):
             pass
 
 
-output = terminal_case('1\n9\n1,3\nn\nn\n')
+output = terminal_case('1\n9\n1,3\nn\nn\nn\n')
 assert '[3] codex' in output and 'Please choose numbers' in output, output
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'codex'}, output
 assert 'harnesses: claude-desktop' not in output, output
 output = terminal_case('2\n3\n')
 assert 'local mode removed' in output and 'harnesses: codex' in output, output
 assert 'shared binary kept' in output, output
-output = terminal_case('1\na\nn\nn\n')
+output = terminal_case('1\na\nn\nn\nn\n')
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'claude-desktop', 'codex'}, output
 output = terminal_case('q\n')
 assert 'running the installer' not in output, output
 output = terminal_case('1\nq\n', dry_run=False)
 assert not (home / '.local/bin/mmhmem').exists(), 'Cancel installed a binary'
-output = terminal_case('1\n3\ny\ntest-model\nhttps://worker.example/v1/\n\ny\n')
+output = terminal_case('1\n3\nn\ny\ntest-model\nhttps://worker.example/v1/\n\ny\n')
 assert 'worker model: test-model' in output and 'worker_api_url' in output, output
 assert 'shunt_warmup' in output and '25 files' in output, output
 saved = home / '.mmhmem.json'
 saved.write_text(json.dumps({'worker_model': 'saved-model',
                             'worker_api_url': 'https://saved.example/v1/chat/completions',
                             'worker_api_key': 'private-fixture-token'}))
-output = terminal_case('1\n3\nn\nn\n')
+output = terminal_case('1\n3\nn\nn\nn\n')
 assert 'Current base URL: https://saved.example/v1' in output, output
 assert 'Current model ID: saved-model' in output and 'API key: ***' in output, output
 assert 'private-fixture-token' not in output, output
 assert output.index('Current model ID') < output.index('Select agents'), output
-output = terminal_case('1\n3\ny\n\n\n\nn\n')
+output = terminal_case('1\n3\nn\ny\n\n\n\nn\n')
 assert 'Model ID [saved-model]' in output and 'base URL [https://saved.example/v1]' in output, output
 assert 'API key [***]' in output and 'worker model: saved-model' in output, output
 assert 'private-fixture-token' not in output, output

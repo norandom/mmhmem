@@ -1,11 +1,13 @@
 # Show, install, remove and report mmhmem's read-routing hook entry for one harness (Windows).
-# Usage: manage_hooks.ps1 <show|install|remove|status> -Harness claude -Binary <abs mmhmem.exe>
+# Usage: manage_hooks.ps1 <show|install|remove|status> -Harness claude|codex -Binary <abs mmhmem.exe>
 #        [-SettingsPath <file>] [-ManagedSettingsPath <file>] [-DryRun]
+# Claude Code: ~/.claude/settings.json (or CLAUDE_CONFIG_DIR). Codex: CODEX_HOME/hooks.json; its
+# config.toml and the managed requirements.toml are only read, and Codex's trust state is never written.
 # Edits are textual splices on a position-tracking JSON parse, so every byte outside
 # mmhmem's own entry stays as it was and removal undoes an install byte for byte.
 param(
     [Parameter(Position = 0, Mandatory = $true)][ValidateSet('show', 'install', 'remove', 'status')][string]$Command,
-    [ValidateSet('claude')][string]$Harness = 'claude',
+    [ValidateSet('claude', 'codex')][string]$Harness = 'claude',
     [string]$Binary,
     [string]$SettingsPath,
     [string]$ManagedSettingsPath,
@@ -194,7 +196,7 @@ function Remove-JsonElement([string]$Text, $Container, [int]$Index) {
     return $Text.Substring(0, $from) + $Text.Substring($to)
 }
 
-# --- harness definitions (codex and opencode are added by later tasks) ------------
+# --- harness definitions (opencode is added by a later task) --------------------------
 $script:Harnesses = @{
     claude = @{
         Label = 'Claude Code'
@@ -206,18 +208,32 @@ $script:Harnesses = @{
         Approval = 'Claude Code holds back hooks until you accept the workspace trust dialog in an interactive session; review the entry with /hooks.'
         Sees = 'Before each Read, Bash or PowerShell tool call, Claude Code passes the hook the tool name and its input: the file path with any offset and limit for Read, or the command text for Bash and PowerShell. The hook looks only at that file''s size and line count; it declines (pointing the agent to mmhmem''s smart_read) only full reads of large files that are not security-critical, and only while an mmhmem worker is configured. Every other call, and any hook error or timeout, proceeds unchanged. It never returns or records file content, never reads secrets such as the worker API key, and makes no network connections.'
     }
+    codex = @{
+        Label = 'Codex'
+        Matcher = '^(Bash|shell)$'
+        Args = @('hook', 'codex')
+        Timeout = 10
+        # Verified in codex-cli 0.166.0: "Use %ProgramData%\OpenAI\Codex\requirements.toml for enforced settings".
+        DefaultManaged = (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'OpenAI\Codex\requirements.toml')
+        Approval = 'Codex runs a new or changed hook only after you trust it: start Codex and choose "Trust all and continue" at the "Hooks need review" prompt, or open /hooks and press t on the mmhmem entry. Until then Codex skips it (codex exec skips it silently). mmhmem never writes Codex''s trust state.'
+        Reapprove = 'The entry changed, so Codex treats it as a new hook: approve it again in /hooks (re-approval is needed).'
+        Sees = 'Before each shell command (Codex has no separate read tool), Codex passes the hook the shell command text and the working directory. The hook recognises only a single whole-file read such as cat, type or Get-Content of one file, looks only at that file''s size and line count, and declines (pointing the agent to mmhmem''s smart_read or a ranged read) only full reads of large files that are not security-critical, and only while an mmhmem worker is configured. Every other command, and any hook error or timeout, proceeds unchanged. It never returns or records file content, never reads secrets such as the worker API key, and makes no network connections.'
+    }
 }
 
-function Get-UserConfigDir {
+function Get-UserConfigDir([string]$Name) {
+    if ($Name -eq 'codex') { if ($env:CODEX_HOME) { return [IO.Path]::GetFullPath($env:CODEX_HOME) }; return Join-Path $HOME '.codex' }
     if ($env:CLAUDE_CONFIG_DIR) { return [IO.Path]::GetFullPath($env:CLAUDE_CONFIG_DIR) }
     return Join-Path $HOME '.claude'
 }
 function Get-Entry($Def, [string]$Bin) {
+    if ($Def.Label -eq 'Codex') { return [ordered]@{ matcher = $Def.Matcher; hooks = @([ordered]@{ type = 'command'; command = (Get-CodexCommand $Bin); timeout = $Def.Timeout }) } }
     $handler = [ordered]@{ type = 'command'; command = $Bin; args = $Def.Args; timeout = $Def.Timeout }
     return [ordered]@{ matcher = $Def.Matcher; hooks = @($handler) }
 }
 function Test-OwnHandler($Handler, $Def) {
     if ($Handler.K -ne 'o') { return $false }
+    if ($Def.Label -eq 'Codex') { return [bool](Get-CodexBinary $Handler) }
     $cmd = Get-JsonMember $Handler 'command'; $argList = Get-JsonMember $Handler 'args'
     if ($null -eq $cmd -or $cmd.V.K -ne 's' -or $null -eq $argList -or $argList.V.K -ne 'a') { return $false }
     $name = ($cmd.V.V -split '[\\/]')[-1]
@@ -262,6 +278,99 @@ function Remove-OwnHandler([string]$Text, $Def, [ValidateSet('first', 'last')][s
     $hooks = $own.Hooks.V
     if ($hooks.M.Count -gt 1) { return Remove-JsonElement $Text $hooks $hooks.M.IndexOf($own.Pre) }
     return Remove-JsonElement $Text $root $root.M.IndexOf($own.Hooks)
+}
+
+# --- Codex: command form and read-only TOML checks (policy, trust state) --------------
+# Codex runs a hook command through the user's shell (PowerShell on Windows, verified with
+# codex-cli 0.166.0), so the path is single-quoted: PowerShell takes it literally.
+function Get-CodexCommand([string]$Bin) { return "& '" + $Bin + "' hook codex" }
+$script:CodexCommand = [regex]"^&\s*'([^']+)'\s+hook\s+codex$"
+function Get-CodexBinary($Handler) {
+    $cmd = Get-JsonMember $Handler 'command'
+    if ($null -eq $cmd -or $cmd.V.K -ne 's') { return $null }
+    $m = $script:CodexCommand.Match($cmd.V.V)
+    if (-not $m.Success) { return $null }
+    $name = ($m.Groups[1].Value -split '[\\/]')[-1]
+    if ($name -ne 'mmhmem' -and $name -ne 'mmhmem.exe') { return $null }
+    return $m.Groups[1].Value
+}
+# Line-based reading of the few keys checked here: table headers and key = value lines, with
+# comments dropped outside quotes. Keys are returned with their table, whitespace removed.
+$script:TomlKey = '(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|''[^'']*'')'
+function Convert-TomlKey([string]$Text) {
+    if ($Text -notmatch ('^\s*' + $script:TomlKey + '(?:\s*\.\s*' + $script:TomlKey + ')*\s*$')) { return $null }
+    $parts = @([regex]::Matches($Text, $script:TomlKey) | ForEach-Object {
+        $token = $_.Value
+        if ($token.StartsWith('"')) { (ConvertFrom-JsonText $token).V }
+        elseif ($token.StartsWith("'")) { $token.Substring(1, $token.Length - 2) }
+        else { $token }
+    })
+    return $parts -join '.'
+}
+function Test-InlineHooksOff([string]$Text) {
+    foreach ($m in [regex]::Matches($Text, ('(?:^|[{,])\s*(' + $script:TomlKey + ')\s*=\s*false\b'))) {
+        if ((Convert-TomlKey $m.Groups[1].Value) -ceq 'hooks') { return $true }
+    }
+    return $false
+}
+function Read-TomlLines([string]$Path) {
+    $result = @{ Keys = New-Object Collections.Generic.List[object]; Tables = New-Object Collections.Generic.List[string] }
+    $table = ''
+    foreach ($raw in [IO.File]::ReadAllLines($Path)) {
+        $line = ([regex]::Match($raw, '^(?:[^"''#]|"(?:[^"\\]|\\.)*"|''[^'']*'')*')).Value.Trim()
+        if (-not $line) { continue }
+        if ($line.StartsWith('[')) { $table = $line.Trim('[', ']', ' ', "`t"); $result.Tables.Add($table); continue }
+        $m = [regex]::Match($line, '^([^=]+?)\s*=\s*(.*)$')
+        if (-not $m.Success) { continue }
+        $full = (@($table, $m.Groups[1].Value) | Where-Object { $_ }) -join '.'
+        $result.Keys.Add(@{ Table = $table; Full = (Convert-TomlKey $full); Value = $m.Groups[2].Value.Trim() })
+    }
+    return $result
+}
+function Read-TomlOrNote([string]$Path) {
+    if (-not [IO.File]::Exists($Path)) { return $null }
+    try { return Read-TomlLines $Path }
+    catch { throw "$Path cannot be read or safely parsed for hook policy; nothing was changed: $($_.Exception.Message)" }
+}
+# [features] hooks = false in the user config.toml or the managed requirements.toml, and
+# allow_managed_hooks_only = true in requirements.toml, keep Codex from running user hooks.
+function Get-CodexBlocks([string]$ConfigPath, [string]$RequirementsPath) {
+    $blocks = @()
+    foreach ($source in @(@{ Path = $ConfigPath; Label = 'user config' }, @{ Path = $RequirementsPath; Label = 'managed requirements' })) {
+        $toml = Read-TomlOrNote $source.Path
+        if (-not $toml) { continue }
+        foreach ($entry in $toml.Keys) {
+            $off = ($entry.Full -ceq 'features.hooks' -and $entry.Value -ceq 'false') -or ($source.Label -eq 'managed requirements' -and $entry.Full -ceq 'hooks' -and $entry.Value -ceq 'false') -or ($entry.Full -ceq 'features' -and (Test-InlineHooksOff $entry.Value))
+            if ($off) { $blocks += "[features] hooks = false in $($source.Label) $($source.Path)" }
+            if ($source.Label -eq 'managed requirements' -and $entry.Full -ceq 'allow_managed_hooks_only' -and $entry.Value -ceq 'true') {
+                $blocks += "allow_managed_hooks_only = true in managed requirements $($source.Path)"
+            }
+        }
+    }
+    return , $blocks
+}
+# Inline [hooks.<Event>] tables next to hooks.json make Codex warn that it loads hooks from both.
+function Get-InlineHookTables([string]$ConfigPath) {
+    $toml = Read-TomlOrNote $ConfigPath
+    if (-not $toml) { return , @() }
+    $inline = @($toml.Tables | Where-Object { ($_ -replace '\s', '') -match '^hooks\.(?!state(\.|$))' })
+    $inline += @($toml.Keys | Where-Object { $_.Full -match '^hooks\.(?!state(\.|$))' } | ForEach-Object { $_.Full })
+    return , $inline
+}
+# Codex records trust per hook as [hooks.state.'<hooks.json>:pre_tool_use:<group>:<handler>'].
+function Get-CodexTrust([string]$ConfigPath, [string]$HooksPath, [int]$Group, [int]$Index) {
+    $toml = Read-TomlOrNote $ConfigPath
+    if (-not $toml) { return 'not yet trusted: approve it in Codex /hooks' }
+    $want = "${HooksPath}:pre_tool_use:${Group}:${Index}"
+    $header = [regex]'^hooks\s*\.\s*state\s*\.\s*(?:''([^'']*)''|"((?:[^"\\]|\\.)*)")$'
+    $tables = @($toml.Tables | Where-Object {
+            $m = $header.Match($_)
+            $m.Success -and ($(if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value -replace '\\(.)', '$1' }) -ieq $want)
+        })
+    if (-not $tables.Count) { return 'not yet trusted: approve it in Codex /hooks' }
+    $enabled = @($toml.Keys | Where-Object { $tables -ccontains $_.Table -and $_.Full -and $_.Full.EndsWith('.enabled') })
+    if ($enabled.Count -and $enabled[-1].Value -ceq 'false') { return 'disabled in Codex /hooks' }
+    return 'trust recorded in Codex (Codex re-checks it against the entry)'
 }
 
 # --- settings file I/O -------------------------------------------------------------
@@ -365,17 +474,24 @@ function Get-ManagedBlocks($Def, [string]$ManagedPath, [bool]$UseRegistry) {
 
 # --- commands -----------------------------------------------------------------------
 $def = $script:Harnesses[$Harness]
-$userDir = Get-UserConfigDir
-$target = if ($SettingsPath) { [IO.Path]::GetFullPath($SettingsPath) } else { Join-Path $userDir 'settings.json' }
+$isCodex = $Harness -eq 'codex'
+$userDir = Get-UserConfigDir $Harness
+$fileName = if ($isCodex) { 'hooks.json' } else { 'settings.json' }
+$target = if ($SettingsPath) { [IO.Path]::GetFullPath($SettingsPath) } else { Join-Path $userDir $fileName }
 $managedPath = if ($ManagedSettingsPath) { [IO.Path]::GetFullPath($ManagedSettingsPath) } else { $def.DefaultManaged }
 $useRegistry = -not $ManagedSettingsPath
 $prefix = if ($DryRun) { '[dry-run] ' } else { '' }
-
-# User scope only: a project's .claude directory or a local settings file is never a target.
 $targetDir = [IO.Path]::GetDirectoryName($target)
-if ([IO.Path]::GetFileName($target) -ieq 'settings.local.json' -or
-    (([IO.Path]::GetFileName($targetDir) -ieq '.claude') -and ($targetDir.TrimEnd('\', '/') -ine $userDir.TrimEnd('\', '/')))) {
+# Codex reads config.toml next to its hooks.json (one CODEX_HOME layer).
+$codexConfig = Join-Path $targetDir 'config.toml'
+
+# User scope only: a project's .claude/.codex directory or a local settings file is never a target.
+$projectDir = if ($isCodex) { '.codex' } else { '.claude' }
+if (([IO.Path]::GetFileName($targetDir) -ieq $projectDir) -and ($targetDir.TrimEnd('\', '/') -ine $userDir.TrimEnd('\', '/'))) {
     Stop-Helper "$target looks like project settings; mmhmem only adds hooks to the user settings file. Nothing was changed."
+}
+if ((-not $isCodex -and [IO.Path]::GetFileName($target) -ieq 'settings.local.json') -or ($isCodex -and [IO.Path]::GetFileName($target) -ine 'hooks.json')) {
+    Stop-Helper "$target is not the user hooks file mmhmem manages ($fileName). Nothing was changed."
 }
 
 if ($Command -in @('show', 'install')) {
@@ -385,9 +501,25 @@ if ($Command -in @('show', 'install')) {
     $Binary = [IO.Path]::GetFullPath($Binary)
     $leaf = [IO.Path]::GetFileName($Binary)
     if ($leaf -ne 'mmhmem.exe' -and $leaf -ne 'mmhmem') { Stop-Helper "-Binary must point to mmhmem.exe: $Binary" }
+    # PowerShell also ends a single-quoted string at the typographic single quotes.
+    if ($isCodex -and $Binary -match "['\u2018\u2019\u201A\u201B]") { Stop-Helper "-Binary must not contain a single quote for the Codex entry: $Binary" }
 }
 $entry = if ($Binary) { Get-Entry $def $Binary } else { $null }
 $removeCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" remove -Harness ' + $Harness + $(if ($SettingsPath) { ' -SettingsPath "' + $target + '"' } else { '' })
+
+function Get-Blocks($State) {
+    if ($isCodex) { return , (Get-CodexBlocks $codexConfig $managedPath) }
+    $blocks = @()
+    $userBlock = Get-PolicyBlock $State.Root "user settings $target"
+    if ($userBlock) { $blocks += $userBlock }
+    $blocks += Get-ManagedBlocks $def $managedPath $useRegistry
+    return , $blocks
+}
+# Codex: the command string carries the binary; Claude Code: the exec-form command member.
+function Get-InstalledBinary($Node) {
+    if ($isCodex) { return Get-CodexBinary $Node }
+    return (Get-JsonMember $Node 'command').V.V
+}
 
 try { $state = Read-Settings $target } catch { Stop-Helper "$($_.Exception.Message). Nothing was changed." }
 try { $own = if ($state.Root) { Find-Own $state.Root $def } else { @{ Hooks = $null; Pre = $null; Found = (New-Object Collections.Generic.List[object]) } } }
@@ -400,31 +532,28 @@ switch ($Command) {
         Write-Line 'Entry appended to hooks.PreToolUse:'
         Write-Line (ConvertTo-JsonText $entry '' @{ NL = [Environment]::NewLine; Unit = '  '; Pretty = $true; Colon = ': ' })
         Write-Line "What it sees and decides: $($def.Sees)"
+        Write-Line "Approval: $($def.Approval)"
         Write-Line "Remove it with: $removeCommand"
     }
     'status' {
-        $blocks = @()
-        $userBlock = Get-PolicyBlock $state.Root "user settings $target"
-        if ($userBlock) { $blocks += $userBlock }
-        $blocks += Get-ManagedBlocks $def $managedPath $useRegistry
+        $blocks = Get-Blocks $state
         $present = $own.Found.Count -gt 0
         if ($blocks.Count) {
             $note = if ($present) { ' (entry present in the settings file)' } else { '' }
             Write-Line "$($Harness): policy-blocked by $($blocks -join '; ')$note"
         } elseif ($present) {
-            Write-Line "$($Harness): installed in $target ($((Get-JsonMember $own.Found[0].Node 'command').V.V))"
+            $trust = if ($isCodex) { '; ' + (Get-CodexTrust $codexConfig $target $own.Found[0].Group $own.Found[0].Index) } else { '' }
+            Write-Line "$($Harness): installed in $target ($(Get-InstalledBinary $own.Found[0].Node))$trust"
         } else {
             Write-Line "$($Harness): not installed ($target)"
         }
     }
     'install' {
-        $blocks = @()
-        $userBlock = Get-PolicyBlock $state.Root "user settings $target"
-        if ($userBlock) { $blocks += $userBlock }
-        $blocks += Get-ManagedBlocks $def $managedPath $useRegistry
+        $blocks = Get-Blocks $state
         if ($blocks.Count) { Stop-Helper "$($def.Label) hooks are disabled or restricted by policy: $($blocks -join '; '). The hook was not added." }
         $text = $state.Text
         $message = ''
+        $changedEntry = $false
         if ($own.Found.Count -eq 0) {
             if (-not $state.Root) { $text = ConvertTo-JsonText ([ordered]@{ hooks = [ordered]@{ PreToolUse = @($entry) } }) '' @{ NL = "`n"; Unit = '  '; Pretty = $true; Colon = ': ' }; $text += "`n" }
             else {
@@ -437,9 +566,12 @@ switch ($Command) {
         } else {
             $first = $own.Found[0]
             $cmdNode = (Get-JsonMember $first.Node 'command').V
-            if ($cmdNode.V -cne $Binary) {
-                $text = $text.Substring(0, $cmdNode.S) + (ConvertTo-JsonString $Binary) + $text.Substring($cmdNode.E)
-                $message = "replaced the hook's binary path $($cmdNode.V) with $Binary in $target"
+            $installed = Get-InstalledBinary $first.Node
+            if ($installed -cne $Binary) {
+                $newCommand = if ($isCodex) { Get-CodexCommand $Binary } else { $Binary }
+                $text = $text.Substring(0, $cmdNode.S) + (ConvertTo-JsonString $newCommand) + $text.Substring($cmdNode.E)
+                $message = "replaced the hook's binary path $installed with $Binary in $target"
+                $changedEntry = $true
             }
             # Duplicates (from manual edits) are removed so exactly one entry remains.
             while ($true) {
@@ -455,6 +587,11 @@ switch ($Command) {
         }
         Write-Line "[mmhmem] $prefix$message"
         if ($state.Exists -and -not $DryRun) { Write-Line "[mmhmem] backup: $target.mmhmem.bak" }
+        if ($isCodex -and $changedEntry) { Write-Line "[mmhmem] $($def.Reapprove)" }
+        if ($isCodex) {
+            $inline = Get-InlineHookTables $codexConfig
+            if ($inline.Count) { Write-Line "[mmhmem] note: $codexConfig also defines hooks inline ($($inline -join ', ')); Codex loads both and warns about it at startup. Move them into $target to silence the warning." }
+        }
         Write-Line "[mmhmem] $($def.Approval)"
         Write-Line "[mmhmem] Remove it with: $removeCommand"
     }

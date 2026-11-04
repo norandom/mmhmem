@@ -4,12 +4,13 @@
 $ErrorActionPreference = 'Stop'
 $root = Join-Path (Split-Path $PSScriptRoot -Parent) ('tmp/hooks-onboarding-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
-$names = @('CLAUDE_CONFIG_DIR', 'LOCALAPPDATA', 'PATH', 'TEST_CLAUDE_LOG', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS')
+$names = @('CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'LOCALAPPDATA', 'PATH', 'TEST_CLAUDE_LOG', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS')
 $saved = @{}; foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 function Fail([string]$m) { throw "hooks onboarding: $m" }
 try {
     $env:CLAUDE_CODE_SIMPLE = $null; $env:CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS = $null
     $env:CLAUDE_CONFIG_DIR = Join-Path $root '.claude'
+    $env:CODEX_HOME = Join-Path $root '.codex'
     $env:LOCALAPPDATA = Join-Path $root 'local'
     $env:TEST_CLAUDE_LOG = Join-Path $root 'claude-calls'
     $settings = Join-Path $root '.claude/settings.json'
@@ -28,10 +29,10 @@ try {
     [IO.File]::WriteAllText((Join-Path $root 'claude.cmd'), '@echo called>>"%TEST_CLAUDE_LOG%"' + "`r`n" + '@exit /b 0')
     $env:PATH = $root + ';' + $saved['PATH']
     $shell = (Get-Process -Id $PID).Path
-    function Invoke-Engine([string[]]$EngineArgs) {
+    function Invoke-Engine([string[]]$EngineArgs, [string]$AgentName = 'claude') {
         $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
         try {
-            $text = & $shell -NoProfile -File $engine -Global -Binary $fake -Agent claude -NonInteractive @EngineArgs 2>&1 | ForEach-Object { [string]$_ } | Out-String
+            $text = & $shell -NoProfile -File $engine -Global -Binary $fake -Agent $AgentName -NonInteractive @EngineArgs 2>&1 | ForEach-Object { [string]$_ } | Out-String
             return [pscustomobject]@{ Code = $LASTEXITCODE; Text = $text }
         } finally { $ErrorActionPreference = $old }
     }
@@ -89,6 +90,21 @@ try {
     $r = Invoke-Engine @('-Remove')
     if ($r.Code -ne 0) { Fail "full removal failed: $($r.Text)" }
     Assert-Settings $original 'full removal'
+
+    # Codex consent uses its own user hooks file and leaves approval to /hooks.
+    [IO.Directory]::CreateDirectory($env:CODEX_HOME) | Out-Null
+    $codexHooks = Join-Path $env:CODEX_HOME 'hooks.json'
+    $r = Invoke-Engine @() -AgentName codex
+    if ($r.Code -ne 0 -or (Test-Path $codexHooks)) { Fail "Codex default install: $($r.Text)" }
+    $r = Invoke-Engine @('-Hooks', 'codex', '-DryRun') -AgentName codex
+    if ($r.Code -ne 0 -or (Test-Path $codexHooks) -or $r.Text -notmatch '-Harness codex') { Fail "Codex dry run: $($r.Text)" }
+    $r = Invoke-Engine @('-Hooks', 'codex') -AgentName codex
+    if ($r.Code -ne 0 -or -not (Test-Path $codexHooks) -or $r.Text -notmatch '/hooks') { Fail "Codex opt-in: $($r.Text)" }
+    $codexInstalled = [IO.File]::ReadAllText($codexHooks)
+    $r = Invoke-Engine @('-Hooks', 'codex') -AgentName codex
+    if ($r.Code -ne 0 -or [IO.File]::ReadAllText($codexHooks) -cne $codexInstalled) { Fail "Codex repeat: $($r.Text)" }
+    $r = Invoke-Engine @('-RemoveHooks') -AgentName codex
+    if ($r.Code -ne 0 -or [IO.File]::ReadAllText($codexHooks) -match 'hook codex') { Fail "Codex hook removal: $($r.Text)" }
 
     # Refusals happen before any write.
     foreach ($bad in @(@('-Hooks', 'codex'), @('-Hooks', 'bogus'), @('-Hooks', 'claude', '-RemoveHooks'))) {

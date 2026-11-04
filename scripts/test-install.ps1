@@ -46,15 +46,16 @@ try {
     if ($output -notmatch 'local mode removed' -or $output -notmatch 'unified-memory') { throw "Removal failed: $output" }
     # One-line installer passes the hook options through (scratch Claude config; nothing is written).
     $originalClaudeDir = $env:CLAUDE_CONFIG_DIR
+    $originalCodexDir = $env:CODEX_HOME
     $env:CLAUDE_CONFIG_DIR = Join-Path $scratch 'claude-config'
+    $env:CODEX_HOME = Join-Path $scratch 'codex-config'
     try {
         $fixture.DownloadBinary = $false
         $output = & (Join-Path $repo 'install.ps1') -RemoveHooks -DryRun 6>&1 | Out-String
         if ($output -notmatch 'no Claude Code read-routing hook' -or $fixture.DownloadBinary -or (Test-Path $env:CLAUDE_CONFIG_DIR)) { throw "-RemoveHooks bootstrap: $output" }
-        $refused = $false
-        try { & (Join-Path $repo 'install.ps1') -Hooks codex -Agent codex -DryRun 6>&1 | Out-Null } catch { $refused = $_ -match 'Installer failed' }
-        if (-not $refused) { throw '-Hooks codex was not passed through to the engine' }
-    } finally { $env:CLAUDE_CONFIG_DIR = $originalClaudeDir }
+        $output = & (Join-Path $repo 'install.ps1') -Hooks codex -Agent codex -DryRun 6>&1 | Out-String
+        if ($output -notmatch 'hook codex' -or $output -notmatch '/hooks') { throw '-Hooks codex was not passed through to the engine' }
+    } finally { $env:CLAUDE_CONFIG_DIR = $originalClaudeDir; $env:CODEX_HOME = $originalCodexDir }
     # Actual bootstrap writes, isolated from the user's harness registrations.
     $fixture.Install = $true
     & (Join-Path $repo 'install.ps1') -Agent codex
@@ -78,6 +79,7 @@ try {
     & (Join-Path $PSScriptRoot 'test-install-menus.ps1')
     & (Join-Path $PSScriptRoot 'test-worker-check.ps1')
     & (Join-Path $PSScriptRoot 'test-manage-hooks.ps1')
+    & (Join-Path $PSScriptRoot 'test-manage-hooks-codex.ps1')
     & (Join-Path $PSScriptRoot 'test-hooks-onboarding.ps1')
 } finally {
     $env:TEMP = $originalTemp

@@ -114,7 +114,7 @@ fn file_argument(args: &[Token], powershell: bool) -> Option<&str> {
 }
 
 /// Resolves `raw` against `cwd` unless it is already absolute.
-fn resolve(raw: &str, cwd: &Path) -> Option<PathBuf> {
+pub(super) fn resolve(raw: &str, cwd: &Path) -> Option<PathBuf> {
     let bytes = raw.as_bytes();
     match bytes {
         [] => None,
