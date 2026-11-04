@@ -7,6 +7,9 @@
 
 use crate::setup::record::{AgentId, Feature, PendingUserStep};
 
+#[path = "text_changes.rs"]
+pub mod changes;
+
 pub const LEGEND: &str = "↑↓ move · space select · enter continue · esc back · q quit";
 pub const LEGEND_HOME: &str = "↑↓ move · enter continue · q quit";
 pub const LEGEND_REVIEW: &str =
@@ -135,7 +138,14 @@ using the standard choices.";
 pub const DUMB_TERMINAL: &str = "This terminal cannot show a menu, so mmhmem will \
 ask numbered questions instead.";
 pub const PROMPT_CHOICE: &str = "Type a number and press enter:";
-pub const PLACEHOLDER: &str = "The setup menu is coming soon. Nothing was changed.";
+pub const BAD_CHOICE: &str = "That is not one of the choices shown. Please try again.";
+pub const HELP_HOME: &str = "Type a number to choose, or q to quit.";
+pub const HELP_AGENTS: &str =
+    "Type numbers to switch tools on or off, Enter to continue, b = back, q = quit.";
+pub const HELP_FEATURES: &str =
+    "Type numbers to switch features on or off, Enter to continue, b = back, q = quit.";
+pub const HELP_REVIEW: &str =
+    "y = make these changes, d <number> = show the details of one change, b = back, q = quit.";
 pub const BAD_ARGUMENT: &str = "mmhmem setup does not take any options. \
 Just run: mmhmem setup";
 
@@ -304,7 +314,11 @@ pub const ALL: &[&str] = &[
     NO_TERMINAL,
     DUMB_TERMINAL,
     PROMPT_CHOICE,
-    PLACEHOLDER,
+    BAD_CHOICE,
+    HELP_HOME,
+    HELP_AGENTS,
+    HELP_FEATURES,
+    HELP_REVIEW,
     BAD_ARGUMENT,
     NEXT_CLAUDE_CODE,
     NEXT_CODEX,

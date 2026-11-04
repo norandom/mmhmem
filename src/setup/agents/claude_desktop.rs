@@ -39,6 +39,7 @@ use crate::setup::check::{Registration, RegistrationError};
 use crate::setup::edit::json as edit;
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{KeySegment, ManagedEntry, Os, Scope, Target, key_path};
+use crate::setup::ui::text::changes::{self as say, What};
 
 /// The config file name inside a profile folder.
 pub const CONFIG_FILE: &str = "claude_desktop_config.json";
@@ -210,7 +211,7 @@ impl ClaudeDesktop {
                 owner_only: false,
                 hide_diff: false,
                 missing_parents: Some(missing),
-                summary: "Add mmhmem to the Claude Desktop config".to_owned(),
+                summary: say::add(What::Server, AgentId::ClaudeDesktop.label(), &file),
             },
         )))
     }
@@ -233,7 +234,7 @@ impl ClaudeDesktop {
             Change {
                 scope: SCOPE,
                 target,
-                file,
+                file: file.clone(),
                 action: if before.is_some() {
                     Action::Update
                 } else {
@@ -244,7 +245,7 @@ impl ClaudeDesktop {
                 owner_only: false,
                 hide_diff: false,
                 missing_parents: None,
-                summary: "Add the unified-memory skill for Claude Desktop".to_owned(),
+                summary: say::add(What::Guide, AgentId::ClaudeDesktop.label(), &file),
             },
         )))
     }
@@ -286,11 +287,9 @@ fn remove_entry(
     chain: &mut FileChain,
     entry: &ManagedEntry,
 ) -> Result<Option<Change>, AgentProblem> {
-    let (file, summary) = match &entry.target {
-        Target::File { file } => (file, "Remove the unified-memory skill"),
-        Target::JsonEntry { file, pointer, .. } if is_entry(pointer) => {
-            (file, "Remove mmhmem from the Claude Desktop config")
-        }
+    let file = match &entry.target {
+        Target::File { file } => file,
+        Target::JsonEntry { file, pointer, .. } if is_entry(pointer) => file,
         _ => return Ok(None),
     };
     let bad = |error| AgentProblem::Json {
@@ -320,7 +319,7 @@ fn remove_entry(
             owner_only: false,
             hide_diff: false,
             missing_parents: None,
-            summary: summary.to_owned(),
+            summary: say::remove(AgentId::ClaudeDesktop.label(), file),
         },
     )))
 }
@@ -334,7 +333,7 @@ impl Agent for ClaudeDesktop {
         let found = profiles(&env.dirs);
         if found.is_empty() {
             return Detection::NotFound {
-                reason: "no Claude Desktop folder was found in your app data".to_owned(),
+                reason: "no Claude Desktop folder was found".to_owned(),
             };
         }
         Detection::Found {

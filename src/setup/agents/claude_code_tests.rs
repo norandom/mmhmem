@@ -128,7 +128,7 @@ fn detects_the_folder_alone_and_tolerates_a_failing_cli() {
     let r = rig();
     assert!(matches!(
         r.agent.detect(&r.home.env),
-        Detection::NotFound { reason } if reason.contains(".claude")
+        Detection::NotFound { reason } if reason == "Claude Code is not installed"
     ));
     std::fs::create_dir_all(r.home.home().join(".claude")).unwrap();
     r.home.install_program("claude");

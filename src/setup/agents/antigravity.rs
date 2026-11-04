@@ -15,6 +15,7 @@ use super::{
 use crate::setup::check::Registration;
 use crate::setup::check::agent::Steps;
 use crate::setup::plan::Change;
+use crate::setup::ui::text::changes as say;
 
 /// What the user does to take mmhmem out again.
 pub const REMOVE_INSTRUCTION: &str =
@@ -76,11 +77,12 @@ impl Agent for Antigravity {
         }
         if paths.is_empty() {
             let dir: &Path = &dir;
+            tracing::debug!(
+                "antigravity is not on PATH and {} does not exist",
+                dir.display()
+            );
             return Detection::NotFound {
-                reason: format!(
-                    "antigravity is not on PATH and {} does not exist",
-                    dir.display()
-                ),
+                reason: say::not_installed(AgentId::Antigravity.label()),
             };
         }
         Detection::Found {

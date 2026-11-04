@@ -9,6 +9,7 @@
 use super::{AgentScan, Artefact, ArtefactKind, Origin, Scan};
 use crate::setup::plan::{Action, Change, Plan};
 use crate::setup::record::{AgentId, InstallRecord, Scope, UtcTimestamp};
+use crate::setup::ui::text::changes::{self as say, What};
 
 /// The agent's name as shown to the user.
 pub fn agent_label(agent: AgentId) -> &'static str {
@@ -56,34 +57,17 @@ fn agent_changes(agent: &AgentScan, record: Option<&InstallRecord>) -> Vec<Chang
 
 impl Artefact {
     /// One plain-language line for the review screen, e.g. "Found mmhmem in
-    /// the Codex config (made by the old installer); keep and track it."
+    /// Codex's server list (made by the old installer); keep and track it."
     pub fn summary(&self, agent: AgentId) -> String {
-        let label = agent_label(agent);
-        let what = match (self.kind, agent) {
-            (ArtefactKind::McpEntry, AgentId::ClaudeDesktop) => {
-                "mmhmem in the Claude Desktop config".to_owned()
-            }
-            (ArtefactKind::McpEntry, AgentId::Codex) => "mmhmem in the Codex config".to_owned(),
-            (ArtefactKind::McpEntry, _) => format!("mmhmem in the {label} settings"),
-            (ArtefactKind::Skill, _) => format!("the mmhmem skill for {label}"),
-            (ArtefactKind::RecapCommand, _) => format!("the mmhmem recap command for {label}"),
-            (ArtefactKind::RoutingSection, _) => {
-                format!("mmhmem's reading instructions for {label}")
-            }
-            (ArtefactKind::ReadHook, _) => format!("mmhmem's read-routing hook for {label}"),
-            (ArtefactKind::ReadPlugin, _) => format!("mmhmem's read-routing plugin for {label}"),
+        let what = match self.kind {
+            ArtefactKind::McpEntry => What::Server,
+            ArtefactKind::Skill => What::Guide,
+            ArtefactKind::RecapCommand => What::Recap,
+            ArtefactKind::RoutingSection => What::Instructions,
+            ArtefactKind::ReadHook => What::ReadHook,
+            ArtefactKind::ReadPlugin => What::ReadPlugin,
         };
-        let origin = match self.origin {
-            Origin::OldInstaller => " (made by the old installer)",
-            Origin::Unknown => "",
-        };
-        let mut line = format!("Found {what}{origin}; keep and track it.");
-        if self.converts_marker_block() {
-            line.push_str(
-                " Only the old installer's two marker comment lines are removed; \
-                 the rest of the file stays as it is.",
-            );
-        }
-        line
+        let old = self.origin == Origin::OldInstaller;
+        say::adopt(what, agent_label(agent), old, self.converts_marker_block())
     }
 }

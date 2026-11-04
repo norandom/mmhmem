@@ -50,6 +50,7 @@ use crate::setup::record::{
     ElementMatcher, EntryState, HookHarness, KeySegment, Observation, Scope, Sha256Hex, Target,
     key_path, observe_in,
 };
+use crate::setup::ui::text::changes::{self as say, What};
 
 #[path = "claude_code_remove.rs"]
 mod remove;
@@ -232,7 +233,7 @@ impl ClaudeCode {
             file: file.clone(),
             after: text.into_bytes(),
             missing_parents: Some(missing as u32),
-            summary: format!("register the mmhmem MCP server in {}", file.display()),
+            summary: say::add(What::Server, AgentId::ClaudeCode.label(), file),
         })
     }
 
@@ -264,7 +265,7 @@ impl ClaudeCode {
             file: file.clone(),
             after: after.into_bytes(),
             missing_parents: Some(missing as u32),
-            summary: format!("add the mmhmem read hook to {}", file.display()),
+            summary: say::add(What::ReadHook, AgentId::ClaudeCode.label(), file),
         })
     }
 
@@ -274,21 +275,25 @@ impl ClaudeCode {
         paths: &Paths,
         feature: Feature,
     ) -> Result<Proposal, AgentProblem> {
-        let owned = |file: &PathBuf, bytes: &[u8], what: &str| Proposal {
+        let owned = |file: &PathBuf, bytes: &[u8], what: What| Proposal {
             target: Target::File { file: file.clone() },
             file: file.clone(),
             after: bytes.to_vec(),
             missing_parents: None,
-            summary: format!("install the {what} {}", file.display()),
+            summary: say::add(what, AgentId::ClaudeCode.label(), file),
         };
         match feature {
             Feature::Mcp => self.plan_mcp(chain, paths),
             Feature::ReadHook => self.plan_hook(chain, paths),
-            Feature::Skill => Ok(owned(&paths.skill, UNIFIED_MEMORY_SKILL.bytes(), "skill")),
+            Feature::Skill => Ok(owned(
+                &paths.skill,
+                UNIFIED_MEMORY_SKILL.bytes(),
+                What::Guide,
+            )),
             Feature::RecapCommand => Ok(owned(
                 &paths.command,
                 CLAUDE_RECAP_COMMAND.bytes(),
-                "recap command",
+                What::Recap,
             )),
             Feature::Instructions => {
                 let file = &paths.rules;
@@ -304,7 +309,7 @@ impl ClaudeCode {
                     file: file.clone(),
                     after: after.into_bytes(),
                     missing_parents: None,
-                    summary: format!("add the mmhmem routing instructions to {}", file.display()),
+                    summary: say::add(What::Instructions, AgentId::ClaudeCode.label(), file),
                 })
             }
         }
@@ -348,10 +353,11 @@ impl Agent for ClaudeCode {
             }
         }
         if paths.is_empty() {
-            let reason = format!(
-                "the claude program is not on PATH and {} does not exist",
+            tracing::debug!(
+                "claude is not on PATH and {} does not exist",
                 env.home().join(".claude").display()
             );
+            let reason = say::not_installed(AgentId::ClaudeCode.label());
             return Detection::NotFound { reason };
         }
         let version = program.and_then(|p| version(env, &p));

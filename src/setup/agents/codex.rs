@@ -43,6 +43,7 @@ use crate::setup::plan::{Action, Change};
 use crate::setup::record::{
     ElementMatcher, HookHarness, KeySegment, ManagedEntry, Os, Scope, Target, key_path,
 };
+use crate::setup::ui::text::changes::{self as say, What};
 
 const ID: AgentId = AgentId::Codex;
 const SCOPE: Scope = Scope::Agent(ID);
@@ -238,7 +239,7 @@ impl Codex {
             file,
             before,
             Some(after.into_bytes()),
-            "register the mmhmem MCP server in Codex".to_owned(),
+            say::add(What::Server, ID.label(), file),
         );
         c.action = if existed { Action::Update } else { Action::Add };
         push_unless_noop(chain, rec, c);
@@ -284,7 +285,7 @@ impl Codex {
             file,
             before,
             Some(text.into_bytes()),
-            "add the mmhmem read hook to Codex".to_owned(),
+            say::add(What::ReadHook, ID.label(), file),
         );
         c.missing_parents = Some(missing);
         if found.is_empty() {
@@ -299,13 +300,13 @@ impl Codex {
         rec: Option<&AgentRecord>,
         file: &Path,
         asset: Asset,
-        what: &str,
+        what: What,
     ) -> Planned {
         let before = chain.bytes(file)?;
         let target = Target::File {
             file: file.to_path_buf(),
         };
-        let summary = format!("install the Codex {what}");
+        let summary = say::add(what, ID.label(), file);
         let c = change(target, file, before, Some(asset.bytes().to_vec()), summary);
         push_unless_noop(chain, rec, c);
         Ok(())
@@ -317,7 +318,7 @@ impl Codex {
         chain: &mut FileChain,
         entry: &ManagedEntry,
     ) -> Result<Option<Change>, AgentProblem> {
-        let summary = "remove the mmhmem entry from Codex".to_owned();
+        let summary = |file: &Path| say::remove(ID.label(), file);
         match &entry.target {
             Target::File { file } => {
                 let before = chain.bytes(file)?;
@@ -326,7 +327,7 @@ impl Codex {
                     file,
                     before,
                     None,
-                    summary,
+                    summary(file),
                 )))
             }
             Target::TomlTable { file, .. } => {
@@ -341,7 +342,7 @@ impl Codex {
                     file,
                     before,
                     Some(after.into_bytes()),
-                    summary,
+                    summary(file),
                 );
                 Ok(Some(Change {
                     action: Action::Remove,
@@ -371,7 +372,7 @@ impl Codex {
                     file,
                     Some(text.into_bytes()),
                     Some(after.into_bytes()),
-                    summary,
+                    summary(file),
                 );
                 Ok(Some(Change {
                     action: Action::Remove,
@@ -415,8 +416,9 @@ impl Agent for Codex {
             paths.push(home.clone());
         }
         if paths.is_empty() {
+            tracing::debug!("codex is not on PATH and {} does not exist", home.display());
             return Detection::NotFound {
-                reason: format!("codex is not on PATH and {} does not exist", home.display()),
+                reason: say::not_installed(ID.label()),
             };
         }
         let version = program
@@ -448,12 +450,12 @@ impl Agent for Codex {
         }
         if want.wants(ID, Feature::Skill) {
             for (file, asset) in &p.skills {
-                Self::plan_file(&mut chain, rec, file, *asset, "skill")?;
+                Self::plan_file(&mut chain, rec, file, *asset, What::Guide)?;
             }
         }
         if want.wants(ID, Feature::RecapCommand) {
             let asset = assets::CODEX_RECAP_PROMPT;
-            Self::plan_file(&mut chain, rec, &p.prompt, asset, "recap prompt")?;
+            Self::plan_file(&mut chain, rec, &p.prompt, asset, What::Recap)?;
         }
         if let Some(rec) = rec {
             Self::plan_removals(&p, &mut chain, want, rec)?;

@@ -8,11 +8,12 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::{SCOPE, hides_contents, json_problem};
-use crate::setup::agents::{AgentProblem, FileChain};
+use crate::setup::agents::{AgentId, AgentProblem, FileChain};
 use crate::setup::edit::json::{self as edit_json, JsonEditError};
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change, target_file};
 use crate::setup::record::{ElementMatcher, KeySegment, ManagedEntry, Target};
+use crate::setup::ui::text::changes as say;
 
 fn text_of(file: &Path, bytes: &[u8]) -> Result<String, AgentProblem> {
     String::from_utf8(bytes.to_vec()).map_err(|_| AgentProblem::Unreadable {
@@ -117,7 +118,7 @@ pub(super) fn removal(
         target: entry.target.clone(),
         owner_only: false,
         hide_diff: hides_contents(&file),
-        summary: format!("remove mmhmem's entry from {}", file.display()),
+        summary: say::remove(AgentId::ClaudeCode.label(), &file),
         file,
         action: Action::Remove,
         before: Some(before),

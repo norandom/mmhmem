@@ -1,9 +1,11 @@
 //! The `mmhmem setup` front end (reliable-installers requirement 4). Task 6.1
 //! provides the entry point and the text; the full-screen menu (6.2: the
-//! controller in `flow.rs`, the screens in `app.rs`) and the numbered
-//! fallback (6.3) plug into [`run`] through [`Mode`].
+//! controller in `flow.rs`, the screens in `app.rs`), the numbered
+//! fallback and the no-terminal run (6.3, `fallback.rs`) plug into
+//! [`run`] through [`Mode`].
 
 pub mod app;
+pub mod fallback;
 #[cfg(test)]
 pub(crate) mod fixtures;
 pub mod flow;
@@ -11,7 +13,7 @@ pub mod text;
 #[cfg(test)]
 mod text_tests;
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use crate::setup::agents::Env;
@@ -110,21 +112,35 @@ fn run_menu() -> i32 {
     }
 }
 
-/// TODO(6.3): the numbered fallback and the no-terminal default
-/// (`fallback.rs`) take over here, driving the same [`Flow`].
-fn run_fallback(flow: Option<Flow>, mode: Mode, args: &SetupArgs) -> i32 {
-    let _ = flow;
-    println!("{}", text::TITLE_HOME);
-    println!("{}", text::INTRO);
-    match mode {
-        Mode::Menu | Mode::Fallback => println!("{}", text::DUMB_TERMINAL),
-        Mode::NoTerminal => println!("{}", text::NO_TERMINAL),
+/// The numbered prompts (`TERM=dumb`, or the menu could not start) or the
+/// run without a terminal: both drive the same [`Flow`] (`fallback.rs`).
+fn run_fallback(flow: Option<Flow>, mode: Mode, _args: &SetupArgs) -> i32 {
+    // TODO(7.1): `--bootstrap <tag>` names the release to install.
+    let Some(mut flow) = flow.or_else(|| process_deps().map(Flow::load)) else {
+        eprintln!("{}", text::NO_HOME);
+        return 1;
+    };
+    let mut out = std::io::stdout().lock();
+    if mode == Mode::NoTerminal {
+        flow.set_newest(Newest::Unknown);
+        return fallback::run_default(&mut flow, &mut out);
     }
-    if let Some(tag) = &args.bootstrap {
-        println!("Installing version {tag}.");
-    }
-    println!("{}", text::PLACEHOLDER);
-    0
+    let _ = writeln!(out, "{}", text::DUMB_TERMINAL);
+    flow.set_newest(newest_within(NEWEST_WAIT));
+    fallback::run(&mut flow, &mut std::io::stdin().lock(), &mut out)
+}
+
+/// How long the numbered prompts wait for the newest-release lookup.
+const NEWEST_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The newest release, or [`Newest::Unknown`] when the lookup takes longer
+/// than `wait`.
+fn newest_within(wait: std::time::Duration) -> Newest {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(newest_release());
+    });
+    rx.recv_timeout(wait).unwrap_or(Newest::Unknown)
 }
 
 /// The real environment, record folder, binary and release of this run.

@@ -144,7 +144,7 @@ impl App {
             Line::raw(format!("{}{}", cell(&home.installed, 27), home.newest)),
             Line::raw(""),
         ];
-        lines.extend(agent_table(&home));
+        lines.extend(agent_table(&home, width));
         lines.push(Line::raw(""));
         for note in &home.notes {
             push_wrapped(&mut lines, note, width, Style::new());
@@ -263,7 +263,7 @@ impl App {
     }
 }
 
-fn agent_table(home: &HomeView) -> Vec<Line<'static>> {
+fn agent_table(home: &HomeView, width: usize) -> Vec<Line<'static>> {
     let header = format!(
         "{}{}{}{}",
         cell(text::COL_AGENT, 16),
@@ -274,28 +274,43 @@ fn agent_table(home: &HomeView) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(header, bold())];
     for row in &home.rows {
         let label = cell(row.agent.label(), 16);
-        let line = match &row.state {
-            AgentState::NotFound(reason) => Line::styled(
-                format!("{label}{}({reason})", cell(text::STATUS_NOT_FOUND, 12)),
-                dim(),
-            ),
-            state => {
-                let status = if *state == AgentState::Installed {
-                    text::STATUS_INSTALLED
-                } else {
-                    text::STATUS_NOT_SET_UP
-                };
-                Line::raw(format!(
-                    "{label}{}{}{}",
-                    cell(status, 12),
-                    cell(&row.features, 22),
-                    row.last_check
-                ))
-            }
+        if let AgentState::NotFound(reason) = &row.state {
+            lines.extend(not_found_lines(&label, reason, width));
+            continue;
+        }
+        let status = if row.state == AgentState::Installed {
+            text::STATUS_INSTALLED
+        } else {
+            text::STATUS_NOT_SET_UP
         };
-        lines.push(line);
+        lines.push(Line::raw(format!(
+            "{label}{}{}{}",
+            cell(status, 12),
+            cell(&row.features, 22),
+            row.last_check
+        )));
     }
     lines
+}
+
+/// "Antigravity     not found   (reason)", with a long reason wrapped under
+/// itself at word breaks.
+fn not_found_lines(label: &str, reason: &str, width: usize) -> Vec<Line<'static>> {
+    let first = format!("{label}{}", cell(text::STATUS_NOT_FOUND, 12));
+    let indent = first.chars().count();
+    let parts = wrap(&format!("({reason})"), width.saturating_sub(indent), "", 0);
+    parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let lead = if i == 0 {
+                first.clone()
+            } else {
+                " ".repeat(indent)
+            };
+            Line::styled(format!("{lead}{part}"), dim())
+        })
+        .collect()
 }
 
 fn feature_row(lines: &mut Vec<Line<'static>>, row: &FeatureRow, selected: bool, width: usize) {
@@ -314,5 +329,27 @@ fn feature_row(lines: &mut Vec<Line<'static>>, row: &FeatureRow, selected: bool,
     )));
     for l in wrap(&row.help, width, "        ", 8) {
         lines.push(Line::styled(l, dim()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_reason_wraps_at_word_breaks_under_its_column() {
+        let reason = "no Claude Desktop folder was found anywhere in your user profile or app data";
+        let lines = not_found_lines(&cell("Claude Desktop", 16), reason, 76);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect();
+        assert!(text.len() >= 2, "{text:?}");
+        for line in &text {
+            assert!(line.chars().count() <= 76, "{line:?}");
+        }
+        assert!(text[1].starts_with(&" ".repeat(28)), "{text:?}");
+        let joined = text.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+        assert!(joined.contains(reason), "{joined}");
     }
 }

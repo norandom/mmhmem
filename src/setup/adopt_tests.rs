@@ -85,7 +85,7 @@ fn powershell_home_gives_the_expected_scan_and_plan() {
         .unwrap();
     assert_eq!(
         codex.summary,
-        "Found mmhmem in the Codex config (made by the old installer); keep and track it. \
+        "Found mmhmem in Codex's server list (made by the old installer); keep and track it. \
          Only the old installer's two marker comment lines are removed; \
          the rest of the file stays as it is."
     );
@@ -101,13 +101,15 @@ fn bash_home_gives_the_expected_scan_and_plan() {
     assert_eq!(scan.leftovers.len(), 2);
     let plan = check_expected_plan(&scan, &home);
     let summaries: Vec<&str> = plan.changes.iter().map(|c| c.summary.as_str()).collect();
-    assert!(summaries.contains(&"Found mmhmem in the Claude Desktop config; keep and track it."));
-    assert!(summaries.contains(&"Found the mmhmem skill for Claude Code; keep and track it."));
+    assert!(
+        summaries.contains(&"Found mmhmem in Claude Desktop's server list; keep and track it.")
+    );
+    assert!(summaries.contains(&"Found the memory guide for Claude Code; keep and track it."));
     assert!(summaries.contains(
-        &"Found mmhmem's reading instructions for OpenCode (made by the old installer); \
+        &"Found mmhmem's memory notes for OpenCode (made by the old installer); \
           keep and track it."
     ));
-    assert!(summaries.contains(&"Found mmhmem's read-routing hook for Codex; keep and track it."));
+    assert!(summaries.contains(&"Found mmhmem's read hook for Codex; keep and track it."));
     let scopes: Vec<Scope> = plan.scopes();
     assert_eq!(scopes.len(), 4);
 }

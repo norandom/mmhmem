@@ -35,6 +35,7 @@ use crate::setup::edit::json as jedit;
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change, target_file};
 use crate::setup::record::{ManagedEntry, Scope, Target, key_path, observe_in};
+use crate::setup::ui::text::changes::{self as say, What};
 
 const SCOPE: Scope = Scope::Agent(AgentId::OpenCode);
 const MCP: [&str; 3] = ["mcp", "servers", "mmhmem"];
@@ -108,7 +109,7 @@ struct Draft {
     before: Option<Vec<u8>>,
     after: Vec<u8>,
     missing_parents: Option<u32>,
-    what: &'static str,
+    what: What,
 }
 
 struct Planner<'a> {
@@ -147,18 +148,15 @@ impl<'a> Planner<'a> {
         if same && self.recorded(&target).is_some() {
             return;
         }
-        let (action, after, summary) = match (&before, same) {
-            (None, _) => (Action::Add, after, format!("Add {what}.")),
-            (Some(b), true) => (
-                Action::Update,
-                b.clone(),
-                format!("Keep {what} as it is and track it."),
-            ),
-            (Some(_), false) => (Action::Update, after, format!("Update {what}.")),
-        };
         let file = target_file(&target)
             .expect("an OpenCode entry has a file")
             .to_path_buf();
+        let label = AgentId::OpenCode.label();
+        let (action, after, summary) = match (&before, same) {
+            (None, _) => (Action::Add, after, say::add(what, label, &file)),
+            (Some(b), true) => (Action::Update, b.clone(), say::keep(what, label, &file)),
+            (Some(_), false) => (Action::Update, after, say::update(what, label, &file)),
+        };
         self.chain.push(Change {
             scope: SCOPE,
             target,
@@ -229,17 +227,12 @@ impl<'a> Planner<'a> {
             before,
             after: after.into_bytes(),
             missing_parents: Some(missing),
-            what: "the mmhmem entry in the OpenCode settings",
+            what: What::Server,
         });
         Ok(())
     }
 
-    fn plan_file(
-        &mut self,
-        file: PathBuf,
-        bytes: Vec<u8>,
-        what: &'static str,
-    ) -> Result<(), AgentProblem> {
+    fn plan_file(&mut self, file: PathBuf, bytes: Vec<u8>, what: What) -> Result<(), AgentProblem> {
         let before = self.chain.bytes(&file)?;
         self.put(Draft {
             target: Target::File { file },
@@ -270,7 +263,7 @@ impl<'a> Planner<'a> {
         let quoted = Value::String(binary.to_string_lossy().into_owned()).to_string();
         let template = assets::OPENCODE_READ_PLUGIN.text;
         let text = template.replace(BINARY_PLACEHOLDER, &quoted);
-        self.plan_file(file, text.into_bytes(), "the OpenCode read-routing plugin")
+        self.plan_file(file, text.into_bytes(), What::ReadPlugin)
     }
 
     fn plan_section(&mut self) -> Result<(), AgentProblem> {
@@ -291,7 +284,7 @@ impl<'a> Planner<'a> {
             before,
             after: after.into_bytes(),
             missing_parents: None,
-            what: "mmhmem's reading instructions in OpenCode's AGENTS.md",
+            what: What::Instructions,
         });
         Ok(())
     }
@@ -334,7 +327,7 @@ impl<'a> Planner<'a> {
             owner_only: false,
             hide_diff: false,
             missing_parents: entry.missing_parents,
-            summary: format!("Remove mmhmem from {}.", file.display()),
+            summary: say::remove(AgentId::OpenCode.label(), file),
         });
         Ok(())
     }
@@ -377,11 +370,12 @@ impl Agent for OpenCode {
             paths.push(dir.clone());
         }
         if paths.is_empty() {
+            tracing::debug!(
+                "opencode is not on PATH and {} does not exist",
+                dir.display()
+            );
             return Detection::NotFound {
-                reason: format!(
-                    "opencode is not on PATH and {} does not exist",
-                    dir.display()
-                ),
+                reason: say::not_installed(AgentId::OpenCode.label()),
             };
         }
         let version = program
@@ -410,12 +404,12 @@ impl Agent for OpenCode {
         if on(Feature::Skill) {
             let file = p.dir.join("skills").join("unified-memory").join("SKILL.md");
             let bytes = assets::UNIFIED_MEMORY_SKILL.bytes().to_vec();
-            p.plan_file(file, bytes, "the mmhmem skill for OpenCode")?;
+            p.plan_file(file, bytes, What::Guide)?;
         }
         if on(Feature::RecapCommand) {
             let file = p.recap_file();
             let bytes = assets::OPENCODE_RECAP_COMMAND.bytes().to_vec();
-            p.plan_file(file, bytes, "the mmhmem recap command for OpenCode")?;
+            p.plan_file(file, bytes, What::Recap)?;
         }
         if on(Feature::Instructions) {
             p.plan_section()?;

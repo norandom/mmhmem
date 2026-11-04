@@ -153,7 +153,7 @@ released.
   - _Depends: 1.4, 5.2_
   - _Requirements: 2.3, 2.4, 2.5, 2.6, 2.7_
 
-- [ ] 6. Build the menu
+- [x] 6. Build the menu
 - [x] 6.1 Plain-language text and the `setup` entry point
   - Add `mmhmem setup` to the hand-parsed CLI in `src/main.rs` with no user-facing flags (only the internal `--bootstrap <tag>` and the maintainer `--release-dir <dir>`).
   - Put every user-facing string in `src/setup/ui/text.rs`, reviewed for users who don't know the project.
@@ -167,7 +167,7 @@ released.
   - _Depends: 2.5, 4.2, 6.1_
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 1.5_
 
-- [ ] 6.3 (P) Numbered fallback and no-terminal default
+- [x] 6.3 (P) Numbered fallback and no-terminal default
   - Implement `src/setup/ui/fallback.rs` with the same screens as numbered prompts, used when raw mode or the alternate screen is unavailable or `TERM=dumb`. Without a terminal, install the default selection, or stop without changes when no agent is detected.
   - Done when tests drive the fallback through install and cancel, and the no-terminal path installs the defaults with plain result lines.
   - _Boundary: ui-fallback_
