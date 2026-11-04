@@ -1,13 +1,23 @@
 //! The `mmhmem setup` front end (reliable-installers requirement 4). Task 6.1
-//! provides the entry point and the text; the full-screen menu (6.2) and the
-//! numbered fallback (6.3) plug into [`run`] through [`Mode`].
+//! provides the entry point and the text; the full-screen menu (6.2: the
+//! controller in `flow.rs`, the screens in `app.rs`) and the numbered
+//! fallback (6.3) plug into [`run`] through [`Mode`].
 
+pub mod app;
+#[cfg(test)]
+pub(crate) mod fixtures;
+pub mod flow;
 pub mod text;
 #[cfg(test)]
 mod text_tests;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
+
+use crate::setup::agents::Env;
+use crate::setup::record::{LocationInput, RecordStore, ReleaseTag};
+use crate::setup::release::{self, ReleaseSource};
+use flow::{Deps, Flow, Newest};
 
 /// Internal arguments of `mmhmem setup`; never shown in `--help`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -69,11 +79,45 @@ pub fn current_mode() -> Mode {
 
 /// Entry point of `mmhmem setup`. Returns the process exit code.
 pub fn run(args: SetupArgs) -> i32 {
+    match current_mode() {
+        Mode::Menu => run_menu(),
+        mode => run_fallback(None, mode, &args),
+    }
+}
+
+/// The full-screen menu; falls back to the numbered prompts when the
+/// terminal cannot enter raw mode or the alternate screen.
+fn run_menu() -> i32 {
+    let Some(deps) = process_deps() else {
+        eprintln!("{}", text::NO_HOME);
+        return 1;
+    };
+    let flow = Flow::load(deps);
+    match app::run_terminal(flow, Box::new(newest_release)) {
+        Ok((code, progress)) => {
+            let lines = progress.map(|p| p.all_lines()).unwrap_or_default();
+            for line in lines {
+                println!("{line}");
+            }
+            if code == flow::EXIT_CANCELLED {
+                println!("{}", text::CANCELLED);
+            }
+            code
+        }
+        Err(app::TerminalUnavailable(flow)) => {
+            run_fallback(Some(*flow), Mode::Fallback, &SetupArgs::default())
+        }
+    }
+}
+
+/// TODO(6.3): the numbered fallback and the no-terminal default
+/// (`fallback.rs`) take over here, driving the same [`Flow`].
+fn run_fallback(flow: Option<Flow>, mode: Mode, args: &SetupArgs) -> i32 {
+    let _ = flow;
     println!("{}", text::TITLE_HOME);
     println!("{}", text::INTRO);
-    match current_mode() {
-        Mode::Menu => {}
-        Mode::Fallback => println!("{}", text::DUMB_TERMINAL),
+    match mode {
+        Mode::Menu | Mode::Fallback => println!("{}", text::DUMB_TERMINAL),
         Mode::NoTerminal => println!("{}", text::NO_TERMINAL),
     }
     if let Some(tag) = &args.bootstrap {
@@ -81,6 +125,29 @@ pub fn run(args: SetupArgs) -> i32 {
     }
     println!("{}", text::PLACEHOLDER);
     0
+}
+
+/// The real environment, record folder, binary and release of this run.
+fn process_deps() -> Option<Deps> {
+    let env = Env::from_process()?;
+    let store = RecordStore::locate(&LocationInput::from_process()).ok()?;
+    let version = ReleaseTag::try_from(format!("v{}", env!("CARGO_PKG_VERSION"))).ok()?;
+    // TODO(7.1): install the program to its final place first; until then
+    // the agents launch the recorded program, or this one.
+    let recorded = store.load().ok().flatten().and_then(|r| r.binary);
+    let binary = match recorded {
+        Some(b) => b.path,
+        None => std::env::current_exe().ok()?,
+    };
+    Some(Deps::new(env, store, binary, version))
+}
+
+/// The newest stable release, or [`Newest::Unknown`] when it cannot be
+/// looked up (offline, rate limit, a platform without releases).
+fn newest_release() -> Newest {
+    release::Target::current()
+        .and_then(|target| release::latest_release(&ReleaseSource::github(), target))
+        .map_or(Newest::Unknown, |latest| Newest::Known(latest.tag))
 }
 
 #[cfg(test)]

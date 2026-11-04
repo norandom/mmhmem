@@ -211,6 +211,14 @@ Findings:
   optional `termwiz` backend and is not compiled
   (`cargo tree -i terminfo --target all -e all` prints nothing). Task 6.2
   sets `ratatui` to `default-features = false, features = ["crossterm"]`.
+- **Binary size (task 6.2, Windows x86_64 release, 2026-11-04):** HEAD
+  `89a97cb` (menu not linked) 16,178,176 bytes; with the menu and
+  `ratatui` restricted to `crossterm` 20,785,152 bytes (+4.4 MiB). Most of
+  that is the installer code `mmhmem setup` now reaches (agents, plan,
+  check, release lookup); the same tree with `ratatui`'s default features
+  is 20,797,440 bytes, so the restriction saves 12 KiB. With the
+  restriction `termwiz`, `terminfo` and their dependencies left
+  `Cargo.lock` (609 lines fewer).
 - **Spike** (`tests/setup_update_spike.rs`, against an `httpmock` GitHub API
   mock):
   - a zipsign-signed `.zip` with a matching `SHA256SUMS` is installed;

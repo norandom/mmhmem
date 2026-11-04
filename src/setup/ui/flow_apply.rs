@@ -1,0 +1,191 @@
+//! Confirm: apply, check, store and report (task 6.2, design.md §4, §6 and
+//! §7 "Progress"; Requirements 1.5, 3.3, 3.5, 5.1, 5.5 and 6.5–6.7).
+//!
+//! [`Flow::confirm`] applies the reviewed plan unchanged
+//! ([`crate::setup::plan::apply`]), runs [`Checker::run`] for the selected
+//! agents (which rolls back an agent whose check fails and stores each
+//! `last_check`), records the release and binary, drops agents that are no
+//! longer selected and have nothing left, saves the record and builds the
+//! progress lines: one line per agent's changes, where the backups are, the
+//! check results with pending user steps, and the next step per agent.
+
+use super::{Flow, text};
+use crate::setup::agents::{AgentId, Selection};
+use crate::setup::plan::{ApplyReport, Outcome, apply};
+use crate::setup::record::{BinaryInfo, CheckResult, InstallRecord, Scope, Sha256Hex};
+use crate::setup::verify::{Checker, VerifyReport};
+
+/// What a confirm did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirmed {
+    /// The earlier install was taken over; the choices are planned now and
+    /// wait for their own review.
+    Review,
+    /// Done; the results are in [`Flow::progress`].
+    Done,
+}
+
+/// The results screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Progress {
+    /// What was changed, skipped or restored, then the check results.
+    pub lines: Vec<String>,
+    /// What to do next in each agent that works.
+    pub next_steps: Vec<String>,
+    /// The exit code: 0 when every agent passed or only has user steps
+    /// left, 1 otherwise.
+    pub code: i32,
+}
+
+impl Progress {
+    /// Every line, with the next steps under [`text::DONE`].
+    pub fn all_lines(&self) -> Vec<String> {
+        let mut lines = self.lines.clone();
+        if !self.next_steps.is_empty() {
+            lines.push(String::new());
+            lines.push(text::DONE.to_owned());
+            lines.extend(self.next_steps.iter().cloned());
+        }
+        lines
+    }
+}
+
+impl Flow {
+    /// Applies the reviewed plan (the only call besides the check that
+    /// writes). Without a plan it does nothing.
+    pub fn confirm(&mut self) -> Confirmed {
+        let Some(planned) = self.planned.take() else {
+            return Confirmed::Done;
+        };
+        let mut record = self.loaded.record.clone().unwrap_or_default();
+        let mut applied = apply(&planned.plan, &self.deps.store, &mut record);
+        if planned.adoption {
+            if let Err(e) = self.deps.store.save(&record) {
+                self.loaded.notes.push(self.tidy(&e.to_string()));
+            }
+            self.loaded.record = Some(record);
+            self.loaded.scan = None;
+            self.make_plan();
+            return Confirmed::Review;
+        }
+        let registry = self.registry();
+        let checker = Checker {
+            registry: &registry,
+            env: &self.deps.env,
+            store: &self.deps.store,
+        };
+        let verify = checker.run(&self.selection, &mut applied, &mut record);
+        self.finish_record(&mut record);
+        let mut progress = self.progress_of(&applied, &verify, &planned.problems);
+        if let Err(e) = self.deps.store.save(&record) {
+            progress.lines.push(self.tidy(&e.to_string()));
+            progress.code = 1;
+        }
+        if planned.plan.changes.iter().any(|c| c.before.is_some()) {
+            let dir = self.deps.store.backup_dir(&planned.plan.run);
+            if dir.is_dir() {
+                let dir = self.tidy(&dir.display().to_string());
+                progress.lines.insert(0, text::backups_in(&dir));
+            }
+        }
+        self.loaded.record = Some(record);
+        self.progress = Some(progress);
+        Confirmed::Done
+    }
+
+    /// Checks every recorded agent again and stores the results.
+    pub(super) fn run_check(&mut self) {
+        let Some(mut record) = self.loaded.record.clone() else {
+            return;
+        };
+        self.selection = Selection::from_record(&record);
+        let registry = self.registry();
+        let checker = Checker {
+            registry: &registry,
+            env: &self.deps.env,
+            store: &self.deps.store,
+        };
+        let mut applied = ApplyReport { agents: Vec::new() };
+        let verify = checker.run(&self.selection, &mut applied, &mut record);
+        self.progress = Some(self.progress_of(&applied, &verify, &[]));
+        self.loaded.record = Some(record);
+    }
+
+    /// The release and binary of this install; agents that are no longer
+    /// selected and manage nothing leave the record.
+    fn finish_record(&self, record: &mut InstallRecord) {
+        let selected = self.selection.agents();
+        record
+            .agents
+            .retain(|id, a| selected.contains(id) || !a.managed.is_empty());
+        if record.agents.is_empty() {
+            return;
+        }
+        record.release = Some(self.deps.version.clone());
+        if record.binary.is_none()
+            && let Ok(bytes) = std::fs::read(&self.deps.binary)
+        {
+            record.binary = Some(BinaryInfo {
+                path: self.deps.binary.clone(),
+                sha256: Sha256Hex::of(&bytes),
+            });
+        }
+    }
+
+    fn progress_of(
+        &self,
+        applied: &ApplyReport,
+        verify: &VerifyReport,
+        problems: &[(AgentId, String)],
+    ) -> Progress {
+        let mut lines = self.problem_lines(problems);
+        let mut failed = !problems.is_empty();
+        for report in &applied.agents {
+            let checked = match report.scope {
+                Scope::Agent(id) => verify.agent(id).is_some(),
+                Scope::Install => false,
+            };
+            let line = self.outcome_line(report.scope, &report.outcome, report.files().len());
+            failed |= !checked && report.outcome != Outcome::Applied;
+            lines.extend(line.filter(|_| !checked || report.outcome == Outcome::Applied));
+        }
+        if !verify.agents.is_empty() {
+            lines.push(String::new());
+            lines.push(text::CHECKING.to_owned());
+            lines.extend(verify.lines().iter().map(|l| self.tidy(l)));
+        }
+        lines.extend(verify.record_errors.iter().map(|e| self.tidy(e)));
+        let next_steps = verify
+            .agents
+            .iter()
+            .filter(|v| v.report.result != CheckResult::Fail)
+            .map(|v| text::next_step(v.agent()).to_owned())
+            .collect();
+        let ok = !failed && verify.all_passed() && verify.record_errors.is_empty();
+        Progress {
+            lines,
+            next_steps,
+            code: i32::from(!ok),
+        }
+    }
+
+    fn outcome_line(&self, scope: Scope, outcome: &Outcome, files: usize) -> Option<String> {
+        let label = match scope {
+            Scope::Agent(id) => id.label(),
+            Scope::Install => "mmhmem",
+        };
+        match outcome {
+            Outcome::Applied if files == 0 => None,
+            Outcome::Applied => Some(text::changes_made(label, files)),
+            Outcome::Skipped(skip) => {
+                Some(text::agent_skipped(label, &self.tidy(&skip.to_string())))
+            }
+            Outcome::RolledBack { reason } => Some(self.tidy(reason)),
+            Outcome::RollbackIncomplete { reason, problems } => Some(format!(
+                "{} {}",
+                self.tidy(reason),
+                self.tidy(&problems.join("; "))
+            )),
+        }
+    }
+}

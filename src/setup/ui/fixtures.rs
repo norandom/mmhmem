@@ -1,0 +1,170 @@
+//! Test fixtures of the menu (task 6.2): a temporary home with the agent
+//! doubles, flow dependencies with a fixed clock, records in given states,
+//! a digest of the whole temporary folder and `TestBackend` rendering.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use serde_json::{Value, json};
+
+use super::app::{App, Key};
+use super::flow::{Deps, Flow, Newest};
+use crate::setup::agents::doubles::{Reply, TestHome};
+use crate::setup::agents::doubles_cli::{self, CLAUDE_MCP_GET, CODEX_MCP_LIST_JSON};
+use crate::setup::agents::{AgentId, AgentRecord, Feature, PendingUserStep};
+use crate::setup::record::{
+    CheckResult, InstallRecord, LastCheck, Os, RecordStore, ReleaseTag, Sha256Hex, UtcTimestamp,
+};
+
+/// The program path in the captured CLI fixtures.
+const FIXTURE_BIN: &str = r"C:\Users\user\AppData\Local\Programs\mmhmem\mmhmem.exe";
+
+pub(crate) fn tag(text: &str) -> ReleaseTag {
+    ReleaseTag::try_from(text.to_owned()).expect("tag")
+}
+
+pub(crate) fn at(text: &str) -> UtcTimestamp {
+    UtcTimestamp::try_from(text.to_owned()).expect("time")
+}
+
+/// A temporary home and the flow's dependencies on it.
+pub(crate) struct Fx {
+    pub(crate) home: TestHome,
+    pub(crate) deps: Deps,
+}
+
+/// A fresh Linux-rules home with no agent; the record folder and the
+/// installed program live under the home.
+pub(crate) fn fx() -> Fx {
+    let home = TestHome::new(Os::Linux);
+    let state = home.home().join(".local").join("state").join("mmhmem");
+    let binary = home.home().join(".local").join("bin").join("mmhmem");
+    let deps = Deps {
+        env: home.env.clone(),
+        store: RecordStore::new(state),
+        binary,
+        version: tag("v0.4.1"),
+        now: Arc::new(|| at("2026-11-04T10:00:00Z")),
+    };
+    Fx { home, deps }
+}
+
+/// A home where Claude Code, Codex and OpenCode are installed and their
+/// CLIs answer like the real ones for this home's program.
+pub(crate) fn with_clis() -> Fx {
+    let fx = fx();
+    for program in ["claude", "codex", "opencode"] {
+        fx.home.install_program(program);
+    }
+    fx.script_checks();
+    fx
+}
+
+impl Fx {
+    /// Scripts the CLIs, with check answers naming this home's program.
+    pub(crate) fn script_checks(&self) {
+        let runner = &self.home.runner;
+        doubles_cli::all(runner, &self.home.env);
+        let bin = self.deps.binary.to_string_lossy().into_owned();
+        let get = CLAUDE_MCP_GET.replace(FIXTURE_BIN, &bin);
+        runner.on("claude", &["mcp", "get", "mmhmem"], vec![Reply::ok(&get)]);
+        let mut list: Value = serde_json::from_str(CODEX_MCP_LIST_JSON).expect("fixture");
+        list[0]["transport"]["command"] = json!(bin);
+        let list = list.to_string();
+        runner.on("codex", &["mcp", "list", "--json"], vec![Reply::ok(&list)]);
+    }
+
+    /// The flow as `mmhmem setup` starts it, with the release answer given.
+    pub(crate) fn flow(&self, newest: Newest) -> Flow {
+        let mut flow = Flow::load(self.deps.clone());
+        flow.set_newest(newest);
+        flow
+    }
+
+    /// The menu on its home screen.
+    pub(crate) fn app(&self, newest: Newest) -> App {
+        App::new(self.flow(newest))
+    }
+
+    /// Saves `record` as the install record.
+    pub(crate) fn save(&self, record: &InstallRecord) {
+        self.deps.store.save(record).expect("save record");
+    }
+
+    /// Writes `text` under the home and returns the path.
+    pub(crate) fn write(&self, rel: &[&str], text: &str) -> PathBuf {
+        self.home.write(rel, text)
+    }
+
+    /// A digest of every file and folder in the temporary folder.
+    pub(crate) fn digest(&self) -> String {
+        let mut entries = Vec::new();
+        walk(self.home.dir.path(), self.home.dir.path(), &mut entries);
+        entries.sort();
+        Sha256Hex::of(entries.join("\n").as_bytes())
+            .as_str()
+            .to_owned()
+    }
+}
+
+fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read.filter_map(Result::ok) {
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if path.is_dir() {
+            out.push(format!("dir {rel}"));
+            walk(root, &path, out);
+        } else {
+            let bytes = std::fs::read(&path).unwrap_or_default();
+            out.push(format!("file {rel} {}", Sha256Hex::of(&bytes).as_str()));
+        }
+    }
+}
+
+/// A record entry with `features` on, a check result and pending steps.
+pub(crate) fn agent_record(
+    features: &[Feature],
+    result: CheckResult,
+    pending: &[PendingUserStep],
+) -> AgentRecord {
+    AgentRecord {
+        features: features.iter().map(|f| (*f, true)).collect(),
+        managed: Vec::new(),
+        pending_user_steps: pending.to_vec(),
+        last_check: Some(LastCheck {
+            at: at("2026-11-04T09:31:12Z"),
+            result,
+            details: Vec::new(),
+        }),
+    }
+}
+
+/// A record of release `release` with `agents`.
+pub(crate) fn record(release: &str, agents: Vec<(AgentId, AgentRecord)>) -> InstallRecord {
+    let mut record = InstallRecord::new();
+    record.release = Some(tag(release));
+    record.agents = agents.into_iter().collect();
+    record
+}
+
+/// The menu drawn on an 80×24 `TestBackend`, with the home folder shown as
+/// `~` and `/` as the folder separator on every OS.
+pub(crate) fn render(app: &App) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+    terminal.draw(|frame| app.draw(frame)).expect("draw");
+    terminal.backend().to_string().replace('\\', "/")
+}
+
+/// Feeds `keys` to `app`.
+pub(crate) fn press(app: &mut App, keys: &[Key]) {
+    let _ = app.keys(keys);
+}

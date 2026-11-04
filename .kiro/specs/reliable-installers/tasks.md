@@ -160,7 +160,7 @@ released.
   - Done when `mmhmem setup` starts, the internal arguments are hidden from help, and a test asserts that no string in `text.rs` uses project-internal terms without an explanation.
   - _Requirements: 1.3, 1.4, 1.5_
 
-- [ ] 6.2 Full-screen menu
+- [x] 6.2 Full-screen menu
   - Set `ratatui` to `default-features = false, features = ["crossterm"]` and record the release binary size before and after (research §11).
   - Implement `src/setup/ui/app.rs` on `ratatui` + `crossterm`: Home with state from the record plus live detection and the newest release, Agents, Features (hook off by default), Review with diff, and Progress with check results. Show only applicable actions and keep a visible key legend.
   - Done when `TestBackend` snapshot tests cover each screen and state (fresh, installed, update available, drift, pending user step), and key-sequence tests show cancel or quit at every screen before confirm changes nothing.

@@ -5,9 +5,15 @@
 //! unless the same string explains it. [`ALL`] lists every string so a test
 //! can check that rule.
 
-use crate::setup::record::AgentId;
+use crate::setup::record::{AgentId, Feature, PendingUserStep};
 
 pub const LEGEND: &str = "↑↓ move · space select · enter continue · esc back · q quit";
+pub const LEGEND_HOME: &str = "↑↓ move · enter continue · q quit";
+pub const LEGEND_REVIEW: &str =
+    "↑↓ move · d show details · enter make these changes · esc back · q quit";
+pub const LEGEND_DIFF: &str = "↑↓ scroll · d or esc close the details · q quit";
+pub const LEGEND_WORKING: &str = "Please wait...";
+pub const LEGEND_DONE: &str = "↑↓ scroll · enter or q close";
 
 pub const TITLE_HOME: &str = "mmhmem setup";
 pub const TITLE_AGENTS: &str = "Which tools should mmhmem work with?";
@@ -28,6 +34,9 @@ pub const ACTION_UPDATE_TO: &str = "Update to {version}";
 pub const FEATURE_MEMORY: &str = "Shared memory (required)";
 pub const FEATURE_MEMORY_HELP: &str =
     "Lets your tools save notes and find them again in later sessions.";
+pub const FEATURE_SKILL: &str = "Memory guide";
+pub const FEATURE_SKILL_HELP: &str =
+    "A short guide your tool reads to learn how to use the shared memory.";
 pub const FEATURE_RECAP: &str = "Recap command";
 pub const FEATURE_RECAP_HELP: &str =
     "Adds a command that shows what you were working on last time.";
@@ -40,6 +49,77 @@ pub const FEATURE_HOOK_HELP: &str = "Sends large file reads through mmhmem to sa
 pub const FEATURE_WORKER: &str = "Worker model (optional)";
 pub const FEATURE_WORKER_HELP: &str = "Worker model: a small AI model that summarizes long \
 files for you. It needs extra setup, so it is left off unless you ask for it.";
+
+pub const WORKER_LATER: &str = "Worker model: setup will show you how to connect one \
+after the install. Nothing about it changes now.";
+
+pub const COL_AGENT: &str = "Tool";
+pub const COL_STATUS: &str = "mmhmem";
+pub const COL_FEATURES: &str = "Features";
+pub const COL_CHECK: &str = "Last check";
+pub const STATUS_INSTALLED: &str = "installed";
+pub const STATUS_NOT_SET_UP: &str = "not set up";
+pub const STATUS_NOT_FOUND: &str = "not found";
+pub const SHORT_MEMORY: &str = "memory";
+pub const SHORT_SKILL: &str = "guide";
+pub const SHORT_RECAP: &str = "recap";
+pub const SHORT_INSTRUCTIONS: &str = "instructions";
+pub const SHORT_HOOK: &str = "read hook";
+pub const PENDING_APPROVE_HOOK: &str = "approve the hook in Codex";
+pub const PENDING_RESTART_DESKTOP: &str = "restart Claude Desktop";
+pub const PENDING_IMPORT_SNIPPET: &str = "import the snippet in Antigravity";
+/// Contains `{version}`.
+pub const INSTALLED_VERSION: &str = "Installed: {version}";
+pub const NOTHING_INSTALLED: &str = "Installed: nothing yet";
+/// Contains `{version}`.
+pub const NEWEST: &str = "Newest release: {version}";
+pub const NEWEST_CHECKING: &str = "Newest release: checking...";
+pub const NEWEST_UNKNOWN: &str = "Newest release: unknown (offline?)";
+
+/// Contains `{agent}` and `{reason}`.
+pub const AGENT_UNAVAILABLE: &str = "{agent}: not found ({reason})";
+/// Contains `{path}`.
+pub const PROFILE_CHOICE: &str = "Use the Claude Desktop profile in {path}";
+pub const NOTHING_SELECTED: &str = "Choose at least one tool, or press q to quit.";
+pub const UPDATE_LATER: &str = "Updating from this menu is not available in this \
+build yet. Nothing was changed.";
+pub const REMOVE_LATER: &str = "Removing from this menu is not available in this \
+build yet. Nothing was changed.";
+
+pub const RECORD_UNREADABLE: &str = "The file where setup keeps track of what it \
+installed could not be read, so setup looked for an earlier install instead. \
+Nothing changes until you confirm.";
+pub const RECOVERED: &str = "An earlier setup was interrupted. Setup worked out \
+where it stopped.";
+/// Contains `{file}`.
+pub const RECOVERY_UNCLEAR: &str = "An earlier setup was interrupted while changing \
+{file}, and that file now matches neither the old nor the new version. Please check it.";
+/// Contains `{file}`.
+pub const DRIFT_CHANGED: &str = "{file} was changed outside setup. The review shows \
+the difference before anything is overwritten.";
+/// Contains `{file}`.
+pub const DRIFT_MISSING: &str = "{file} was deleted outside setup.";
+/// Contains `{file}` and `{reason}`.
+pub const DRIFT_UNREADABLE: &str = "{file} could not be read: {reason}.";
+/// Contains `{agent}`.
+pub const ADOPT_FOUND: &str = "Found an earlier mmhmem setup for {agent}. It will be \
+kept and tracked.";
+pub const ADOPT_REVIEW: &str = "First, setup takes over what an earlier install made. \
+After that you will see the changes for your choices.";
+pub const BINARY_CHANGED: &str = "The installed mmhmem program is not the one setup \
+installed.";
+pub const BINARY_MISSING: &str = "The installed mmhmem program is missing.";
+
+pub const PATH_SETTING: &str = "your PATH setting";
+pub const NO_HOME: &str = "Setup could not find your home folder, so nothing was changed.";
+
+pub const REVIEW_PROBLEMS: &str = "These tools will be skipped:";
+/// Contains `{agent}` and `{reason}`.
+pub const AGENT_SKIPPED: &str = "{agent} was skipped: {reason}.";
+/// Contains `{agent}` and `{count}`.
+pub const CHANGES_MADE: &str = "{agent}: {count} change(s) made.";
+/// Contains `{dir}`.
+pub const BACKUPS_IN: &str = "Your original files were backed up to {dir}.";
 
 pub const REVIEW_NOTHING: &str = "Everything is current. Nothing needs to change.";
 pub const REVIEW_BACKUP: &str = "Every file is backed up before it is changed.";
@@ -67,9 +147,116 @@ pub const NEXT_DESKTOP: &str = "Claude Desktop: quit it completely and open it a
 pub const NEXT_ANTIGRAVITY: &str = "Antigravity: import the snippet that setup saved, \
 then start a new session.";
 
+/// Fills `{key}` placeholders in `template`.
+fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    values
+        .iter()
+        .fold(template.to_owned(), |text, (key, value)| {
+            text.replace(&format!("{{{key}}}"), value)
+        })
+}
+
+/// "Installed: v1.2.3", or "Installed: nothing yet".
+pub fn installed_version(version: Option<&str>) -> String {
+    version.map_or_else(
+        || NOTHING_INSTALLED.to_owned(),
+        |v| fill(INSTALLED_VERSION, &[("version", v)]),
+    )
+}
+
+/// "Newest release: v1.2.3".
+pub fn newest(version: &str) -> String {
+    fill(NEWEST, &[("version", version)])
+}
+
+/// "Codex: not found (reason)".
+pub fn agent_unavailable(agent: &str, reason: &str) -> String {
+    fill(AGENT_UNAVAILABLE, &[("agent", agent), ("reason", reason)])
+}
+
+/// "Use the Claude Desktop profile in <path>".
+pub fn profile_choice(path: &str) -> String {
+    fill(PROFILE_CHOICE, &[("path", path)])
+}
+
+/// The interrupted-change line for `file`.
+pub fn recovery_unclear(file: &str) -> String {
+    fill(RECOVERY_UNCLEAR, &[("file", file)])
+}
+
+/// "<file> was changed outside setup. ...".
+pub fn drift_changed(file: &str) -> String {
+    fill(DRIFT_CHANGED, &[("file", file)])
+}
+
+/// "<file> was deleted outside setup.".
+pub fn drift_missing(file: &str) -> String {
+    fill(DRIFT_MISSING, &[("file", file)])
+}
+
+/// "<file> could not be read: <reason>.".
+pub fn drift_unreadable(file: &str, reason: &str) -> String {
+    fill(DRIFT_UNREADABLE, &[("file", file), ("reason", reason)])
+}
+
+/// "Found an earlier mmhmem setup for <agent>. ...".
+pub fn adopt_found(agent: &str) -> String {
+    fill(ADOPT_FOUND, &[("agent", agent)])
+}
+
+/// "<agent> was skipped: <reason>.".
+pub fn agent_skipped(agent: &str, reason: &str) -> String {
+    let reason = reason.trim_end_matches('.');
+    fill(AGENT_SKIPPED, &[("agent", agent), ("reason", reason)])
+}
+
+/// "<agent>: <n> change(s) made.".
+pub fn changes_made(agent: &str, count: usize) -> String {
+    fill(
+        CHANGES_MADE,
+        &[("agent", agent), ("count", &count.to_string())],
+    )
+}
+
+/// "Your original files were backed up to <dir>.".
+pub fn backups_in(dir: &str) -> String {
+    fill(BACKUPS_IN, &[("dir", dir)])
+}
+
+/// The short name of a feature for the home screen.
+pub fn feature_short(feature: Feature) -> &'static str {
+    match feature {
+        Feature::Mcp => SHORT_MEMORY,
+        Feature::Skill => SHORT_SKILL,
+        Feature::RecapCommand => SHORT_RECAP,
+        Feature::Instructions => SHORT_INSTRUCTIONS,
+        Feature::ReadHook => SHORT_HOOK,
+    }
+}
+
+/// The name and one-line explanation of a feature (features screen).
+pub fn feature_label(feature: Feature) -> (&'static str, &'static str) {
+    match feature {
+        Feature::Mcp => (FEATURE_MEMORY, FEATURE_MEMORY_HELP),
+        Feature::Skill => (FEATURE_SKILL, FEATURE_SKILL_HELP),
+        Feature::RecapCommand => (FEATURE_RECAP, FEATURE_RECAP_HELP),
+        Feature::Instructions => (FEATURE_INSTRUCTIONS, FEATURE_INSTRUCTIONS_HELP),
+        Feature::ReadHook => (FEATURE_HOOK, FEATURE_HOOK_HELP),
+    }
+}
+
+/// A step only the user can do, in a few words.
+pub fn pending_short(step: PendingUserStep) -> &'static str {
+    match step {
+        PendingUserStep::ApproveHookInCodex => PENDING_APPROVE_HOOK,
+        PendingUserStep::RestartClaudeDesktop => PENDING_RESTART_DESKTOP,
+        PendingUserStep::ImportAntigravitySnippet => PENDING_IMPORT_SNIPPET,
+    }
+}
+
 /// "Update to v1.2.3".
 pub fn update_to(version: &str) -> String {
-    ACTION_UPDATE_TO.replace("{version}", version)
+    fill(ACTION_UPDATE_TO, &[("version", version)])
 }
 
 /// What the user still has to do for `agent` after an install.
@@ -84,8 +271,7 @@ pub fn next_step(agent: AgentId) -> &'static str {
 }
 
 /// Every string above (for the plain-language test).
-#[cfg(test)]
-pub(crate) const ALL: &[&str] = &[
+pub const ALL: &[&str] = &[
     LEGEND,
     TITLE_HOME,
     TITLE_AGENTS,
@@ -125,4 +311,53 @@ pub(crate) const ALL: &[&str] = &[
     NEXT_OPENCODE,
     NEXT_DESKTOP,
     NEXT_ANTIGRAVITY,
+    LEGEND_HOME,
+    LEGEND_REVIEW,
+    LEGEND_DIFF,
+    LEGEND_WORKING,
+    LEGEND_DONE,
+    FEATURE_SKILL,
+    FEATURE_SKILL_HELP,
+    WORKER_LATER,
+    COL_AGENT,
+    COL_STATUS,
+    COL_FEATURES,
+    COL_CHECK,
+    STATUS_INSTALLED,
+    STATUS_NOT_SET_UP,
+    STATUS_NOT_FOUND,
+    SHORT_MEMORY,
+    SHORT_SKILL,
+    SHORT_RECAP,
+    SHORT_INSTRUCTIONS,
+    SHORT_HOOK,
+    PENDING_APPROVE_HOOK,
+    PENDING_RESTART_DESKTOP,
+    PENDING_IMPORT_SNIPPET,
+    INSTALLED_VERSION,
+    NOTHING_INSTALLED,
+    NEWEST,
+    NEWEST_CHECKING,
+    NEWEST_UNKNOWN,
+    AGENT_UNAVAILABLE,
+    PROFILE_CHOICE,
+    NOTHING_SELECTED,
+    UPDATE_LATER,
+    REMOVE_LATER,
+    RECORD_UNREADABLE,
+    RECOVERED,
+    RECOVERY_UNCLEAR,
+    DRIFT_CHANGED,
+    DRIFT_MISSING,
+    DRIFT_UNREADABLE,
+    ADOPT_FOUND,
+    ADOPT_REVIEW,
+    BINARY_CHANGED,
+    BINARY_MISSING,
+    REVIEW_PROBLEMS,
+    AGENT_SKIPPED,
+    CHANGES_MADE,
+    BACKUPS_IN,
+    PATH_SETTING,
+    NO_HOME,
 ];
