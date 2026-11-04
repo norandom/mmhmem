@@ -24,13 +24,16 @@
 //! Submodules: `flow_home.rs` (home model, actions), `flow_select.rs`
 //! (agents and features), `flow_review.rs` (plan and review),
 //! `flow_install.rs` (the program and `PATH` changes), `flow_update.rs`
-//! (the update) and `flow_apply.rs` (apply, check, progress lines).
+//! (the update and the restart into the new program), `flow_remove.rs`
+//! (the removal) and `flow_apply.rs` (apply, check, progress lines).
 //!
 //! Everything outside comes in through [`Deps`]: the agents' [`Env`], the
 //! record folder, the binary the agents launch and the program to install
 //! there, the user's `PATH` store, the release source and keys, this
-//! build's release tag and the clock, so tests run on temporary homes with
-//! the agent doubles, a fake `PATH` and local releases.
+//! build's release tag, the clock, the memory store a removal may delete
+//! and how to start the new program after an update, so tests run on
+//! temporary homes with the agent doubles, a fake `PATH`, local releases
+//! and no real process.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -55,6 +58,8 @@ mod finish;
 mod home;
 #[path = "flow_install.rs"]
 mod install;
+#[path = "flow_remove.rs"]
+mod remove;
 #[path = "flow_review.rs"]
 mod review;
 #[path = "flow_select.rs"]
@@ -64,9 +69,10 @@ mod update;
 
 pub use finish::{Confirmed, Progress};
 pub use home::{AgentRow, AgentState, HomeAction, HomeView};
-pub use review::{FileGroup, ReviewItem, ReviewView};
+pub use remove::Memories;
+pub use review::{FileGroup, MemoriesChoice, ReviewItem, ReviewView};
 pub use select::{Choice, FeatureRow};
-pub use update::Releases;
+pub use update::{Exec, Relaunch, Releases, Restart, spawn};
 
 /// The exit code when the user cancels or quits before confirming.
 pub const EXIT_CANCELLED: i32 = 2;
@@ -95,6 +101,11 @@ pub struct Deps {
     pub version: ReleaseTag,
     /// The run clock.
     pub now: Clock,
+    /// The memory store a removal deletes when the user asks for it
+    /// (`None`: unknown, the option is not offered).
+    pub memories: Option<Memories>,
+    /// Starting the new program after an update (task 7.1 follow-up).
+    pub restart: Restart,
 }
 
 impl Deps {
@@ -110,6 +121,8 @@ impl Deps {
             releases: Releases::github(),
             version,
             now: Arc::new(UtcTimestamp::now),
+            memories: None,
+            restart: Restart::default(),
         }
     }
 }
@@ -134,6 +147,10 @@ pub enum Next {
     Review,
     /// Results are ready.
     Progress,
+    /// The program was updated: leave the screens and start the new
+    /// program ([`Flow::relaunch`]), which reviews the agents with its own
+    /// files.
+    Restart,
     /// Stay on the home screen and show this line.
     Note(&'static str),
 }
@@ -160,6 +177,11 @@ pub struct Flow {
     progress: Option<Progress>,
     /// A line above the next review (after an update).
     intro: Option<String>,
+    /// The removal also deletes the saved memories.
+    delete_memories: bool,
+    /// The release the program was updated to, when the new program must
+    /// be started.
+    relaunch: Option<ReleaseTag>,
 }
 
 impl Flow {
@@ -209,6 +231,8 @@ impl Flow {
             planned: None,
             progress: None,
             intro: None,
+            delete_memories: false,
+            relaunch: None,
         };
         flow.loaded.current = flow.is_current();
         flow

@@ -8,8 +8,11 @@
 //!
 //! Screens: Home → Agents → Features → Review (`d` shows a change's diff,
 //! scrollable) → Progress. Keys: ↑↓ move, space toggles, enter continues,
-//! esc goes back, q quits. Esc on Home or q before the Review is confirmed
-//! exits with [`EXIT_CANCELLED`] and nothing changed. The state machine has
+//! esc goes back, q quits. On a removal's Review, space switches "Also
+//! delete my saved memories". Esc on Home or q before the Review is
+//! confirmed exits with [`EXIT_CANCELLED`] and nothing changed. After an
+//! update the menu closes so the new program can start; the restarted
+//! program opens on the Review. The state machine has
 //! no terminal in it, so tests drive it key by key and draw it on a
 //! `TestBackend`.
 
@@ -84,12 +87,22 @@ pub struct App {
 }
 
 impl App {
-    /// The menu on its home screen.
-    pub fn new(flow: Flow) -> Self {
+    /// The menu on its home screen, or on the review when this run was
+    /// started right after an update ([`Flow::resume`]).
+    pub fn new(mut flow: Flow) -> Self {
+        let resumed = flow.resume();
         Self {
             flow,
-            screen: Screen::Home,
-            back: Vec::new(),
+            screen: if resumed {
+                Screen::Review
+            } else {
+                Screen::Home
+            },
+            back: if resumed {
+                vec![Screen::Home]
+            } else {
+                Vec::new()
+            },
             cursor: 0,
             scroll: 0,
             max_scroll: Cell::new(0),
@@ -102,6 +115,11 @@ impl App {
     /// The controller.
     pub fn flow(&self) -> &Flow {
         &self.flow
+    }
+
+    /// The controller, when the menu is closed.
+    pub fn into_flow(self) -> Flow {
+        self.flow
     }
 
     /// The screen shown.
@@ -195,6 +213,7 @@ impl App {
                         Next::Review => self.go(Screen::Review),
                         Next::Progress => self.go(Screen::Progress),
                         Next::Note(note) => self.note = Some(note),
+                        Next::Restart => return Control::Exit(0),
                     }
                 }
                 Control::Continue
@@ -250,6 +269,7 @@ impl App {
         match key {
             Key::Quit => return Control::Exit(EXIT_CANCELLED),
             Key::Esc => return self.go_back(),
+            Key::Space => self.flow.toggle_memories(),
             Key::Diff => {
                 let review = self.flow.review();
                 self.diff = review.items().get(self.cursor).map(|i| i.index);

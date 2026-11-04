@@ -269,8 +269,8 @@ fn removal_restores_seeded_files_byte_identical() {
     assert_eq!(read(&p.claude_json), CLAUDE_JSON);
     assert_eq!(read(&p.settings), SETTINGS);
     assert!(!p.skill.exists() && !p.command.exists());
-    // A Markdown section cannot delete its file, so the rules file stays empty.
-    assert_eq!(read(&p.rules), "");
+    // mmhmem created the rules file for its section only, so it goes too.
+    assert!(!p.rules.exists());
     assert!(r.rec().is_none_or(|rec| rec.managed.is_empty()));
 }
 

@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 
 use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
-    Invocation, Selection,
+    Invocation, Selection, section_left,
 };
 
 #[path = "opencode_check.rs"]
@@ -300,10 +300,9 @@ impl<'a> Planner<'a> {
         let text = std::str::from_utf8(&before).map_err(|_| bad_text(file))?;
         let after = match &entry.target {
             Target::JsonEntry { .. } => Some(remove_entry(text, entry, file)?.into_bytes()),
-            Target::MarkdownSection { .. } => Some(
-                markdown::remove_section(text, &routing())
-                    .map_err(AgentProblem::markdown(file))?
-                    .into_bytes(),
+            Target::MarkdownSection { .. } => section_left(
+                markdown::remove_section(text, &routing()).map_err(AgentProblem::markdown(file))?,
+                entry,
             ),
             Target::File { .. } if feature_of(&entry.target) == Some(Feature::ReadHook) => {
                 if !is_plugin(&before) {

@@ -129,6 +129,54 @@ impl PathValue {
             data: to_bytes(&out),
         }
     }
+
+    /// The value without `folder` (every entry naming it, with the `;`
+    /// before it, or after it when it is the first entry). Every other
+    /// byte, the terminating NULs and the type stay. `trailing_separator`
+    /// (from the record: the value ended in `;` before [`PathValue::with_folder`]
+    /// appended the folder, so no `;` was added) keeps that `;` when the
+    /// folder is still the last entry, so this undoes `with_folder` exactly.
+    pub fn without_folder(&self, folder: &Path, trailing_separator: bool) -> Self {
+        if !self.contains(folder) {
+            return self.clone();
+        }
+        let units = self.units();
+        let text = trim_nul(&units);
+        let tail = &units[text.len()..];
+        let sep = u16::from(b';');
+        let parts: Vec<&[u16]> = text.split(|u| *u == sep).collect();
+        let last_removed = parts.last().is_some_and(|p| names(p, folder));
+        let kept: Vec<&[u16]> = parts.into_iter().filter(|p| !names(p, folder)).collect();
+        let mut out = kept.join(&sep);
+        if last_removed && trailing_separator && !kept.is_empty() {
+            out.push(sep);
+        }
+        out.extend_from_slice(tail);
+        Self {
+            kind: self.kind,
+            data: to_bytes(&out),
+        }
+    }
+}
+
+/// Whether one `PATH` part names `folder`.
+fn names(part: &[u16], folder: &Path) -> bool {
+    let text = String::from_utf16_lossy(part);
+    !text.trim().is_empty() && same_folder(Path::new(&text), folder)
+}
+
+impl PathValue {
+    /// Whether the value ended in `;` (before its terminating NULs), so
+    /// [`PathValue::with_folder`] adds no `;`.
+    pub fn ends_with_separator(&self) -> bool {
+        let units = self.units();
+        trim_nul(&units).last() == Some(&u16::from(b';'))
+    }
+
+    /// Whether the value holds nothing but its terminating NULs.
+    pub fn is_blank(&self) -> bool {
+        trim_nul(&self.units()).is_empty()
+    }
 }
 
 fn utf16(text: &str) -> Vec<u16> {

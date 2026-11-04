@@ -57,6 +57,9 @@ impl Flow {
         let Some(planned) = self.planned.take() else {
             return Confirmed::Done;
         };
+        if planned.removal {
+            return self.confirm_removal(&planned);
+        }
         let mut record = self.loaded.record.clone().unwrap_or_default();
         let paths = self.deps.paths.as_ref();
         let mut applied = apply_with(&planned.plan, &self.deps.store, &mut record, paths);
@@ -76,7 +79,7 @@ impl Flow {
             store: &self.deps.store,
         };
         let verify = checker.run(&self.selection, &mut applied, &mut record);
-        self.finish_record(&mut record);
+        self.finish_record(&mut record, &planned.plan);
         let mut progress = self.progress_of(&applied, &verify, &planned.problems);
         if !record.agents.is_empty() {
             progress.next_steps.extend(self.path_next_step());
@@ -118,7 +121,7 @@ impl Flow {
     /// The release, the program and the `PATH` entry of this install;
     /// agents that are no longer selected and manage nothing leave the
     /// record.
-    fn finish_record(&self, record: &mut InstallRecord) {
+    fn finish_record(&self, record: &mut InstallRecord, plan: &crate::setup::plan::Plan) {
         let selected = self.selection.agents();
         record
             .agents
@@ -127,7 +130,7 @@ impl Flow {
             return;
         }
         record.release = Some(self.deps.version.clone());
-        self.finish_install(record);
+        self.finish_install(record, plan);
     }
 
     fn progress_of(
@@ -167,7 +170,12 @@ impl Flow {
         }
     }
 
-    fn outcome_line(&self, scope: Scope, outcome: &Outcome, files: usize) -> Option<String> {
+    pub(super) fn outcome_line(
+        &self,
+        scope: Scope,
+        outcome: &Outcome,
+        files: usize,
+    ) -> Option<String> {
         let label = match scope {
             Scope::Agent(id) => id.label(),
             Scope::Install => "mmhmem",

@@ -5,7 +5,8 @@
 //! checked in plan order:
 //!
 //! - **Shape:** the change's file is its target's file (for a `PATH` entry:
-//!   the folder), and only a whole file mmhmem owns may be deleted.
+//!   the folder), and only a whole file mmhmem owns may be deleted (also a
+//!   Markdown file or a `PATH` value mmhmem created, once emptied).
 //! - **Stale guard:** the first change of each file must find exactly its
 //!   `before` bytes on disk; a later change of the same file must start from
 //!   the previous change's `after`.
@@ -175,8 +176,16 @@ fn check_shape(change: &Change) -> Result<(), &'static str> {
         }
         Some(_) => {}
     }
-    let whole_file = matches!(change.target, Target::File { .. } | Target::Binary { .. });
-    if change.after.is_none() && !whole_file {
+    // A whole file mmhmem owns, a Markdown file mmhmem created whose only
+    // content was its section, or a `PATH` value mmhmem created.
+    let deletable = matches!(
+        change.target,
+        Target::File { .. }
+            | Target::Binary { .. }
+            | Target::MarkdownSection { .. }
+            | Target::PathEntry { .. }
+    );
+    if change.after.is_none() && !deletable {
         return Err("only a whole file mmhmem owns can be deleted");
     }
     Ok(())

@@ -114,6 +114,7 @@ impl App {
             Screen::Home => text::LEGEND_HOME,
             Screen::Agents | Screen::Features => text::LEGEND,
             Screen::Review if self.diff.is_some() => text::LEGEND_DIFF,
+            Screen::Review if self.flow.review().memories.is_some() => text::remove::LEGEND,
             Screen::Review => text::LEGEND_REVIEW,
             Screen::Progress if self.working => text::LEGEND_WORKING,
             Screen::Progress => text::LEGEND_DONE,
@@ -212,6 +213,17 @@ impl App {
         let mut lines = Vec::new();
         for line in &review.intro {
             push_wrapped(&mut lines, line, width, bold());
+        }
+        if let Some(option) = &review.memories {
+            // Near the top, so it is seen before the long list (space).
+            lines.push(Line::styled(
+                format!("  {}{}", checkbox(option.on), option.label),
+                bold(),
+            ));
+            for l in wrap(&option.help, width, "      ", 6) {
+                lines.push(Line::styled(l, dim()));
+            }
+            lines.push(Line::raw(""));
         }
         let mut n = 0;
         for group in &review.groups {

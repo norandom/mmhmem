@@ -1,6 +1,9 @@
 //! Setup without a terminal (task 6.3; Requirement 4.9): nobody can answer
 //! questions, so the default choices are installed and every result is
-//! printed as a plain line.
+//! printed as a plain line. Only the install script gets here
+//! (`--bootstrap <tag>`); any other run without a terminal is refused
+//! before anything is read (`ui::refuse_without_terminal`, amended 4.9).
+//! It never removes anything and never updates the program.
 //!
 //! The default choices are those of the first install: every agent found on
 //! this computer with the required feature only (an existing install keeps

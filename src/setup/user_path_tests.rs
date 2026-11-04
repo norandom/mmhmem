@@ -60,6 +60,57 @@ fn a_folder_already_there_is_found_ignoring_trailing_separators() {
 }
 
 #[test]
+fn removing_the_folder_undoes_appending_it_byte_for_byte() {
+    for (kind, text, nuls) in [
+        (ValueKind::Plain, r"C:\Tools;%USERPROFILE%\bin", 2),
+        (ValueKind::Expand, r"C:\Tools", 1),
+        (ValueKind::Expand, r"C:\a;;C:\b", 1),
+        (ValueKind::Expand, "", 1),
+        (ValueKind::Plain, r"C:\x", 0),
+        (ValueKind::Expand, r"C:\Tools;", 1),
+        (ValueKind::Plain, r"C:\a;C:\b;", 2),
+        (ValueKind::Expand, ";", 1),
+    ] {
+        let before = value(kind, text, nuls);
+        let after = before.with_folder(&folder());
+        let removed = after.without_folder(&folder(), before.ends_with_separator());
+        if nuls == 0 {
+            // `with_folder` adds the missing NUL; everything else stays.
+            assert_eq!(removed, value(kind, text, 1), "{text:?}");
+        } else {
+            assert_eq!(removed, before, "{text:?}");
+        }
+    }
+}
+
+#[test]
+fn removing_the_folder_keeps_every_other_entry_where_it_was() {
+    let mid = value(
+        ValueKind::Expand,
+        r"C:\a;C:\Users\u\AppData\Local\Programs\mmhmem\;C:\b",
+        1,
+    );
+    assert_eq!(
+        mid.without_folder(&folder(), false),
+        value(ValueKind::Expand, r"C:\a;C:\b", 1)
+    );
+    let first = value(
+        ValueKind::Plain,
+        r"C:\Users\u\AppData\Local\Programs\mmhmem;C:\b",
+        1,
+    );
+    assert_eq!(
+        first.without_folder(&folder(), true),
+        value(ValueKind::Plain, r"C:\b", 1)
+    );
+    let absent = value(ValueKind::Plain, r"C:\a;C:\b", 1);
+    assert_eq!(absent.without_folder(&folder(), true), absent);
+    let created = PathValue::new_with(&folder()).without_folder(&folder(), false);
+    assert!(created.is_blank());
+    assert!(!absent.is_blank() && value(ValueKind::Plain, ";", 1).ends_with_separator());
+}
+
+#[test]
 fn encoding_round_trips_and_refuses_odd_data() {
     let v = value(ValueKind::Plain, "a;b", 1);
     assert_eq!(PathValue::decode(&v.encode()), Ok(v));

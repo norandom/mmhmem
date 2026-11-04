@@ -149,6 +149,7 @@ pub(super) fn managed(record: &mut InstallRecord, scope: Scope, target: &Target,
             before: None,
             after: Some(present(target, bytes)),
             backup: None,
+            created_file: false,
             missing_parents: Some(1),
         },
     );

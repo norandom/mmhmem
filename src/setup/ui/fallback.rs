@@ -6,9 +6,12 @@
 //! Screens: Home (numbered actions), Agents and Features (type numbers to
 //! switch on or off, Enter to continue, `b` back, `q` quit), Review (the
 //! changes per file; `d <n>` shows one change's details, `y` makes the
-//! changes) and Progress. `q`, `n` or the end of the input before the
-//! review is confirmed ends the run with [`EXIT_CANCELLED`] and nothing
-//! changed. Input and output are injected so tests drive whole sessions.
+//! changes; on a removal `m` switches "Also delete my saved memories") and
+//! Progress. `q`, `n` or the end of the input before the review is
+//! confirmed ends the run with [`EXIT_CANCELLED`] and nothing changed.
+//! After an update the session ends so the new program can start; the
+//! restarted program opens on the review. Input and output are injected so
+//! tests drive whole sessions.
 //!
 //! The run without any terminal is in `fallback_default.rs`.
 
@@ -120,8 +123,11 @@ pub fn run(flow: &mut Flow, input: &mut dyn BufRead, out: &mut dyn Write) -> i32
 }
 
 fn session(flow: &mut Flow, c: &mut Console) -> i32 {
-    let mut screen = Screen::Home;
-    let mut back: Vec<Screen> = Vec::new();
+    let (mut screen, mut back) = if flow.resume() {
+        (Screen::Review, vec![Screen::Home])
+    } else {
+        (Screen::Home, Vec::new())
+    };
     loop {
         let go = match screen {
             Screen::Home => home(flow, c),
@@ -206,6 +212,7 @@ fn after_begin(flow: &mut Flow, c: &mut Console, action: &HomeAction) -> Go {
         Next::Agents => Go::To(Screen::Agents),
         Next::Review => Go::To(Screen::Review),
         Next::Progress => Go::To(Screen::Progress),
+        Next::Restart => Go::Exit(0),
         Next::Note(note) => {
             c.say(note);
             Go::Stay
@@ -327,6 +334,11 @@ pub(super) fn print_review(c: &mut Console, view: &ReviewView, numbers: bool) {
         c.say(text::REVIEW_PROBLEMS);
         view.problems.iter().for_each(|l| c.say(l));
     }
+    if let Some(option) = &view.memories {
+        let mark = if option.on { "[x]" } else { "[ ]" };
+        c.say(&format!("m) {mark} {}", option.label));
+        c.say(&format!("       {}", option.help));
+    }
     view.notes.iter().for_each(|l| c.say(l));
 }
 
@@ -337,6 +349,7 @@ enum ReviewAnswer {
     Quit,
     Back,
     Diff(usize),
+    Memories,
     Bad,
 }
 
@@ -346,6 +359,7 @@ fn parse_review(line: &str) -> ReviewAnswer {
         "y" | "yes" => ReviewAnswer::Yes,
         "n" | "no" | "q" | "quit" => ReviewAnswer::Quit,
         "b" | "back" => ReviewAnswer::Back,
+        "m" => ReviewAnswer::Memories,
         other => other
             .strip_prefix('d')
             .and_then(|rest| rest.trim().parse::<usize>().ok())
@@ -367,16 +381,25 @@ fn show_diff(flow: &Flow, c: &mut Console, view: &ReviewView, at: usize) {
 fn review(flow: &mut Flow, c: &mut Console, back: &mut Vec<Screen>) -> Go {
     let view = flow.review();
     print_review(c, &view, true);
+    let (help, confirm) = if view.memories.is_some() {
+        (text::remove::HELP, text::remove::CONFIRM)
+    } else {
+        (text::HELP_REVIEW, text::CONFIRM)
+    };
     loop {
-        c.say(text::HELP_REVIEW);
+        c.say(help);
         let answer = c
-            .ask(text::CONFIRM)
+            .ask(confirm)
             .map_or(ReviewAnswer::Quit, |l| parse_review(&l));
         match answer {
             ReviewAnswer::Quit => return Go::Exit(EXIT_CANCELLED),
             ReviewAnswer::Back => return Go::Back,
+            ReviewAnswer::Memories if view.memories.is_some() => {
+                flow.toggle_memories();
+                return Go::Stay;
+            }
             ReviewAnswer::Diff(at) => show_diff(flow, c, &view, at),
-            ReviewAnswer::Bad => c.say(text::BAD_CHOICE),
+            ReviewAnswer::Bad | ReviewAnswer::Memories => c.say(text::BAD_CHOICE),
             ReviewAnswer::Yes => {
                 c.say(text::CHECKING);
                 back.clear();

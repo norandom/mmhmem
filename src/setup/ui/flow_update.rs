@@ -14,15 +14,28 @@
 //!    Confirming applies and checks as usual; an empty review says
 //!    "Everything is current".
 //!
+//! **Restart into the new program.** The running program still carries the
+//! previous release's files (skills, commands, hooks), so after a
+//! successful update it does not plan the agents itself: [`Flow::begin`]
+//! returns [`Next::Restart`], the screens close, and the caller starts the
+//! new program at its permanent place as `setup <same internal arguments>
+//! --restarted <tag>`, with the same terminal (stdin, stdout and stderr are
+//! inherited), and exits with its exit code ([`Flow::restart_now`]). The
+//! new program goes straight to the review of the recorded choices with
+//! its own files ([`Flow::resume`]).
+//!
+//! Loop guard: a run started with `--restarted` never restarts again (its
+//! [`Restart::exec`] is `None`), and no restart happens when the release
+//! updated to is this program's own release. Without an `exec` (tests and
+//! the restarted run) the agents are planned in this process as before.
+//!
 //! The release source, the trusted keys and the platform come from
 //! [`Deps::releases`] (GitHub and the built-in keys for real runs; a
 //! `--release-dir` folder or test keys otherwise).
 //!
-//! Limitation: the agents are planned with the assets of the running
-//! program, which is still the previous release until setup starts again.
-//!
 //! [`Deps::releases`]: super::Deps::releases
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::{Flow, Next, text};
@@ -64,7 +77,75 @@ impl Releases {
     }
 }
 
+/// Starts a program with arguments, inheriting the terminal, and returns
+/// its exit code.
+pub type Exec = Arc<dyn Fn(&Relaunch) -> std::io::Result<i32> + Send + Sync>;
+
+/// How the new program is started after an update.
+#[derive(Clone, Default)]
+pub struct Restart {
+    /// Starts it (`None`: never restart; the run was restarted already).
+    pub exec: Option<Exec>,
+    /// The internal arguments to pass again (`--release-dir <dir>`).
+    pub args: Vec<String>,
+    /// In the restarted run: the release the previous run updated to.
+    pub resumed: Option<ReleaseTag>,
+}
+
+/// The new program and its arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relaunch {
+    /// The program at its permanent place.
+    pub program: PathBuf,
+    /// `setup …` with the internal arguments and `--restarted <tag>`.
+    pub args: Vec<String>,
+}
+
+/// The real [`Exec`]: runs the program with this process's stdin, stdout
+/// and stderr and waits for it (a missing exit code, killed by a signal,
+/// counts as 1).
+pub fn spawn(relaunch: &Relaunch) -> std::io::Result<i32> {
+    let status = std::process::Command::new(&relaunch.program)
+        .args(&relaunch.args)
+        .status()?;
+    Ok(status.code().unwrap_or(1))
+}
+
 impl Flow {
+    /// The new program to start, when an update asked for it.
+    pub fn relaunch(&self) -> Option<Relaunch> {
+        let tag = self.relaunch.as_ref()?;
+        let mut args = vec!["setup".to_owned()];
+        args.extend(self.deps.restart.args.iter().cloned());
+        args.extend(["--restarted".to_owned(), tag.as_str().to_owned()]);
+        Some(Relaunch {
+            program: self.deps.binary.clone(),
+            args,
+        })
+    }
+
+    /// Starts the new program after an update and waits for it: `None`
+    /// when no restart is due, else its exit code, or why it could not
+    /// start.
+    pub fn restart_now(&self) -> Option<Result<i32, String>> {
+        let relaunch = self.relaunch()?;
+        let exec = self.deps.restart.exec.as_ref()?;
+        Some(exec(&relaunch).map_err(|e| e.kind().to_string()))
+    }
+
+    /// In the run started after an update: plans the recorded choices with
+    /// this program's files for the review. `false` (and nothing done) in
+    /// any other run.
+    pub fn resume(&mut self) -> bool {
+        let Some(tag) = self.deps.restart.resumed.take() else {
+            return false;
+        };
+        self.intro = Some(text::updated(tag.as_str()));
+        self.selection = self.recorded_selection();
+        self.make_plan();
+        true
+    }
+
     /// Updates the program to `tag`, then plans the recorded choices again.
     pub(super) fn update_to(&mut self, tag: &ReleaseTag) -> Next {
         let releases = self.deps.releases.clone();
@@ -97,9 +178,14 @@ impl Flow {
             .notes
             .retain(|n| n != text::BINARY_CHANGED && n != text::BINARY_MISSING);
         self.loaded.record = Some(record);
+        let same_release = *tag == self.deps.version;
         self.deps.version = tag.clone();
         // The new program is in place; nothing else may overwrite it.
         self.deps.install_from = None;
+        if self.deps.restart.exec.is_some() && !same_release {
+            self.relaunch = Some(tag.clone());
+            return Next::Restart;
+        }
         self.intro = Some(text::updated(tag.as_str()));
         self.selection = self.recorded_selection();
         self.make_plan();

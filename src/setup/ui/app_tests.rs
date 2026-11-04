@@ -60,7 +60,7 @@ fn cancel_or_quit_at_every_screen_of_an_installed_home_changes_nothing() {
     press(&mut app, &[Enter, Enter, Enter, Enter]);
     assert_eq!(app.screen(), Screen::Progress);
     // Installed and current: Change, Check, Remove. Change walks every
-    // screen; Remove only shows its note.
+    // screen; Remove reviews the removal and quits there.
     let exits: &[&[Key]] = &[
         &[Quit],
         &[Enter, Quit],
@@ -70,6 +70,7 @@ fn cancel_or_quit_at_every_screen_of_an_installed_home_changes_nothing() {
         &[Enter, Space, Enter, Enter, Quit],
         &[Enter, Space, Enter, Enter, Diff, Quit],
         &[Down, Down, Enter, Quit],
+        &[Down, Down, Enter, Space, Diff, Esc, Esc, Quit],
     ];
     for keys in exits {
         assert_cancels(&fx, keys);

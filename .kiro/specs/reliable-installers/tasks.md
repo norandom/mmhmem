@@ -174,14 +174,14 @@ released.
   - _Depends: 6.1_
   - _Requirements: 4.8, 4.9_
 
-- [ ] 7. Update and removal
+- [x] 7. Update and removal
 - [x] 7.1 Update flow
   - Let `self_update` replace the running binary (Windows file-in-use case included), record its hash and the `PATH` entry (`winreg` + `WM_SETTINGCHANGE` on Windows), re-plan all agents with the recorded selection, review, apply and check. An up-to-date install yields "Everything is current".
   - Done when tests update a temp-home install from a previous-release fixture to the current one, keep the user's choices, and show a second run reports no changes with byte-identical files.
   - _Depends: 5.4, 6.2_
   - _Requirements: 7.1, 7.2_
 
-- [ ] 7.2 (P) Removal flow
+- [x] 7.2 (P) Removal flow
   - Reverse only recorded entries with the same parsers, remove the binary, the `PATH` entry and the record last, and keep the store unless "Also delete my saved memories" is ticked.
   - Done when tests show unrelated settings, including later user edits to shared files, are byte-identical after removal and the store survives by default.
   - _Depends: 6.2_

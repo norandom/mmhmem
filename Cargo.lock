@@ -1692,6 +1692,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "rusqlite",
+ "self-replace",
  "self_update",
  "serde",
  "serde_json",

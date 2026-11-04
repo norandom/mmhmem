@@ -184,3 +184,15 @@ impl FileChain {
         self.changes
     }
 }
+
+/// The file after mmhmem's Markdown section was taken out: `None` (delete
+/// the file) when nothing is left and the record says mmhmem created the
+/// file; otherwise the remaining bytes, so content the user added stays
+/// byte-identical (task 7.2).
+pub fn section_left(out: String, entry: &crate::setup::record::ManagedEntry) -> Option<Vec<u8>> {
+    if out.is_empty() && entry.created_file {
+        None
+    } else {
+        Some(out.into_bytes())
+    }
+}

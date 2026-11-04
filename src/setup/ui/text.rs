@@ -9,6 +9,8 @@ use crate::setup::record::{AgentId, Feature, PendingUserStep};
 
 #[path = "text_changes.rs"]
 pub mod changes;
+#[path = "text_remove.rs"]
+pub mod remove;
 
 pub const LEGEND: &str = "↑↓ move · space select · enter continue · esc back · q quit";
 pub const LEGEND_HOME: &str = "↑↓ move · enter continue · q quit";
@@ -84,8 +86,6 @@ pub const AGENT_UNAVAILABLE: &str = "{agent}: not found ({reason})";
 /// Contains `{path}`.
 pub const PROFILE_CHOICE: &str = "Use the Claude Desktop profile in {path}";
 pub const NOTHING_SELECTED: &str = "Choose at least one tool, or press q to quit.";
-pub const REMOVE_LATER: &str = "Removing from this menu is not available in this \
-build yet. Nothing was changed.";
 pub const UPDATE_NO_KEY: &str = "Updates are turned off until the release signing key \
 is added to mmhmem, so nothing was downloaded. Nothing was changed.";
 pub const UPDATE_FAILED: &str = "The update did not finish; the reason is shown above.";
@@ -400,7 +400,6 @@ pub const ALL: &[&str] = &[
     AGENT_UNAVAILABLE,
     PROFILE_CHOICE,
     NOTHING_SELECTED,
-    REMOVE_LATER,
     RECORD_UNREADABLE,
     RECOVERED,
     RECOVERY_UNCLEAR,

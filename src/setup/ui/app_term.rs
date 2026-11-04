@@ -12,7 +12,7 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{App, Control, Key};
-use crate::setup::ui::flow::{Flow, Newest, Progress};
+use crate::setup::ui::flow::{Flow, Newest};
 
 /// How often the loop looks for the release answer while no key comes.
 const POLL: Duration = Duration::from_millis(200);
@@ -33,12 +33,10 @@ impl Drop for Restore {
     }
 }
 
-/// Runs the menu on the real terminal. Returns the exit code and the
-/// results to print once the normal screen is back.
-pub fn run_terminal(
-    flow: Flow,
-    lookup: Lookup,
-) -> Result<(i32, Option<Progress>), TerminalUnavailable> {
+/// Runs the menu on the real terminal. Returns the exit code and the flow
+/// (its results to print, or the restart after an update) once the normal
+/// screen is back.
+pub fn run_terminal(flow: Flow, lookup: Lookup) -> Result<(i32, Box<Flow>), TerminalUnavailable> {
     let mut terminal = match ratatui::try_init() {
         Ok(terminal) => terminal,
         Err(_) => {
@@ -54,7 +52,7 @@ pub fn run_terminal(
     let mut app = App::new(flow);
     let code = event_loop(&mut terminal, &mut app, &rx).unwrap_or(1);
     drop(restore);
-    Ok((code, app.flow().progress().cloned()))
+    Ok((code, Box::new(app.into_flow())))
 }
 
 fn event_loop(

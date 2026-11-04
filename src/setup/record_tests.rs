@@ -25,6 +25,7 @@ fn done(target: Target, seed: &str) -> ManagedEntry {
         was_managed: false,
         backup: None,
         missing_parents: None,
+        created_file: false,
         state: EntryState::Done,
     }
 }
@@ -102,6 +103,8 @@ pub(super) fn sample_record(root: &Path) -> InstallRecord {
     record.path_entry = Some(PathEntryInfo {
         added: true,
         value: root.join("bin"),
+        created_value: false,
+        trailing_separator: false,
     });
     record.worker_configured = true;
     record.managed = vec![
@@ -344,6 +347,7 @@ fn change(target: Target, before: Option<&str>, after: Option<&str>) -> PendingC
         before: before.map(sha),
         after: after.map(sha),
         backup: None,
+        created_file: false,
         missing_parents: Some(0),
     }
 }

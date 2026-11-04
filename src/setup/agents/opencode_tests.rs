@@ -206,6 +206,21 @@ fn removal_of_a_fresh_install_prunes_only_what_mmhmem_created() {
 }
 
 #[test]
+fn an_agents_file_mmhmem_created_goes_unless_the_user_wrote_in_it() {
+    let mut fx = fx();
+    fx.install(&all());
+    fx.remove_all();
+    assert!(!fx.dir().join("AGENTS.md").exists());
+
+    let mut fx = self::fx();
+    fx.install(&all());
+    let installed = fx.text("AGENTS.md");
+    fx.put("AGENTS.md", &format!("{installed}\nMy note.\n"));
+    fx.remove_all();
+    assert_eq!(fx.text("AGENTS.md"), "\nMy note.\n");
+}
+
+#[test]
 fn user_keys_inside_our_entry_are_kept() {
     let mut fx = fx();
     let seed = "{\"mcp\":{\"servers\":{\"mmhmem\":{\"type\":\"local\",\"command\":[\"old\",\"stdio\"],\"enabled\":false,\"environment\":{\"A\":\"b\"}}}}}";

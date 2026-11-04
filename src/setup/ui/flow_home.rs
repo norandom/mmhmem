@@ -17,7 +17,7 @@ pub enum HomeAction {
     Change,
     /// Run the functional check again.
     Check,
-    /// Remove mmhmem (task 7.2 does the removal itself).
+    /// Remove mmhmem (task 7.2, `flow_remove.rs`).
     Remove,
 }
 
@@ -102,13 +102,13 @@ impl Flow {
     /// Starts `action`; only [`Flow::confirm`] and the check write.
     pub fn begin(&mut self, action: &HomeAction) -> Next {
         self.planned = None;
+        self.delete_memories = false;
+        self.relaunch = None;
         self.progress = None;
         self.intro = None;
         match action {
             HomeAction::UpdateTo(tag) => self.update_to(tag),
-            // TODO(7.2): plan_remove for every recorded agent, then the
-            // binary, the PATH entry and the record last.
-            HomeAction::Remove => Next::Note(text::REMOVE_LATER),
+            HomeAction::Remove => self.plan_removal(),
             HomeAction::Check => {
                 self.run_check();
                 Next::Progress

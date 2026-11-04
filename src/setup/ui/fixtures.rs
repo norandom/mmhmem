@@ -10,7 +10,7 @@ use ratatui::backend::TestBackend;
 use serde_json::{Value, json};
 
 use super::app::{App, Key};
-use super::flow::{Deps, Flow, Newest, Releases};
+use super::flow::{Deps, Flow, Memories, Newest, Releases, Restart};
 use crate::setup::agents::doubles::{Reply, TestHome};
 use crate::setup::agents::doubles_cli::{self, CLAUDE_MCP_GET, CODEX_MCP_LIST_JSON};
 use crate::setup::agents::{AgentId, AgentRecord, Feature, PendingUserStep};
@@ -36,12 +36,14 @@ pub(crate) struct Fx {
     pub(crate) deps: Deps,
 }
 
-/// A fresh Linux-rules home with no agent; the record folder and the
-/// installed program live under the home.
+/// A fresh Linux-rules home with no agent; the record folder, the
+/// installed program and the memory store live under the home; restarting
+/// after an update is off.
 pub(crate) fn fx() -> Fx {
     let home = TestHome::new(Os::Linux);
     let state = home.home().join(".local").join("state").join("mmhmem");
     let binary = home.home().join(".local").join("bin").join("mmhmem");
+    let memories = home.home().join(".local").join("share").join("mmhmem");
     let deps = Deps {
         env: home.env.clone(),
         store: RecordStore::new(state),
@@ -51,6 +53,11 @@ pub(crate) fn fx() -> Fx {
         releases: Releases::github(),
         version: tag("v0.4.1"),
         now: Arc::new(|| at("2026-11-04T10:00:00Z")),
+        memories: Some(Memories {
+            dir: memories.clone(),
+            log_file: memories.join("audit.jsonl"),
+        }),
+        restart: Restart::default(),
     };
     Fx { home, deps }
 }

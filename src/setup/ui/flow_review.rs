@@ -25,6 +25,8 @@ pub(super) struct Planned {
     pub(super) plan: Plan,
     pub(super) problems: Vec<(AgentId, String)>,
     pub(super) adoption: bool,
+    /// A removal (`flow_remove.rs`): confirmed and shown its own way.
+    pub(super) removal: bool,
 }
 
 impl Planned {
@@ -53,6 +55,17 @@ pub struct FileGroup {
     pub items: Vec<ReviewItem>,
 }
 
+/// The "Also delete my saved memories" option of a removal's review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoriesChoice {
+    /// Ticked (off by default).
+    pub on: bool,
+    /// The option's name.
+    pub label: &'static str,
+    /// What it does, with the folder.
+    pub help: String,
+}
+
 /// Everything the review screen shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewView {
@@ -64,6 +77,8 @@ pub struct ReviewView {
     pub problems: Vec<String>,
     /// Lines below the changes (backups).
     pub notes: Vec<String>,
+    /// A removal's memories option (`None` for every other review).
+    pub memories: Option<MemoriesChoice>,
 }
 
 impl ReviewView {
@@ -92,6 +107,7 @@ impl Flow {
                 plan: adoption_plan(scan, None, (self.deps.now)()),
                 problems: Vec::new(),
                 adoption: true,
+                removal: false,
             },
             None => self.plan_for(&self.selection),
         };
@@ -106,8 +122,12 @@ impl Flow {
                 groups: Vec::new(),
                 problems: Vec::new(),
                 notes: Vec::new(),
+                memories: None,
             };
         };
+        if planned.removal {
+            return self.removal_review(planned);
+        }
         let mut intro: Vec<String> = self.intro.iter().cloned().collect();
         if planned.adoption {
             intro.push(text::ADOPT_REVIEW.to_owned());
@@ -122,6 +142,7 @@ impl Flow {
             groups: self.groups(&planned.plan),
             problems: self.problem_lines(&planned.problems),
             notes,
+            memories: None,
         }
     }
 
@@ -174,6 +195,7 @@ impl Flow {
             plan,
             problems,
             adoption: false,
+            removal: false,
         }
     }
 
@@ -184,7 +206,7 @@ impl Flow {
             .collect()
     }
 
-    fn groups(&self, plan: &Plan) -> Vec<FileGroup> {
+    pub(super) fn groups(&self, plan: &Plan) -> Vec<FileGroup> {
         let mut files: Vec<PathBuf> = Vec::new();
         let mut groups: Vec<FileGroup> = Vec::new();
         for (index, change) in plan.changes.iter().enumerate() {

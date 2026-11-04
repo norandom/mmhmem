@@ -44,7 +44,7 @@ pub use env::{
     CommandOutput, CommandRunner, DEFAULT_TIMEOUT, Env, Invocation, MAX_OUTPUT, RunError,
     SystemRunner,
 };
-pub use problem::{AgentProblem, FileChain, read_optional};
+pub use problem::{AgentProblem, FileChain, read_optional, section_left};
 
 #[cfg(test)]
 mod check_more_tests;

@@ -17,6 +17,7 @@ fn help_hides_the_internal_setup_arguments() {
     assert!(help.contains("setup"));
     assert!(!help.contains("--bootstrap"));
     assert!(!help.contains("--release-dir"));
+    assert!(!help.contains("--restarted"));
 }
 
 #[test]
@@ -28,13 +29,48 @@ fn setup_with_an_unknown_argument_exits_two_with_a_plain_message() {
     assert!(!err.contains("--bogus"));
 }
 
-/// `mmhmem setup` without a terminal installs for real, so it only runs
-/// where every folder it reads can be redirected: on Unix the home folder
-/// comes from `HOME`. (On Windows the home folder comes from the system,
-/// not the environment, so a test could touch the real user's folders; the
-/// no-terminal run is covered by the library tests on temporary homes.)
-/// Every home, config and state variable points into a temporary folder
-/// and `PATH` is an empty folder, so no agent can be found.
+/// Amended Requirement 4.9: a plain `mmhmem setup` without a terminal (an
+/// AI agent's shell, a pipe) changes nothing and reads nothing, so this
+/// runs on every OS. `--restarted` (the run after an update) is refused the
+/// same way, so it is accepted as an argument.
+#[test]
+fn setup_without_a_terminal_changes_nothing_and_says_to_use_a_terminal() {
+    for args in [&["setup"][..], &["setup", "--restarted", "v1.0.0"]] {
+        let out = run_cli(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let text = String::from_utf8(out.stdout).expect("utf8");
+        assert!(
+            text.contains("open a terminal window and run: mmhmem setup"),
+            "{text}"
+        );
+        assert!(text.contains("nothing was changed"), "{text}");
+    }
+}
+
+/// The restart after an update starts the real program with the same
+/// terminal and returns its exit code.
+#[test]
+fn the_restart_starts_the_program_and_returns_its_exit_code() {
+    let relaunch = mmhmem::setup::ui::flow::Relaunch {
+        program: env!("CARGO_BIN_EXE_mmhmem").into(),
+        args: vec!["setup".into(), "--bogus".into()],
+    };
+    assert_eq!(mmhmem::setup::ui::flow::spawn(&relaunch).expect("spawn"), 2);
+    let missing = mmhmem::setup::ui::flow::Relaunch {
+        program: std::env::temp_dir().join("no-such-mmhmem-program"),
+        args: Vec::new(),
+    };
+    assert!(mmhmem::setup::ui::flow::spawn(&missing).is_err());
+}
+
+/// `mmhmem setup --bootstrap <tag>` without a terminal installs for real,
+/// so it only runs where every folder it reads can be redirected: on Unix
+/// the home folder comes from `HOME`. (On Windows the home folder comes
+/// from the system, not the environment, so a test could touch the real
+/// user's folders; the no-terminal run is covered by the library tests on
+/// temporary homes.) Every home, config and state variable points into a
+/// temporary folder and `PATH` is an empty folder, so no agent can be
+/// found.
 #[cfg(unix)]
 mod no_terminal {
     use super::*;
@@ -81,13 +117,24 @@ mod no_terminal {
     #[test]
     fn setup_finding_no_agent_changes_nothing_and_says_why() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let out = run_isolated(&["setup"], dir.path());
+        let out = run_isolated(&["setup", "--bootstrap", "v0.0.0"], dir.path());
         assert_eq!(out.status.code(), Some(1));
         let text = String::from_utf8(out.stdout).expect("utf8");
         assert!(text.contains("No supported AI tool was found"), "{text}");
         // Only the two folders the test made: nothing was written.
         let found = entries(dir.path());
         assert_eq!(found.len(), 2, "{found:?}");
+    }
+
+    #[test]
+    fn plain_setup_without_a_terminal_reads_and_writes_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = run_isolated(&["setup"], dir.path());
+        assert_eq!(out.status.code(), Some(1));
+        let text = String::from_utf8(out.stdout).expect("utf8");
+        assert!(text.contains("run: mmhmem setup"), "{text}");
+        assert!(!text.contains("No supported AI tool"), "{text}");
+        assert_eq!(entries(dir.path()).len(), 2);
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub(super) fn record_for(scope: Scope, target: &Target) -> InstallRecord {
             before: None,
             after: Some(after),
             backup: None,
+            created_file: false,
             missing_parents: Some(0),
         },
     );
@@ -253,6 +254,7 @@ fn begin(c: &Crash) {
         before: Some(c.v1.clone()),
         after: Some(c.v2.clone()),
         backup,
+        created_file: false,
         missing_parents: Some(0),
     };
     c.store.journal_begin(&mut record, SCOPE, change).unwrap();
@@ -333,6 +335,7 @@ fn crash_during_new_entry_or_removal_is_classified() {
         before,
         after,
         backup: None,
+        created_file: false,
         missing_parents: None,
     };
     let skill = present(observe_in(&target, b"skill\n"));

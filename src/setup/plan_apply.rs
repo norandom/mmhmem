@@ -15,7 +15,9 @@
 //! A `PATH` entry change (install-wide) reads and writes the user's `PATH`
 //! value through the [`UserPathStore`] given to [`apply_with`]; it has no
 //! backup file, and its rollback writes back the exact value read before
-//! the change. The program ([`Target::Binary`]) is written executable.
+//! the change. The program ([`Target::Binary`]) is written executable; a
+//! removal that deletes the running program defers the delete to the end
+//! of the process on Windows (`delete_program`).
 
 use std::io;
 use std::path::Path;
@@ -187,12 +189,14 @@ pub(super) fn begin(
             .map_err(|e| Failure::new(e.to_string()))?,
     };
     let prior = record.find(change.scope, &change.target).cloned();
+    let new_file = change.before.is_none() && path_restore.is_none();
     let pending = PendingChange {
         target: change.target.clone(),
         before: before_hash.clone(),
         after: after_hash.clone(),
         backup: backup.clone(),
         missing_parents: change.missing_parents,
+        created_file: new_file || prior.as_ref().is_some_and(|p| p.created_file),
     };
     if let Err(e) = store.journal_begin(record, change.scope, pending) {
         set_entry(record, change.scope, &change.target, prior);
@@ -229,6 +233,8 @@ pub(super) fn write_change(change: &Change, paths: &dyn UserPathStore) -> Result
         (Some(bytes), _) if !change.owner_only && change.before.as_ref() == Some(bytes) => Ok(()),
         (Some(bytes), true) => fsx::write_owner_only(&change.file, bytes),
         (Some(bytes), false) => fsx::write_atomic(&change.file, bytes),
+        (None, _) if matches!(change.target, Target::Binary { .. }) => delete_program(&change.file)
+            .map(|()| prune_folders(&change.file, change.missing_parents.unwrap_or(0))),
         (None, _) => remove_file(&change.file),
     };
     let result = result.and_then(|()| match (&change.target, &change.after) {
@@ -247,6 +253,46 @@ fn make_executable(path: &Path) -> anyhow::Result<()> {
     }
     let _ = path;
     Ok(())
+}
+
+/// Delete the installed program. When it is the program running now (a
+/// removal started from it), `self_replace::self_delete_outside_path` does
+/// it: Unix removes the file at once; Windows cannot delete a running
+/// program, so the file is deleted as soon as setup exits (by a short-lived
+/// helper copy placed outside the program's folder).
+fn delete_program(path: &Path) -> anyhow::Result<()> {
+    let running = std::env::current_exe()
+        .ok()
+        .is_some_and(|exe| same_file(&exe, path));
+    if !running {
+        return remove_file(path);
+    }
+    let folder = path.parent().unwrap_or(path);
+    self_replace::self_delete_outside_path(folder)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+}
+
+/// After the program was deleted: delete up to `count` folders above it
+/// that the install created, innermost first, stopping at the first one
+/// that is not empty (or not deletable). A folder with anything in it is
+/// never deleted.
+fn prune_folders(program: &Path, count: u32) {
+    let mut dir = program.parent();
+    for _ in 0..count {
+        let Some(folder) = dir else { return };
+        if std::fs::remove_dir(folder).is_err() {
+            return;
+        }
+        dir = folder.parent();
+    }
+}
+
+/// Whether two paths name the same existing file (also through links).
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 fn remove_file(file: &Path) -> anyhow::Result<()> {
@@ -299,6 +345,7 @@ fn undo_one(
         after: applied.before_hash.clone(),
         backup: applied.backup.clone(),
         missing_parents: applied.prior.as_ref().and_then(|p| p.missing_parents),
+        created_file: applied.prior.as_ref().is_some_and(|p| p.created_file),
     };
     store
         .journal_begin(record, scope, pending)

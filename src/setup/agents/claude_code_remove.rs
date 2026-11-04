@@ -8,7 +8,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::{SCOPE, hides_contents, json_problem};
-use crate::setup::agents::{AgentId, AgentProblem, FileChain};
+use crate::setup::agents::{AgentId, AgentProblem, FileChain, section_left};
 use crate::setup::edit::json::{self as edit_json, JsonEditError};
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change, target_file};
@@ -106,7 +106,7 @@ pub(super) fn removal(
             let text = text_of(&file, &before)?;
             let out = markdown::remove_section(&text, &routing())
                 .map_err(AgentProblem::markdown(&file))?;
-            Some(out.into_bytes())
+            section_left(out, entry)
         }
         _ => return Ok(None),
     };

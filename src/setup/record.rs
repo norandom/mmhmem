@@ -4,19 +4,14 @@
 //! One JSON file per user (`install.json`, schema 1) lists the installed
 //! release, the binary, the `PATH` entry, and per agent the selected features,
 //! every file or config entry mmhmem manages, pending user steps and the last
-//! functional check. Submodules:
-//!
-//! - `record_types.rs`: validated value types (hashes, tags, timestamps, key
-//!   names, section ids, backup paths).
-//! - `record_store.rs`: per-OS location, atomic save, load and its errors.
-//! - `record_drift.rs`: entry normalization, drift detection and the
-//!   recovery scan for interrupted changes.
+//! functional check. Submodules: `record_types.rs` (validated values),
+//! `record_store.rs` (location, atomic save, load) and `record_drift.rs`
+//! (normalization, drift detection, recovery scan).
 //!
 //! **Journaling (5.2).** Each change runs in this order: write the backup;
 //! [`InstallRecord::begin_change`] + save (entry `applying`); write the
-//! target; [`InstallRecord::finish_change`] + save (entry `done`). After an
-//! interruption [`recovery_scan`] compares every `applying` entry with the
-//! disk so the next run can finish or undo it.
+//! target; [`InstallRecord::finish_change`] + save (entry `done`); after an
+//! interruption [`recovery_scan`] tells finished from undone changes.
 //!
 //! **No secrets (5.7).** No field holds free-form text: values are only
 //! [`Sha256Hex`] hashes, [`ReleaseTag`]s, [`UtcTimestamp`]s, config key
@@ -90,6 +85,12 @@ pub struct PathEntryInfo {
     pub added: bool,
     /// The folder on `PATH`.
     pub value: PathBuf,
+    /// There was no `PATH` value before; removal deletes it when empty.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub created_value: bool,
+    /// The value ended in `;` before; removal keeps that `;`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trailing_separator: bool,
 }
 
 /// The agents the installer integrates with.
@@ -306,10 +307,13 @@ pub struct ManagedEntry {
     pub was_managed: bool,
     /// Backup path relative to the record folder, or `None`.
     pub backup: Option<BackupPath>,
-    /// For JSON/TOML entries: how many parent keys mmhmem created, so removal
-    /// prunes only those.
+    /// JSON/TOML: parent keys mmhmem created; the program: folders it
+    /// created. Removal prunes only those (folders only while empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missing_parents: Option<u32>,
+    /// mmhmem created the file; a removal leaving it empty deletes it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub created_file: bool,
     /// Journal state.
     pub state: EntryState,
 }
@@ -334,8 +338,10 @@ pub struct PendingChange {
     pub after: Option<Sha256Hex>,
     /// The backup taken before the change.
     pub backup: Option<BackupPath>,
-    /// Parent keys the change creates (JSON/TOML).
+    /// Parent keys (JSON/TOML) or folders (program) the change creates.
     pub missing_parents: Option<u32>,
+    /// mmhmem created the file (kept from the entry's first change).
+    pub created_file: bool,
 }
 
 /// A journaling call that names an entry the record does not hold.
@@ -402,6 +408,7 @@ impl InstallRecord {
             was_managed: old.is_some(),
             backup: change.backup,
             missing_parents: change.missing_parents,
+            created_file: change.created_file,
             state: EntryState::Applying,
         };
         match old {

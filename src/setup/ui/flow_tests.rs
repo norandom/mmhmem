@@ -124,10 +124,7 @@ fn a_newer_release_offers_the_update_hook_and_changes_nothing() {
     assert_eq!(actions[0], HomeAction::UpdateTo(tag("v0.5.0")));
     assert!(!actions.contains(&HomeAction::Install));
     assert_eq!(flow.begin(&actions[0]), Next::Note(text::UPDATE_NO_KEY));
-    assert_eq!(
-        flow.begin(&HomeAction::Remove),
-        Next::Note(text::REMOVE_LATER)
-    );
+    assert_eq!(flow.begin(&HomeAction::Remove), Next::Review);
     assert_eq!(fx.digest(), before);
 }
 

@@ -32,6 +32,7 @@ fn violations(strings: &[&str]) -> Vec<String> {
 #[test]
 fn text_uses_no_unexplained_project_terms() {
     assert_eq!(violations(ALL), Vec::<String>::new());
+    assert_eq!(violations(text::remove::ALL), Vec::<String>::new());
 }
 
 #[test]

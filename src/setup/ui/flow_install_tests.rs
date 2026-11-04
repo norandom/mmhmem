@@ -106,7 +106,12 @@ fn assert_install_record(fx: &Fx, flow: &Flow) {
     let sha = Sha256Hex::of(NEW_PROGRAM);
     assert_eq!((&binary.path, &binary.sha256), (&fx.deps.binary, &sha));
     let value = fx.deps.binary.parent().expect("folder").to_path_buf();
-    let entry = PathEntryInfo { added: true, value };
+    let entry = PathEntryInfo {
+        added: true,
+        value,
+        created_value: false,
+        trailing_separator: false,
+    };
     assert_eq!(record.path_entry, Some(entry));
     assert_eq!(record.managed.len(), 2);
     assert!(record.managed.iter().all(|e| e.state == EntryState::Done));
@@ -160,7 +165,9 @@ fn a_folder_already_on_path_is_kept_and_recorded_as_not_added() {
         record.path_entry,
         Some(PathEntryInfo {
             added: false,
-            value: folder
+            value: folder,
+            created_value: false,
+            trailing_separator: false,
         })
     );
     assert!(
@@ -184,7 +191,9 @@ fn without_a_path_store_nothing_is_edited_and_the_results_say_how_to_add_it() {
         flow.record().expect("record").path_entry,
         Some(PathEntryInfo {
             added: false,
-            value: folder.clone()
+            value: folder.clone(),
+            created_value: false,
+            trailing_separator: false,
         })
     );
 
@@ -300,4 +309,96 @@ fn an_update_signed_by_an_unknown_key_shows_why_and_changes_nothing() {
     );
     assert_eq!(fx.digest(), before);
     assert_eq!(std::fs::read(&fx.deps.binary).unwrap(), b"OLD");
+}
+
+/// Records every program start instead of starting it; answers `code`.
+fn recording_exec(code: i32) -> (Exec, Arc<std::sync::Mutex<Vec<Relaunch>>>) {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let exec: Exec = Arc::new(move |r: &Relaunch| {
+        log.lock().unwrap().push(r.clone());
+        Ok(code)
+    });
+    (exec, seen)
+}
+
+#[test]
+fn after_an_update_the_new_program_is_started_and_reviews_with_its_own_files() {
+    let fake = new_release();
+    let dir = release_dir(&fake);
+    let mut fx = installed_old(dir.path(), vec![public_key(TRUSTED)]);
+    let (exec, seen) = recording_exec(7);
+    fx.deps.restart = Restart {
+        exec: Some(exec),
+        args: vec!["--release-dir".into(), "R".into()],
+        resumed: None,
+    };
+    let mut flow = fx.flow(Newest::Known(fake.tag.clone()));
+    assert_eq!(
+        flow.begin(&HomeAction::UpdateTo(tag("v9.9.9"))),
+        Next::Restart
+    );
+    assert_eq!(std::fs::read(&fx.deps.binary).unwrap(), b"NEW PROGRAM");
+    let want = Relaunch {
+        program: fx.deps.binary.clone(),
+        args: ["setup", "--release-dir", "R", "--restarted", "v9.9.9"]
+            .map(String::from)
+            .to_vec(),
+    };
+    assert_eq!(flow.relaunch(), Some(want.clone()));
+    assert_eq!(flow.restart_now(), Some(Ok(7)));
+    assert_eq!(*seen.lock().unwrap(), [want]);
+    assert_eq!(flow.exit_code(), EXIT_CANCELLED, "nothing confirmed here");
+
+    // The restarted program: straight to the review, never restarting again.
+    fx.deps.restart = Restart {
+        exec: None,
+        args: Vec::new(),
+        resumed: Some(tag("v9.9.9")),
+    };
+    let app = crate::setup::ui::app::App::new(fx.flow(Newest::Known(tag("v9.9.9"))));
+    assert_eq!(app.screen(), crate::setup::ui::app::Screen::Review);
+    assert_eq!(app.flow().review().intro, [text::updated("v9.9.9")]);
+    assert_eq!(app.flow().restart_now(), None);
+}
+
+#[test]
+fn an_update_to_this_programs_own_release_does_not_restart() {
+    let fake = new_release();
+    let dir = release_dir(&fake);
+    let mut fx = installed_old(dir.path(), vec![public_key(TRUSTED)]);
+    let (exec, seen) = recording_exec(0);
+    fx.deps.restart.exec = Some(exec);
+    fx.deps.version = tag("v9.9.9");
+    let mut flow = fx.flow(Newest::Known(fake.tag.clone()));
+    assert_eq!(
+        flow.begin(&HomeAction::UpdateTo(tag("v9.9.9"))),
+        Next::Review
+    );
+    assert_eq!(flow.restart_now(), None);
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_numbered_fallback_ends_for_the_restart_and_the_restarted_run_opens_the_review() {
+    let fake = new_release();
+    let dir = release_dir(&fake);
+    let mut fx = installed_old(dir.path(), vec![public_key(TRUSTED)]);
+    let (exec, _seen) = recording_exec(0);
+    fx.deps.restart.exec = Some(exec);
+    let mut flow = fx.flow(Newest::Known(fake.tag.clone()));
+    let code = crate::setup::ui::fallback::run(&mut flow, &mut "1\n".as_bytes(), &mut Vec::new());
+    assert_eq!(code, 0);
+    assert!(flow.relaunch().is_some());
+
+    fx.deps.restart = Restart {
+        resumed: Some(tag("v9.9.9")),
+        ..Restart::default()
+    };
+    let mut flow = fx.flow(Newest::Unknown);
+    let mut out = Vec::new();
+    let code = crate::setup::ui::fallback::run(&mut flow, &mut "q\n".as_bytes(), &mut out);
+    assert_eq!(code, EXIT_CANCELLED);
+    let out = String::from_utf8(out).unwrap();
+    assert!(out.contains(&text::updated("v9.9.9")), "{out}");
 }
