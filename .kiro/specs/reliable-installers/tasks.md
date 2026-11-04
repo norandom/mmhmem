@@ -134,7 +134,7 @@ released.
   - Done when `publish-ci-release.ps1` tests show the asset set and that every asset is listed and re-verified after upload.
   - _Requirements: 2.3, 2.8_
 
-- [ ] 5.2 (P) Sign checksums and publish attestations
+- [x] 5.2 (P) Sign checksums and publish attestations
   - Generate the ed25519 key pair with `zipsign`. Store the secret only in the GitHub `release` environment with required reviewers, and embed the public key list in the binary.
   - Sign each archive with `zipsign`, then compute `SHA256SUMS` over the signed archives, sign it as `SHA256SUMS.sig` with the same key, run the existing remote byte verification, and add `actions/attest-build-provenance` for every archive.
   - Done when a dry-run publish produces archives and a `SHA256SUMS.sig` that the embedded keys verify, and a modified archive or `SHA256SUMS` fails verification in a test.
@@ -205,6 +205,7 @@ released.
 
 - [ ] 8.3 Block publishing on the gate
   - Make the release workflow require a green `installer-e2e` run for the exact tag commit, in the same way it already requires main CI.
+  - Follow-up from the 5.2 review: the provenance attestation currently runs after the release is published. Keep the release a draft until signing, upload verification and attestation all succeed, then publish it as the last step.
   - Done when `test-publish-ci-release.ps1` shows publishing refuses a commit without a green installer run.
   - _Depends: 8.2_
   - _Requirements: 10.5_

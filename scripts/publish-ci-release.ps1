@@ -7,6 +7,7 @@ The Linux publisher retains its full provenance and byte-equality checks.
 param([string]$Tag,[string]$RunId)
 . (Join-Path $PSScriptRoot 'publish-linux-release.ps1') -Tag $Tag -RunId $RunId
 . (Join-Path $PSScriptRoot 'package-release-archives.ps1')
+. (Join-Path $PSScriptRoot 'sign-release-assets.ps1')
 
 function Assert-CiReleaseTag([string]$Value) {
     if ($Value -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {throw 'Only stable vMAJOR.MINOR.PATCH tags can be published'}
@@ -72,6 +73,11 @@ function Initialize-CiReleaseAssets([string]$ReleaseTag,[hashtable]$Native,[stri
     [Array]::Sort($names,[StringComparer]::Ordinal)
     return ,$names
 }
+function Write-AttestationSubjects([string[]]$Paths) {
+    if (-not $env:GITHUB_OUTPUT) {return}
+    $list=($Paths | ForEach-Object {$_.Replace('\','/')}) -join "`n"
+    [IO.File]::AppendAllText($env:GITHUB_OUTPUT,"archives<<MMHMEM_ARCHIVES`n$list`nMMHMEM_ARCHIVES`n",(New-Object Text.UTF8Encoding($false)))
+}
 function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if (-not $ReleaseTag) {
         if ($RequestedRun -cnotmatch '^[1-9][0-9]*$') {throw 'Automatic completion requires a run ID'}
@@ -85,11 +91,14 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
         return
     }
     Assert-CiReleaseTag $ReleaseTag
+    $scratch=New-ReleaseScratch
+    # Fail closed before any GitHub read or write: no signing key, no release.
+    $signing=Open-ReleaseSigning (Join-Path $scratch 'signing')
+    try {
     $revision=Resolve-ReleaseTag $ReleaseTag
     $run=Get-CiReleaseRun $revision $RequestedRun
     Assert-CiReleaseRun $run $revision
     $id=[string]$run.id
-    $scratch=New-ReleaseScratch
     foreach ($entry in @(@('windows','mmhmem-x86_64-pc-windows-msvc'),@('macos','mmhmem-macos'))) {
         $destination=Join-Path $scratch $entry[0]
         $null=Invoke-ReleaseGh @('run','download',$id,'--repo',$script:ReleaseRepository,'--name',$entry[1],'--dir',$destination)
@@ -105,18 +114,27 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     $null=Invoke-LinuxReleaseDelivery $context
     $staging=Join-Path $scratch 'assets'
     $staged=Initialize-CiReleaseAssets $ReleaseTag $native $context.BundleDirectory $staging
+    # Sign the archives (context = final file name), THEN hash every asset, then
+    # sign SHA256SUMS. All signing finishes before the remaining uploads.
+    $signedArchives=@($staged | Where-Object {$_ -cmatch '\.(zip|tar\.gz)$'} | ForEach-Object {Join-Path $staging $_})
+    Invoke-ReleaseSigning $signedArchives $signing
+    $sumPath=Write-ReleaseChecksums $staging $staged
+    $sigPath=Write-ReleaseChecksumSignature $staging $signing
+    # Hand the final signed archives to the workflow's provenance attestation step.
+    Write-AttestationSubjects $signedArchives
     # Everything except the Linux files already delivered above is uploaded and
-    # re-downloaded byte for byte; SHA256SUMS goes last and covers every asset.
+    # re-downloaded byte for byte; SHA256SUMS then SHA256SUMS.sig go last.
     foreach ($name in $staged) {
         if ($name -cin @($script:LinuxAssetName,'verification.json')) {continue}
         Send-CiReleaseAsset $ReleaseTag (Join-Path $staging $name) $scratch
     }
-    $sumPath=Write-ReleaseChecksums $staging $staged
     Send-CiReleaseAsset $ReleaseTag $sumPath $scratch
+    Send-CiReleaseAsset $ReleaseTag $sigPath $scratch
     Assert-LinuxDeliveryFiles $context
     $null=Get-LinuxDeliveryDraft $context
     if ((Resolve-ReleaseTag $ReleaseTag) -cne $revision) {throw 'Tag changed before publication'}
     $null=Invoke-ReleaseGh @('release','edit',$ReleaseTag,'--repo',$script:ReleaseRepository,'--draft=false','--latest')
+    } finally {Close-ReleaseSigning $signing}
     Write-Host "Published $ReleaseTag from successful CI run $id ($revision)"
 }
 if ($MyInvocation.InvocationName -ne '.') {

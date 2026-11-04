@@ -21,14 +21,50 @@ concurrency:
   group: release-publication
   cancel-in-progress: false
 
+env:
+  # Pinned signing CLI; scripts/sign-release-assets.ps1 refuses any other version.
+  ZIPSIGN_VERSION: '0.2.2'
+
 jobs:
-  publish:
+  # No secrets and no environment here: decide whether anything needs publishing
+  # so that the approval-gated `release` environment is only entered for tags.
+  plan:
     if: github.repository == 'norandom/mmhmem' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          publish=false
+          if [ "$EVENT" != workflow_run ]; then
+            publish=true
+          elif git tag --points-at "$RUN_SHA" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            publish=true
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
+    # The signing key exists only as a secret of this environment, which must
+    # have required reviewers (docs/release-signing.md).
+    environment: release
     permissions:
       contents: write
       actions: read
+      id-token: write       # build provenance attestation (OIDC)
+      attestations: write   # build provenance attestation
     steps:
       # Always execute trusted default-branch publication code. Binaries come
       # exclusively from the exact tagged commit's successful main CI run.
@@ -36,16 +72,34 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - name: Install pinned zipsign
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'zipsign'
+          cargo install zipsign --version "=$env:ZIPSIGN_VERSION" --locked --root $root
+          if ($LASTEXITCODE -ne 0) { throw 'zipsign install failed' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $root 'bin')
       - name: Validate publisher regressions
         shell: pwsh
         run: |
           ./scripts/test-publish-linux-release.ps1
           ./scripts/test-package-release-archives.ps1
+          ./scripts/test-sign-release-assets.ps1
           ./scripts/test-publish-ci-release.ps1
       - name: Publish verified artifacts
+        id: publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
           SOURCE_RUN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+          # Only this step sees the key (secret of the `release` environment).
+          MMHMEM_RELEASE_SIGNING_KEY: ${{ secrets.MMHMEM_RELEASE_SIGNING_KEY }}
         run: ./scripts/publish-ci-release.ps1 -Tag $env:RELEASE_TAG -RunId $env:SOURCE_RUN
+      # Provenance for the exact signed archive bytes that were published.
+      # actions/attest-build-provenance v4.2.2
+      - name: Attest archives
+        if: steps.publish.outputs.archives != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: ${{ steps.publish.outputs.archives }}
