@@ -146,7 +146,7 @@ released.
   - _Depends: 5.1_
   - _Requirements: 1.1, 1.3, 2.1, 2.2, 2.3, 2.5, 2.7, 2.8, 8.2_
 
-- [ ] 5.4 Release verification inside setup
+- [x] 5.4 Release verification inside setup
   - Implement `src/setup/release.rs` as a thin wrapper around `self_update`'s GitHub backend: latest-release lookup, asset choice by target triple, download, `zipsign` signature check with the embedded `verifying_keys`, and unpack. Add the detached `SHA256SUMS.sig` check (`zipsign-api` / `ed25519-dalek`), the archive hash check, and a re-hash of the installed binary for status. Run the blocking calls in `spawn_blocking`.
   - Refuse to build an updater with an empty key set (self_update silently disables signature checks then; research §11), and use `checksum_from_asset("SHA256SUMS")` for the hash check.
   - Done when tests against a local HTTP server (the `self_update` base URL pointed at `httpmock`) cover success, an empty key set, a bad archive signature, a bad `SHA256SUMS` signature, a bad hash, a missing asset and an unsupported platform, each leaving nothing changed.
