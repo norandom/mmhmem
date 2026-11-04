@@ -74,4 +74,14 @@ if ($sumLines.Count -ne 9) {throw 'SHA256SUMS must list every staged asset'}
 foreach ($name in $staged) {
     if ($sumLines -cnotcontains ((Get-FileHash -LiteralPath (Join-Path $staging $name) -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$name)) {throw "SHA256SUMS missing $name"}
 }
+# Bootstraps are rendered from the staged (signed) archives and covered by SHA256SUMS.
+$staged=Add-CiBootstrapAssets 'v0.3.0' $staging $staged
+if ($staged.Count -ne 11 -or $staged -cnotcontains 'install.sh' -or $staged -cnotcontains 'install.ps1') {throw 'Bootstrap scripts were not staged'}
+$sumLines=@([IO.File]::ReadAllText((Write-ReleaseChecksums $staging $staged)).TrimEnd("`n") -split "`n")
+if ($sumLines.Count -ne 11) {throw 'SHA256SUMS must list the bootstrap scripts'}
+foreach ($name in @('install.sh','install.ps1')) {
+    if ($sumLines -cnotcontains ((Get-FileHash -LiteralPath (Join-Path $staging $name) -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$name)) {throw "SHA256SUMS missing $name"}
+}
+$winHash=(Get-FileHash -LiteralPath (Join-Path $staging 'mmhmem-v0.3.0-x86_64-pc-windows-msvc.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
+if (-not [IO.File]::ReadAllText((Join-Path $staging 'install.ps1')).Contains($winHash)) {throw 'install.ps1 does not embed the staged archive hash'}
 Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets and SHA256SUMS'

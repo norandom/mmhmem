@@ -8,6 +8,7 @@ param([string]$Tag,[string]$RunId)
 . (Join-Path $PSScriptRoot 'publish-linux-release.ps1') -Tag $Tag -RunId $RunId
 . (Join-Path $PSScriptRoot 'package-release-archives.ps1')
 . (Join-Path $PSScriptRoot 'sign-release-assets.ps1')
+. (Join-Path $PSScriptRoot 'render-bootstraps.ps1')
 
 function Assert-CiReleaseTag([string]$Value) {
     if ($Value -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {throw 'Only stable vMAJOR.MINOR.PATCH tags can be published'}
@@ -73,6 +74,15 @@ function Initialize-CiReleaseAssets([string]$ReleaseTag,[hashtable]$Native,[stri
     [Array]::Sort($names,[StringComparer]::Ordinal)
     return ,$names
 }
+# Render install.sh / install.ps1 into the staging directory from the signed
+# archives and return the extended, sorted asset-name list. Must run after
+# archive signing and before Write-ReleaseChecksums.
+function Add-CiBootstrapAssets([string]$ReleaseTag,[string]$Staging,[string[]]$Names) {
+    $scripts=Write-RenderedBootstraps $ReleaseTag $Staging $Staging
+    $all=[string[]]@(@($Names)+@($scripts) | Select-Object -Unique)
+    [Array]::Sort($all,[StringComparer]::Ordinal)
+    return ,$all
+}
 function Write-AttestationSubjects([string[]]$Paths) {
     if (-not $env:GITHUB_OUTPUT) {return}
     $list=($Paths | ForEach-Object {$_.Replace('\','/')}) -join "`n"
@@ -118,6 +128,8 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     # sign SHA256SUMS. All signing finishes before the remaining uploads.
     $signedArchives=@($staged | Where-Object {$_ -cmatch '\.(zip|tar\.gz)$'} | ForEach-Object {Join-Path $staging $_})
     Invoke-ReleaseSigning $signedArchives $signing
+    # The bootstraps embed the hashes of the final signed archives.
+    $staged=Add-CiBootstrapAssets $ReleaseTag $staging $staged
     $sumPath=Write-ReleaseChecksums $staging $staged
     $sigPath=Write-ReleaseChecksumSignature $staging $signing
     # Hand the final signed archives to the workflow's provenance attestation step.

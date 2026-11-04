@@ -128,7 +128,7 @@ released.
   - _Depends: 2.5, 3.2, 3.3, 3.4, 3.5, 4.1_
   - _Requirements: 3.5, 6.2, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 5. Publish verifiable releases
+- [x] 5. Publish verifiable releases
 - [x] 5.1 Archive assets per target
   - Change the release build to publish `mmhmem-<tag>-<target>.zip` for Windows and `.tar.gz` for Linux and macOS, plus the existing bare binaries for one transition release, and include all of them in `SHA256SUMS`.
   - Done when `publish-ci-release.ps1` tests show the asset set and that every asset is listed and re-verified after upload.
@@ -140,7 +140,7 @@ released.
   - Done when a dry-run publish produces archives and a `SHA256SUMS.sig` that the embedded keys verify, and a modified archive or `SHA256SUMS` fails verification in a test.
   - _Requirements: 2.4_
 
-- [ ] 5.3 Render the bootstraps per release
+- [x] 5.3 Render the bootstraps per release
   - Write `deploy/bootstrap/install.sh.tmpl` (POSIX sh) and `install.ps1.tmpl` (Windows PowerShell 5.1 compatible) as the design describes. Write `scripts/render-bootstraps.ps1` to fill in the tag, base URL and archive hashes, and publish both rendered scripts as release assets.
   - Done when shell tests (`sh`, `bash`, `dash`, PowerShell 5.1 and 7) show the scripts contain no agent logic, verify the hash, stop on a 404 or mismatch with plain messages and no changes, unpack with `tar` or `Expand-Archive`, start setup with `/dev/tty` on Unix, and clean up the temp folder.
   - _Depends: 5.1_

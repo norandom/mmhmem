@@ -1,0 +1,118 @@
+#!/bin/sh
+# mmhmem installer for Linux and macOS.
+#
+# Rendered for one release: the version and the SHA-256 of each download are
+# written into this file when the release is published. It downloads that
+# release's archive, checks it against the built-in SHA-256, unpacks it into a
+# temporary folder and starts the mmhmem setup program, which does all the
+# real work. It takes no options. Nothing outside the temporary folder is
+# touched here, and the temporary folder is always removed.
+#
+# Structure borrowed from rustup-init.sh: everything lives in functions and
+# main is called last, so "curl ... | sh" never runs a half-read script.
+
+TAG='@@TAG@@'
+BASE_URL='@@BASE_URL@@'
+SHA256_LINUX_X86_64='@@SHA256_LINUX@@'
+SHA256_MACOS_X86_64='@@SHA256_MACOS_X86_64@@'
+SHA256_MACOS_AARCH64='@@SHA256_MACOS_AARCH64@@'
+
+TMP_DIR=''
+
+say() { printf '%s\n' "$*"; }
+fail() {
+    printf '\n%s\n' "$*" >&2
+    printf '%s\n' "Nothing was installed or changed on this computer." >&2
+    exit 1
+}
+cleanup() {
+    if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
+}
+have() { command -v "$1" >/dev/null 2>&1; }
+
+detect_target() {
+    os=$(uname -s 2>/dev/null) || os=unknown
+    cpu=$(uname -m 2>/dev/null) || cpu=unknown
+    case "$os:$cpu" in
+        Linux:x86_64 | Linux:amd64)
+            TARGET=x86_64-unknown-linux-musl; WANT=$SHA256_LINUX_X86_64 ;;
+        Darwin:arm64 | Darwin:aarch64)
+            TARGET=aarch64-apple-darwin; WANT=$SHA256_MACOS_AARCH64 ;;
+        Darwin:x86_64)
+            # A shell running under Rosetta reports x86_64 on an Apple Silicon Mac.
+            if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+                TARGET=aarch64-apple-darwin; WANT=$SHA256_MACOS_AARCH64
+            else
+                TARGET=x86_64-apple-darwin; WANT=$SHA256_MACOS_X86_64
+            fi ;;
+        *)
+            fail "mmhmem does not have a download for $os on $cpu.
+It is available for Linux (x86_64), macOS (Intel and Apple Silicon) and 64-bit Windows." ;;
+    esac
+}
+
+download() { # url destination
+    if have curl; then
+        curl -fsSL --retry 2 -o "$2" "$1"
+    elif have wget; then
+        wget -q -O "$2" "$1"
+    else
+        fail "This installer needs either curl or wget, and neither was found."
+    fi
+}
+
+sha256_of() {
+    if have sha256sum; then
+        sha256sum "$1" | awk '{print $1}'
+    elif have shasum; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        fail "This installer needs sha256sum or shasum to check the download, and neither was found."
+    fi
+}
+
+main() {
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM HUP
+
+    detect_target
+    for tool in tar mktemp awk; do
+        have "$tool" || fail "This installer needs '$tool', which was not found."
+    done
+
+    archive="mmhmem-$TAG-$TARGET.tar.gz"
+    url="$BASE_URL/$archive"
+    TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mmhmem-install.XXXXXX") ||
+        fail "Could not create a temporary folder."
+
+    say "Installing mmhmem $TAG for $TARGET."
+    say "Downloading $url"
+    download "$url" "$TMP_DIR/$archive" ||
+        fail "The download failed: $url
+Check your internet connection. If it keeps failing, this release may not be published yet."
+
+    got=$(sha256_of "$TMP_DIR/$archive")
+    if [ "$got" != "$WANT" ]; then
+        fail "The downloaded file does not match the checksum built into this installer, so it was NOT used.
+  expected SHA-256: $WANT
+  actual SHA-256:   $got"
+    fi
+    say "Checked the download: SHA-256 matches."
+
+    tar -xzf "$TMP_DIR/$archive" -C "$TMP_DIR" 2>/dev/null && [ -f "$TMP_DIR/mmhmem" ] ||
+        fail "The downloaded file could not be unpacked."
+    chmod +x "$TMP_DIR/mmhmem"
+
+    say "Starting mmhmem setup..."
+    # With "curl | sh", stdin is this script, so ask the terminal directly.
+    if ( : </dev/tty ) 2>/dev/null; then
+        "$TMP_DIR/mmhmem" setup --bootstrap "$TAG" </dev/tty
+    else
+        "$TMP_DIR/mmhmem" setup --bootstrap "$TAG" </dev/null
+    fi
+    code=$?
+    exit "$code"
+}
+
+main
