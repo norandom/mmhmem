@@ -22,6 +22,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::setup::adopt::ScanEnv;
+use crate::setup::check::agent::{Clock, McpProbe, ServerProbe, SystemClock};
+use crate::setup::check::{McpCheck, Registration};
 use crate::setup::record::Os;
 
 /// The default time an agent CLI call may take (design.md §6 uses 20 s).
@@ -47,6 +49,9 @@ pub struct Invocation {
     pub envs: Vec<(String, String)>,
     /// The time limit; the program is killed after it.
     pub timeout: Duration,
+    /// Bytes written to the program's standard input, which is then closed
+    /// (`None`: no input). Never a secret, for the same reason as `envs`.
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl Invocation {
@@ -59,7 +64,14 @@ impl Invocation {
             cwd: None,
             envs: Vec::new(),
             timeout: DEFAULT_TIMEOUT,
+            stdin: None,
         }
+    }
+
+    /// Writes `bytes` to the program's standard input (never a secret).
+    pub fn stdin(mut self, bytes: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(bytes.into());
+        self
     }
 
     /// Adds one argument.
@@ -174,7 +186,8 @@ pub trait CommandRunner: Send + Sync {
     fn run(&self, invocation: &Invocation) -> Result<CommandOutput, RunError>;
 }
 
-/// The real runner: `std::process` with a time limit, no stdin, both output
+/// The real runner: `std::process` with a time limit, the invocation's
+/// stdin (or none), both output
 /// streams captured (at most [`MAX_OUTPUT`] bytes each) and never logged.
 /// The program inherits this process's environment, as the agent CLI needs
 /// it to find its own configuration.
@@ -187,7 +200,11 @@ impl CommandRunner for SystemRunner {
         let mut command = std::process::Command::new(&invocation.program);
         command
             .args(&invocation.args)
-            .stdin(Stdio::null())
+            .stdin(if invocation.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(dir) = &invocation.cwd {
@@ -204,6 +221,7 @@ impl CommandRunner for SystemRunner {
             },
         })?;
         let deadline = Instant::now() + invocation.timeout;
+        feed(child.stdin.take(), invocation.stdin.clone());
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let status = wait_until(&mut child, deadline).map_err(|e| RunError::Failed {
@@ -221,6 +239,17 @@ impl CommandRunner for SystemRunner {
             stdout: collect(&stdout, deadline),
             stderr: collect(&stderr, deadline),
         })
+    }
+}
+
+/// Writes `bytes` to the program's stdin on its own thread and closes it,
+/// so a program that does not read never blocks the runner.
+fn feed(pipe: Option<std::process::ChildStdin>, bytes: Option<Vec<u8>>) {
+    if let (Some(mut pipe), Some(bytes)) = (pipe, bytes) {
+        thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(&bytes);
+        });
     }
 }
 
@@ -271,6 +300,9 @@ pub struct Env {
     /// Home, OS, `PATH` and the per-agent folder overrides.
     pub dirs: ScanEnv,
     runner: Arc<dyn CommandRunner>,
+    mcp: Arc<dyn McpProbe>,
+    clock: Arc<dyn Clock>,
+    worker: Option<bool>,
 }
 
 impl fmt::Debug for Env {
@@ -282,9 +314,53 @@ impl fmt::Debug for Env {
 }
 
 impl Env {
-    /// An environment over `dirs` whose agent CLIs run through `runner`.
+    /// An environment over `dirs` whose agent CLIs run through `runner`;
+    /// the MCP check starts the real server ([`ServerProbe`]) and waiting
+    /// uses the system clock.
     pub fn new(dirs: ScanEnv, runner: Arc<dyn CommandRunner>) -> Self {
-        Self { dirs, runner }
+        Self {
+            dirs,
+            runner,
+            mcp: Arc::new(ServerProbe),
+            clock: Arc::new(SystemClock),
+            worker: None,
+        }
+    }
+
+    /// The same environment with a fixed answer to "is a worker model set
+    /// up?" (tests), instead of the hook's own config lookup.
+    pub fn with_worker_configured(mut self, configured: bool) -> Self {
+        self.worker = Some(configured);
+        self
+    }
+
+    /// Whether a worker model is set up, decided exactly as `mmhmem hook`
+    /// decides it ([`crate::cli::hook::worker_configured`]).
+    pub fn worker_configured(&self) -> bool {
+        self.worker
+            .unwrap_or_else(crate::cli::hook::worker_configured)
+    }
+
+    /// The same environment with another MCP check (tests).
+    pub fn with_mcp_probe(mut self, probe: Arc<dyn McpProbe>) -> Self {
+        self.mcp = probe;
+        self
+    }
+
+    /// The same environment with another clock (tests: no real waiting).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Runs the MCP functional check on `registration`.
+    pub fn probe_mcp(&self, registration: &Registration) -> McpCheck {
+        self.mcp.probe(registration)
+    }
+
+    /// The clock agent checks wait with.
+    pub fn clock(&self) -> &dyn Clock {
+        self.clock.as_ref()
     }
 
     /// The real environment of this process with the [`SystemRunner`].

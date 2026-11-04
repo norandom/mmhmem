@@ -17,7 +17,8 @@
 //!
 //! A hook that Codex does not know yet is skipped until the user approves it
 //! in `/hooks`: [`Codex::pending_steps`] names that step. `codex mcp list
-//! --json` prints env values unmasked, so it is never run here.
+//! --json` prints env values unmasked, so only the check (`codex_check.rs`)
+//! runs it, parsing it in memory.
 //!
 //! **Removal** takes out only what the record lists. Only `command` and
 //! `args` leave mmhmem's table; keys the user added stay byte-identical, and
@@ -29,9 +30,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentId, AgentProblem, AgentRecord, Detection, Env, Feature, FileChain, Invocation,
-    PendingUserStep, Selection,
+    Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
+    Invocation, PendingUserStep, Selection,
 };
+
+#[path = "codex_check.rs"]
+mod verify;
 use crate::setup::assets::{self, Asset};
 use crate::setup::edit::json::{self as ejson, JsonEditError};
 use crate::setup::edit::toml::{self as etoml, McpServerEntry, TomlEditError};
@@ -455,6 +459,10 @@ impl Agent for Codex {
             Self::plan_removals(&p, &mut chain, want, rec)?;
         }
         Ok(chain.into_changes())
+    }
+
+    fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
+        verify::check(self, env, rec)
     }
 
     fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {

@@ -115,6 +115,14 @@ fn settings_from(config: &Config) -> HookSettings {
     }
 }
 
+/// Whether a worker model is set up, read from the same configuration and
+/// with the same rule `respond` uses (the installer's hook check asks this,
+/// since without a worker the hook lets every read through). A configuration
+/// that cannot load counts as none, as it does for the hook.
+pub fn worker_configured() -> bool {
+    Config::load_local().is_ok_and(|config| settings_from(&config).worker_configured)
+}
+
 /// `decide`, then the repeat window for a redirect (Req 2.5): a repeat
 /// passes; otherwise the redirect is remembered (errors ignored).
 fn decide_call(

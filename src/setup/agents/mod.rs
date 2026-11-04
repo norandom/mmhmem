@@ -6,7 +6,8 @@
 //! Each agent module (tasks 3.2–3.5) implements [`Agent`]: it detects the
 //! agent, plans its changes as whole-file bytes (chained per file with
 //! [`FileChain`]), plans their removal from the install record and, from
-//! task 4.2, checks that the agent really sees mmhmem. Submodules:
+//! task 4.2, checks that the agent really sees mmhmem (the shared steps are
+//! in `setup::check::agent`). Submodules:
 //!
 //! - `env.rs`: [`Env`] (folders, `PATH`, OS) and the injectable
 //!   [`CommandRunner`] for agent CLIs, with the real [`SystemRunner`].
@@ -45,6 +46,10 @@ pub use env::{
 };
 pub use problem::{AgentProblem, FileChain, read_optional};
 
+#[cfg(test)]
+mod check_more_tests;
+#[cfg(test)]
+pub(crate) mod check_tests;
 #[cfg(test)]
 pub(crate) mod doubles;
 #[cfg(test)]
@@ -199,8 +204,14 @@ pub struct CheckReport {
     pub result: CheckResult,
     /// Per-step outcomes.
     pub details: Vec<CheckDetail>,
-    /// The result line, e.g. `✔ Codex — mmhmem connected, 9 tools`.
+    /// The result line, e.g. `✔ Codex — mmhmem connected, 10 tools`.
     pub line: String,
+    /// One `● Codex — <step>` line per step only the user can do (only
+    /// when everything else passed).
+    pub pending: Vec<String>,
+    /// Plain notes that are neither a failure nor a user step to do now,
+    /// e.g. a read hook that stays inactive without a worker model.
+    pub notes: Vec<String>,
 }
 
 /// The reason shown while an agent's check is not implemented (task 4.2).
@@ -215,7 +226,17 @@ impl CheckReport {
             result: CheckResult::Fail,
             details: Vec::new(),
             line: format!("✘ {} — {CHECK_NOT_IMPLEMENTED}", agent.label()),
+            pending: Vec::new(),
+            notes: Vec::new(),
         }
+    }
+
+    /// The result line followed by the pending-step and note lines.
+    pub fn lines(&self) -> Vec<String> {
+        std::iter::once(self.line.clone())
+            .chain(self.pending.iter().cloned())
+            .chain(self.notes.iter().cloned())
+            .collect()
     }
 
     /// The record's `last_check` for this report.

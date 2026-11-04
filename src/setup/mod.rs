@@ -13,3 +13,4 @@ pub mod fsx;
 pub mod plan;
 pub mod record;
 pub mod release_keys;
+pub mod verify;

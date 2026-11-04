@@ -114,14 +114,14 @@ released.
   - _Depends: 1.1, 2.2, 2.5, 3.1_
   - _Requirements: 3.1, 3.4, 7.3_
 
-- [ ] 4. Prove each agent works
+- [x] 4. Prove each agent works
 - [x] 4.1 MCP functional check
   - Implement `src/setup/check.rs`: read back the registration as the agent will use it, start that exact command with the `rmcp` child-process client with a 20 s timeout, and run `initialize`, `tools/list` against the release's expected tools, and the tool chosen in 1.2.
   - Done when tests pass against the real binary and fail with plain reasons for a wrong path, a server that exits, a timeout and a missing tool.
   - _Depends: 1.2, 3.1_
   - _Requirements: 6.1, 6.5_
 
-- [ ] 4.2 Agent checks, hook sample and rollback on failure
+- [x] 4.2 Agent checks, hook sample and rollback on failure
   - Per agent, run its list/get command and parse the confirmed output, validate that the agent still loads its config, and run the hook sample when the hook is selected.
   - Wire a failed check to per-agent rollback, and store `last_check` and pending user steps in the record.
   - Done when tests with the CLI doubles cover pass, not connected, invalid config after write (rolled back) and hook mismatch, and the result lines match the design's wording.

@@ -1,17 +1,85 @@
 //! Test doubles for agent modules (reliable-installers task 3.1): a
 //! [`TestHome`] over a temporary folder and a [`FakeRunner`] that replays
 //! scripted CLI answers and records every call. The per-CLI scripts are in
-//! `doubles_cli.rs`. Nothing here reads the real user folders or starts a
-//! real agent.
+//! `doubles_cli.rs`. A [`FakeProbe`] stands in for the MCP check and a
+//! [`FakeClock`] for waiting. Nothing here reads the real user folders or
+//! starts a real agent or server.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
 use super::{CommandOutput, CommandRunner, Env, Invocation, RunError, ScanEnv};
+use crate::setup::check::agent::{Clock, McpProbe};
+use crate::setup::check::{CheckFailure, EXPECTED_TOOLS, McpCheck, Registration};
 use crate::setup::record::Os;
+
+/// The MCP check without a server: passes with this release's tools unless
+/// told to fail, and records every registration it was given.
+#[derive(Default)]
+pub(crate) struct FakeProbe {
+    failure: Mutex<Option<CheckFailure>>,
+    seen: Mutex<Vec<Registration>>,
+}
+
+impl FakeProbe {
+    /// Every later probe fails with `failure` (`None`: passes again).
+    pub(crate) fn fail_with(&self, failure: Option<CheckFailure>) {
+        *self.failure.lock().expect("probe lock") = failure;
+    }
+
+    /// The registrations probed so far, in order.
+    pub(crate) fn seen(&self) -> Vec<Registration> {
+        self.seen.lock().expect("probe lock").clone()
+    }
+}
+
+impl McpProbe for FakeProbe {
+    fn probe(&self, registration: &Registration) -> McpCheck {
+        self.seen
+            .lock()
+            .expect("probe lock")
+            .push(registration.clone());
+        let failure = self.failure.lock().expect("probe lock").clone();
+        let program = registration.program.to_string_lossy();
+        McpCheck::fake(&program, failure, &EXPECTED_TOOLS)
+    }
+}
+
+/// A clock that only moves when slept on.
+pub(crate) struct FakeClock {
+    start: Instant,
+    slept: Mutex<Duration>,
+}
+
+impl Default for FakeClock {
+    fn default() -> Self {
+        Self {
+            start: Instant::now(),
+            slept: Mutex::new(Duration::ZERO),
+        }
+    }
+}
+
+impl FakeClock {
+    /// The total time slept.
+    pub(crate) fn slept(&self) -> Duration {
+        *self.slept.lock().expect("clock lock")
+    }
+}
+
+impl Clock for FakeClock {
+    fn now(&self) -> Instant {
+        self.start + self.slept()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        *self.slept.lock().expect("clock lock") += duration;
+    }
+}
 
 /// A side effect of a scripted call (the file a real CLI writes).
 pub(crate) type Effect = Arc<dyn Fn(&Invocation) + Send + Sync>;
@@ -154,6 +222,10 @@ pub(crate) struct TestHome {
     pub(crate) env: Env,
     /// The runner inside `env`, for scripting and inspecting calls.
     pub(crate) runner: Arc<FakeRunner>,
+    /// The MCP check inside `env`.
+    pub(crate) probe: Arc<FakeProbe>,
+    /// The clock inside `env`.
+    pub(crate) clock: Arc<FakeClock>,
 }
 
 impl TestHome {
@@ -171,8 +243,19 @@ impl TestHome {
         }
         dirs.user_path = Some(vec![bin]);
         let runner = Arc::new(FakeRunner::new());
-        let env = Env::new(dirs, runner.clone());
-        Self { dir, env, runner }
+        let probe = Arc::new(FakeProbe::default());
+        let clock = Arc::new(FakeClock::default());
+        let env = Env::new(dirs, runner.clone())
+            .with_mcp_probe(probe.clone())
+            .with_clock(clock.clone())
+            .with_worker_configured(true);
+        Self {
+            dir,
+            env,
+            runner,
+            probe,
+            clock,
+        }
     }
 
     /// The home folder.

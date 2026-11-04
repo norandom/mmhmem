@@ -39,8 +39,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentId, AgentProblem, AgentRecord, Detection, Env, Feature, FileChain, Invocation,
-    Selection,
+    Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
+    Invocation, Selection,
 };
 use crate::setup::assets::{CLAUDE_RECAP_COMMAND, ROUTING_INSTRUCTIONS, UNIFIED_MEMORY_SKILL};
 use crate::setup::edit::json::{self as edit_json, JsonEditError};
@@ -53,6 +53,8 @@ use crate::setup::record::{
 
 #[path = "claude_code_remove.rs"]
 mod remove;
+#[path = "claude_code_check.rs"]
+mod verify;
 use remove::removal;
 
 /// The features in menu order.
@@ -386,6 +388,10 @@ impl Agent for ClaudeCode {
             }
         }
         Ok(chain.into_changes())
+    }
+
+    fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
+        verify::check(self, env, rec)
     }
 
     fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {

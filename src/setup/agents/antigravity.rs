@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentId, AgentProblem, AgentRecord, Detection, Env, Feature, PendingUserStep, Selection,
+    Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature,
+    PendingUserStep, Selection,
 };
+use crate::setup::check::Registration;
+use crate::setup::check::agent::Steps;
 use crate::setup::plan::Change;
 
 /// What the user does to take mmhmem out again.
@@ -97,6 +100,14 @@ impl Agent for Antigravity {
         _rec: Option<&AgentRecord>,
     ) -> Result<Vec<Change>, AgentProblem> {
         Ok(Vec::new())
+    }
+
+    /// Antigravity has no CLI or config file mmhmem edits: the check starts
+    /// exactly the snippet the user imports; the import stays pending.
+    fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
+        let snippet = self.snippet();
+        let registration = Registration::from_claude_json(snippet.as_bytes(), "mmhmem");
+        Steps::start(env, AgentId::Antigravity, registration).finish(rec)
     }
 
     fn plan_remove(&self, _env: &Env, _rec: &AgentRecord) -> Vec<Change> {

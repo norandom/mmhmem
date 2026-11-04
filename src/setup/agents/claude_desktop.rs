@@ -30,10 +30,12 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::{
-    Agent, AgentId, AgentProblem, AgentRecord, Detection, Env, Feature, FileChain, PendingUserStep,
-    ScanEnv, Selection,
+    Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
+    PendingUserStep, ScanEnv, Selection,
 };
 use crate::setup::assets::UNIFIED_MEMORY_SKILL;
+use crate::setup::check::agent::{Steps, read_registration};
+use crate::setup::check::{Registration, RegistrationError};
 use crate::setup::edit::json as edit;
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{KeySegment, ManagedEntry, Os, Scope, Target, key_path};
@@ -373,6 +375,21 @@ impl Agent for ClaudeDesktop {
             }
         }
         Ok(chain.into_changes())
+    }
+
+    /// The functional check only (Desktop has no CLI): the registration is
+    /// read from the recorded profile's `claude_desktop_config.json` and
+    /// started; the restart stays a pending user step.
+    fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
+        let registration = self
+            .resolve(env, Some(rec))
+            .map_err(|_| RegistrationError::Missing)
+            .and_then(|profile| {
+                read_registration(&profile.config(), |bytes| {
+                    Registration::from_claude_json(bytes, "mmhmem")
+                })
+            });
+        Steps::start(env, AgentId::ClaudeDesktop, registration).finish(rec)
     }
 
     fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {

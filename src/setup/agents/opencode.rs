@@ -16,7 +16,7 @@
 //!   format of the old `manage_routing.py`) and the optional read-routing
 //!   plugin (never touched when it lacks mmhmem's header line).
 //!
-//! `check` stays the trait default (task 4.2).
+//! `check` is in `opencode_check.rs` (task 4.2).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -24,9 +24,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentId, AgentProblem, AgentRecord, Detection, Env, Feature, FileChain, Invocation,
-    Selection,
+    Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
+    Invocation, Selection,
 };
+
+#[path = "opencode_check.rs"]
+mod verify;
 use crate::setup::assets;
 use crate::setup::edit::json as jedit;
 use crate::setup::edit::markdown::{self, routing};
@@ -426,6 +429,10 @@ impl Agent for OpenCode {
             }
         }
         Ok(p.chain.into_changes())
+    }
+
+    fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
+        verify::check(self, env, rec)
     }
 
     fn plan_remove(&self, env: &Env, rec: &AgentRecord) -> Vec<Change> {

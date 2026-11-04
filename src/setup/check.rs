@@ -18,7 +18,10 @@
 //! for a log only; it is never part of `Display` or `Debug`.
 //!
 //! Submodules: `check_registration.rs` ([`Registration`] and its readers),
-//! `check_session.rs` (the async client session), `check_text.rs` (wording).
+//! `check_session.rs` (the async client session), `check_text.rs` (every
+//! sentence of the check, MCP and agent steps), `check_agent.rs` ([`agent`]:
+//! the steps every agent check shares, task 4.2) and `check_hook.rs` (the
+//! read-hook sample).
 
 use std::fmt;
 use std::io::ErrorKind;
@@ -28,6 +31,10 @@ use std::time::Duration;
 use crate::setup::agents::AgentId;
 use crate::setup::record::{CheckDetail, CheckResult, CheckStep, StepOutcome};
 
+#[path = "check_agent.rs"]
+pub mod agent;
+#[path = "check_hook.rs"]
+mod hook;
 #[path = "check_registration.rs"]
 mod registration;
 #[path = "check_session.rs"]
@@ -218,6 +225,15 @@ impl McpCheck {
             program,
             diagnostics: String::new(),
         }
+    }
+
+    /// A result as the probe would give it, for tests of agent checks that
+    /// do not start a server.
+    #[cfg(test)]
+    pub(crate) fn fake(program: &str, failure: Option<CheckFailure>, tools: &[&str]) -> Self {
+        let mut check = Self::new(PathBuf::from(program), failure);
+        check.tools = tools.iter().map(|t| (*t).to_owned()).collect();
+        check
     }
 
     /// Every step passed.
