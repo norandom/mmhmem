@@ -73,6 +73,7 @@ there is no store migration or new service configuration.
 | `shunt_warmup` | Prepare summaries in a batch |
 | `shunt_prune` | Remove stale cache entries |
 | `mem_search_breadcrumbs` | Search project action history |
+| `status` | Report version and store health (used by the installer's check) |
 
 ## State and audit
 

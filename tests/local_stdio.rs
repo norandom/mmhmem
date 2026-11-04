@@ -173,7 +173,7 @@ fn write_lines_file(path: &Path, lines: usize, marker: &str) {
 }
 
 #[tokio::test]
-async fn stdio_handshake_lists_all_nine_tools() {
+async fn stdio_handshake_lists_all_ten_tools() {
     let data = tempfile::tempdir().unwrap();
     let mut mcp = StdioMcp::new(data.path()).await;
     mcp.handshake().await;
@@ -196,6 +196,7 @@ async fn stdio_handshake_lists_all_nine_tools() {
         "shunt_warmup",
         "shunt_prune",
         "mem_search_breadcrumbs",
+        "status",
     ] {
         assert!(
             names.contains(&expected),
@@ -204,8 +205,8 @@ async fn stdio_handshake_lists_all_nine_tools() {
     }
     assert_eq!(
         names.len(),
-        9,
-        "exactly nine tools (corpus-warmup-prune Req 5.3)"
+        10,
+        "exactly ten tools (corpus-warmup-prune Req 5.3, reliable-installers Req 6.1)"
     );
 
     let (ok, _stderr) = mcp.shutdown().await;
@@ -294,7 +295,7 @@ async fn stdio_survives_malformed_input_lines() {
         "valid request after garbage must be answered: {list}"
     );
     let names = list["result"]["tools"].as_array().unwrap().len();
-    assert_eq!(names, 9, "all nine tools still listed after garbage");
+    assert_eq!(names, 10, "all ten tools still listed after garbage");
 
     let (ok, _stderr) = mcp.shutdown().await;
     assert!(ok);
@@ -434,4 +435,95 @@ async fn failed_checkpoint_over_stdio_has_no_receipt_and_preserves_state() {
     );
     assert!(text.contains("No worker model configured"));
     assert!(mcp.shutdown().await.0);
+}
+
+/// Row counts of every store table the installer check must never touch.
+fn store_counts(db: &Path) -> Vec<(String, i64)> {
+    let conn = rusqlite::Connection::open(db).unwrap();
+    [
+        "active_sessions",
+        "session_breadcrumbs",
+        "observations",
+        "shunt_file_cache",
+        "token_stats",
+    ]
+    .iter()
+    .map(|t| {
+        let n: i64 = conn
+            .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
+            .unwrap();
+        (t.to_string(), n)
+    })
+    .collect()
+}
+
+/// Lines of every audit file under `dir` (the local profile picks the path).
+fn audit_lines(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            out.extend(audit_lines(&p));
+        } else if p
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("audit"))
+        {
+            out.extend(
+                std::fs::read_to_string(&p)
+                    .unwrap()
+                    .lines()
+                    .map(String::from),
+            );
+        }
+    }
+    out
+}
+
+/// reliable-installers Req 6.1: the installer's check call changes no store
+/// row, still writes exactly one STATUS_CHECK audit record, and reports ok.
+#[tokio::test]
+async fn status_tool_changes_no_store_rows_and_audits_once() {
+    let data = tempfile::tempdir().unwrap();
+    let mut mcp = StdioMcp::new(data.path()).await;
+    mcp.handshake().await;
+    // Seed a session and breadcrumbs so "unchanged" is not trivially zero.
+    mcp.request(
+        "tools/call",
+        json!({"name": "session_resume_or_handoff", "arguments": {
+            "project": "p", "agent_harness": "codex",
+            "updated_working_state_md": "seed", "active_objective": "seed"
+        }}),
+    )
+    .await;
+    let db = data.path().join("memory.db");
+    let before = store_counts(&db);
+    let audit_before = audit_lines(data.path()).len();
+
+    let res = mcp
+        .request(
+            "tools/call",
+            json!({"name": "status", "arguments": {
+                "project": "mmhmem-install-check", "agent_harness": "mmhmem-setup"
+            }}),
+        )
+        .await;
+    assert!(res.get("error").is_none(), "status must not error: {res}");
+    let text = res["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("store ok"),
+        "unexpected status answer: {text}"
+    );
+    assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+
+    let (ok, _stderr) = mcp.shutdown().await;
+    assert!(ok);
+    assert_eq!(
+        store_counts(&db),
+        before,
+        "status must not change any store row"
+    );
+    let audit = audit_lines(data.path());
+    let new: Vec<&String> = audit[audit_before..].iter().collect();
+    assert_eq!(new.len(), 1, "exactly one new audit record: {new:?}");
+    assert!(new[0].contains("\"STATUS_CHECK\""), "{}", new[0]);
 }

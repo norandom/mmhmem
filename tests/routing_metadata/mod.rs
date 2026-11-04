@@ -1,8 +1,12 @@
 pub fn assert_metadata(tools: &serde_json::Value) {
     let tools = tools.as_array().expect("tools array");
-    assert_eq!(tools.len(), 9);
+    assert_eq!(tools.len(), 10);
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
+        if name == "status" {
+            assert_status_metadata(tool);
+            continue;
+        }
         let destructive = matches!(
             name,
             "session_resume_or_handoff"
@@ -32,4 +36,14 @@ pub fn assert_metadata(tools: &serde_json::Value) {
     ] {
         assert!(read.contains(phrase), "missing {phrase}");
     }
+}
+
+/// Installer health check (reliable-installers Req 6.1): read-only hints.
+fn assert_status_metadata(tool: &serde_json::Value) {
+    assert_eq!(tool["annotations"]["readOnlyHint"], true);
+    assert_eq!(tool["annotations"]["destructiveHint"], false);
+    assert_eq!(tool["annotations"]["idempotentHint"], true);
+    assert_eq!(tool["annotations"]["openWorldHint"], false);
+    assert!(tool["inputSchema"]["properties"]["project"].is_object());
+    assert!(tool["inputSchema"]["properties"]["agent_harness"].is_object());
 }

@@ -104,11 +104,12 @@ pub enum AuditEventType {
     MemSearchBreadcrumbs,
     HookRedirect,
     HookPass,
+    StatusCheck,
 }
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 20] = [
+    pub const ALL: [AuditEventType; 21] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -129,11 +130,12 @@ impl AuditEventType {
         AuditEventType::MemSearchBreadcrumbs,
         AuditEventType::HookRedirect,
         AuditEventType::HookPass,
+        AuditEventType::StatusCheck,
     ];
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 20] = [
+        const NAMES: [&str; 21] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -154,6 +156,7 @@ impl AuditEventType {
             "MEM_SEARCH_BREADCRUMBS",
             "HOOK_REDIRECT",
             "HOOK_PASS",
+            "STATUS_CHECK",
         ];
         NAMES[self as usize]
     }
@@ -364,6 +367,7 @@ mod tests {
         assert_eq!(AuditEventType::HookPass.as_str(), "HOOK_PASS");
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookRedirect));
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookPass));
-        assert_eq!(AuditEventType::ALL.len(), 20);
+        assert_eq!(AuditEventType::ALL.len(), 21);
+        assert_eq!(AuditEventType::StatusCheck.as_str(), "STATUS_CHECK");
     }
 }

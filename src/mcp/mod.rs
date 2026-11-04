@@ -12,5 +12,6 @@ pub mod stdio;
 pub mod tools;
 
 mod session_response;
+mod tool_support;
 
 mod instructions;

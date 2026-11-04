@@ -3,15 +3,13 @@
 //! services, format markdown, map errors to actionable MCP tool errors, and
 //! wrap each call in a telemetry span. All policy lives in services/storage.
 
-use std::time::Instant;
-
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, ErrorData, InitializeResult, ToolsCapability};
+use rmcp::model::{CallToolResult, ErrorData, InitializeResult, ToolsCapability};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 use super::params::{
     BoilerplateParams, BreadcrumbSearchParams, MemGetParams, MemRecordParams, MemSearchParams,
-    PruneParams, ResumeParams, SmartReadParams, WarmupParams,
+    PruneParams, ResumeParams, SmartReadParams, StatusParams, WarmupParams,
 };
 use super::server::McpServer;
 
@@ -42,37 +40,7 @@ use crate::services::shunt::ReadOutcome;
 use crate::services::shunt_types::{CallCtx, ReadRequest as ShuntReadRequest};
 use crate::services::warmup::{render_report as render_warmup, run_warmup};
 
-/// Success result with one text content block.
-fn ok_text(md: String) -> Result<CallToolResult, ErrorData> {
-    Ok(CallToolResult::success(vec![ContentBlock::text(md)]))
-}
-
-/// Actionable MCP tool error from any service error.
-fn err<E: std::fmt::Display>(e: E) -> ErrorData {
-    ErrorData::internal_error(e.to_string(), None)
-}
-
-/// Runs `f` under a telemetry span named after the tool.
-async fn with_span<F, Fut, T>(
-    state: &super::server::AppState,
-    tool: &str,
-    harness: &str,
-    project: &str,
-    f: F,
-) -> Result<T, ErrorData>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<T, ErrorData>>,
-{
-    let span = state.telemetry.start_tool_span(tool, harness, project);
-    let t0 = Instant::now();
-    let result = f().await;
-    span.finish(
-        if result.is_ok() { "ok" } else { "error" },
-        t0.elapsed().as_millis() as u64,
-    );
-    result
-}
+use super::tool_support::{err, ok_text, with_span};
 
 #[tool_router]
 impl McpServer {
@@ -393,6 +361,27 @@ impl McpServer {
                 }
             },
         )
+        .await
+    }
+
+    #[tool(
+        description = "Report the server version and whether the memory store is usable. For install and health checks only; it does not resume a session or read memory. Writes one audit record, no breadcrumbs.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn status(
+        &self,
+        Parameters(p): Parameters<StatusParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let state = self.state.clone();
+        with_span(&state, "status", &p.agent_harness, &p.project, || async {
+            let report = state.services.status.check(&p.agent_harness, &p.project);
+            ok_text(report.await.map_err(err)?.render())
+        })
         .await
     }
 

@@ -34,6 +34,7 @@ use crate::services::prune::PruneService;
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt::ShuntEngine;
 use crate::services::stats::{OtelSink, StatsCollector};
+use crate::services::status::StatusService;
 use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter};
 use crate::storage::db::Db;
@@ -57,6 +58,8 @@ pub struct Services {
     pub breadcrumbs: BreadcrumbService,
     /// Stale-cache pruning (corpus-warmup-prune Req 3, 4).
     pub prune: PruneService,
+    /// Read-only health check for the installer (reliable-installers Req 6.1).
+    pub status: StatusService,
 }
 
 /// Shared application state handed to the MCP service factory and middleware.
@@ -92,6 +95,7 @@ impl AppState {
         let worker_configured = worker.is_some();
         let breadcrumbs = BreadcrumbService::new(db.clone(), audit.clone(), Some(bus.clone()));
         let prune = PruneService::new(db.clone(), audit.clone());
+        let status = StatusService::new(db.clone(), audit.clone());
         let shunt = ShuntEngine::new(
             db.clone(),
             audit.clone(),
@@ -119,6 +123,7 @@ impl AppState {
                 boilerplate,
                 breadcrumbs,
                 prune,
+                status,
             },
         })
     }

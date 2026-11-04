@@ -191,3 +191,12 @@ pub struct BreadcrumbSearchParams {
     #[serde(default = "default_limit")]
     pub limit: u16,
 }
+
+/// `status` arguments (reliable-installers Req 6.1).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct StatusParams {
+    /// Project name.
+    pub project: String,
+    /// Calling harness.
+    pub agent_harness: String,
+}
