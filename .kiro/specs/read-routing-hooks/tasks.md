@@ -91,7 +91,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Depends: 2.2, 3.3_
   - _Requirements: 4.4, 4.5, 4.8, 6.2_
 
-- [ ] 4.2 Route OpenCode reads through a v2 plugin
+- [x] 4.2 Route OpenCode reads through a v2 plugin
   - First prove with the installed OpenCode 2.2.5 that a v2 plugin can spawn a process and block a call with a message; stop and return to design if it cannot.
   - Then ship the plugin that forwards read and shell events to the hook command with a short time limit, throws only on a deny answer and catches every other failure, and let both helpers install and remove it.
   - Done when the live check records a redirected read, a passed ranged read, and a call that proceeds when the binary is missing.
@@ -106,6 +106,7 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
 
 - [ ] 5.2 Record the measured effect
+  - _Blocked: The available local audit does not identify paired normal working sessions before and after hook enablement for each harness. Fixture routing evidence is recorded separately; effect remains NOT_VERIFIED (2026-11-04)._
   - Requires working sessions by the user with each enabled harness, before and after enabling the hook.
   - Compare adoption counts, redirects followed by `smart_read`, repeat-read pass-throughs and estimated tokens avoided, and apply the NOT_VERIFIED rule.
   - Done when the validation report holds the comparison for every enabled harness.
@@ -113,6 +114,9 @@ must pass the project pre-commit gate (fmt, size caps, clippy default and `otel`
   - _Requirements: 7.1, 7.2, 7.3_
 
 ## Implementation Notes
+
+- Task 4.1 (independent code review approved): quoted/dotted TOML policy keys must be canonicalised or refused conservatively; both helpers now test refusal without changing existing hook bytes. Live routing passed with the invocation-only trust bypass; user-owned `/hooks` approval and update-trust persistence remain pending.
+- Task 4.2 (independent review approved): installed OpenCode 2.2.5 v2 plugins can spawn `node:child_process` helpers and block via a thrown message. Keep the deny throw outside the transport catch, pass the project cwd, and bound runtime/output. Both bootstrap bundles must fetch the plugin template; Linux-consumed artifacts must remain LF. Live redirect, ranged read and missing-binary full read passed.
 
 - Task 1.1 (Sonnet, inline review): `src/services/shunt.rs` is at 489 of 500 lines, so later work must not grow it. `tests/audit_redaction.rs` pins the event-type count (now 20).
 - Task 1.2 (Opus, Opus reviewer APPROVED): line count matches the server's `str::lines`; `Redirect.lines` is capped at the threshold and means "at least N" (redirect text must say so). Parent applied the reviewer's suggestion: invalid UTF-8 in the 8 KiB probe now passes as NotText, because `smart_read` reads with `read_to_string`. Open suggestions: a byte cap for huge files with few newlines, and a test pinning early stop.

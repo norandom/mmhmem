@@ -7,7 +7,7 @@
 # mmhmem's own entry stays as it was and removal undoes an install byte for byte.
 param(
     [Parameter(Position = 0, Mandatory = $true)][ValidateSet('show', 'install', 'remove', 'status')][string]$Command,
-    [ValidateSet('claude', 'codex')][string]$Harness = 'claude',
+    [ValidateSet('claude', 'codex', 'opencode')][string]$Harness = 'claude',
     [string]$Binary,
     [string]$SettingsPath,
     [string]$ManagedSettingsPath,
@@ -471,6 +471,60 @@ function Get-ManagedBlocks($Def, [string]$ManagedPath, [bool]$UseRegistry) {
     }
     return , $blocks
 }
+
+function Invoke-OpenCodeHook {
+    $configRoot = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+    $configDir = Join-Path $configRoot 'opencode'
+    $plugin = if ($SettingsPath) { [IO.Path]::GetFullPath($SettingsPath) } else { Join-Path $configDir 'plugins/mmhmem-read-routing.js' }
+    if ([IO.Path]::GetFileName($plugin) -cne 'mmhmem-read-routing.js' -or $plugin -match '[\\/]\.opencode[\\/]') { Stop-Helper 'OpenCode target must be the user mmhmem-read-routing.js file' }
+    Assert-PlainPath $plugin
+    foreach ($path in @($plugin, ($plugin + '.mmhmem.bak'))) {
+        $item = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Stop-Helper "Linked plugin path refused: $path" }
+    }
+    $old = if (Test-Path -LiteralPath $plugin) { [IO.File]::ReadAllText($plugin) } else { $null }
+    if ($null -ne $old -and -not $old.StartsWith('// mmhmem read-routing bridge:')) { Stop-Helper 'Unmanaged same-named OpenCode plugin; nothing changed' }
+    if ($Command -eq 'remove') {
+        if ($null -ne $old -and -not $DryRun) { Remove-Item -LiteralPath $plugin -Force }
+        Write-Line "[mmhmem] remove OpenCode plugin $plugin (dry-run=$DryRun)"
+        return
+    }
+    if ($Command -eq 'status') { Write-Line "opencode: installed=$($null -ne $old) ($plugin)"; return }
+    if (-not [IO.Path]::IsPathRooted($Binary) -or [IO.Path]::GetPathRoot($Binary) -notmatch '^([A-Za-z]:\\|\\\\)') { Stop-Helper '-Binary must have an absolute drive or UNC root' }
+    $template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'opencode/mmhmem-read-routing.js'))
+    $content = $template.Replace('__MMHMEM_BINARY__', (ConvertTo-Json -Compress -InputObject $Binary))
+    if ($Command -eq 'show') {
+        Write-Line "File: $plugin"
+        Write-Line $content
+        Write-Line 'Sees read/shell input; declines large full reads. Approval: installer opt-in only.'
+        Write-Line ('Remove it with: powershell -NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" remove -Harness opencode')
+        return
+    }
+    $files = @((Join-Path $configDir 'opencode.json'), (Join-Path $configDir 'opencode.jsonc'))
+    if ($ManagedSettingsPath) { $files += $ManagedSettingsPath }
+    else { $files += @((Join-Path $env:ProgramData 'opencode/opencode.json'), (Join-Path $env:ProgramData 'opencode/opencode.jsonc')) }
+    foreach ($file in $files) {
+        if (-not (Test-Path -LiteralPath $file)) { continue }
+        try { $data = [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { Stop-Helper "Cannot verify plugin policy in $file (unsupported or invalid JSON)" }
+        $policies = $data.PSObject.Properties['policies']
+        if (-not $policies) { continue }
+        foreach ($rule in $policies.Value) {
+            if ($rule.effect -cne 'deny') { continue }
+            $resource = [string]$rule.resource
+            if ($rule.action -ceq 'integration.use' -and $resource.StartsWith('plugin:')) { $resource = $resource.Substring(7) }
+            elseif ($rule.action -cne 'plugin.use') { continue }
+            $pattern = '^' + [regex]::Escape($resource).Replace('\*', '.*').Replace('\?', '.') + '$'
+            if ($plugin -cmatch $pattern -or 'mmhmem-read-routing' -cmatch $pattern) { Stop-Helper "plugin.use denied by $file; nothing changed" }
+        }
+    }
+    if (-not $DryRun -and $old -cne $content) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $plugin) | Out-Null
+        if ($null -ne $old) { [IO.File]::Copy($plugin, ($plugin + '.mmhmem.bak'), $true) }
+        [IO.File]::WriteAllText($plugin, $content, (New-Object Text.UTF8Encoding $false))
+    }
+    Write-Line "[mmhmem] OpenCode plugin: $plugin (dry-run=$DryRun)"
+}
+if ($Harness -eq 'opencode') { Invoke-OpenCodeHook; exit 0 }
 
 # --- commands -----------------------------------------------------------------------
 $def = $script:Harnesses[$Harness]

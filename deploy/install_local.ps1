@@ -29,7 +29,7 @@
 #                 playbook copies and the copied binary. Store and audit
 #                 files stay untouched.
 #   -DryRun       print actions, change nothing.
-#   -Hooks LIST   opt in to the read-routing hook (claude, codex, or all; global
+#   -Hooks LIST   opt in to the read-routing hook (claude, codex, opencode, or all; global
 #                 scope only). Shows the exact entry first, adds it to the
 #                 user settings file, and leaves Claude Code's own review
 #                 (/hooks) to you. A default install adds no hook.
@@ -440,8 +440,8 @@ foreach ($harness in @('claude','opencode')) {
 # --- read-routing hook opt-in (before any write; nothing is added by default) ---------
 $HookSelected = @()
 $HookCandidates = @()
-foreach ($harness in @('claude', 'codex')) {
-    $detected = if ($harness -eq 'claude') { $HasClaude } else { $HasCodex }
+foreach ($harness in @('claude', 'codex', 'opencode')) {
+    $detected = switch ($harness) { 'claude' { $HasClaude } 'codex' { $HasCodex } 'opencode' { $HasOpenCode } }
     $candidate = (-not $Remove) -and $Global -and (Want-Agent $harness) -and $detected
     $selected = $HookHarnesses -contains $harness
     if ($candidate) { $HookCandidates += $harness }
@@ -639,7 +639,7 @@ if ($Global) {
 }
 
 # --- read-routing hook (after the binary copy it points to) -----------------------------------
-foreach ($harness in @('claude', 'codex')) {
+foreach ($harness in @('claude', 'codex', 'opencode')) {
     if ($Remove -and $Global -and (Want-Agent $harness)) {
         if ((Remove-ReadRoutingHook $HookSource $HookDestination -DryRun:$DryRun -Harnesses @($harness)) -ne 0) {
             $HookProblem = $true

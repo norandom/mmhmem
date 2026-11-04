@@ -7,6 +7,7 @@
 
 pub mod adapters;
 mod codex;
+mod opencode;
 pub mod shell;
 pub mod state;
 

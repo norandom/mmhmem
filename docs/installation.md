@@ -118,14 +118,19 @@ Claude Code decides whether the hook runs, not mmhmem, and the installer never
 writes any trust or approval record. After installing, start a new Claude Code
 session, accept the workspace trust dialog for the folder, and review the hook
 with `/hooks`. Codex shell reads can also use the hook: select the `codex` agent
-and opt in with `--hooks codex` / `-Hooks codex` (or `all` for both supported
+and opt in with `--hooks codex` / `-Hooks codex` (or `all` for all supported
 harnesses). Its entry goes in `$CODEX_HOME/hooks.json`, defaulting to
 `~/.codex/hooks.json`. Start Codex and review the new entry in `/hooks`;
 untrusted hooks are skipped, including silently in `codex exec`. The installer
 never enables or trusts the hook for you. It respects `[features] hooks = false`
 and managed `requirements.toml` policy. Updates at the same binary path keep
-the declaration unchanged; a changed path needs re-approval. OpenCode currently
-gets advisory guidance only; its hook is not available yet.
+the declaration unchanged; a changed path needs re-approval. OpenCode 2 supports
+`--hooks opencode` / `-Hooks opencode`: the installer shows and installs
+`~/.config/opencode/plugins/mmhmem-read-routing.js`. Start a new OpenCode
+session afterwards. There is no separate harness approval step; explicit
+installer opt-in is required. Readable user and system `plugin.use` policies
+are checked before installation; unsupported policy files are refused
+conservatively. Hook-only and full removal also remove this plugin.
 
 Remove only the hook with `--remove-hooks` / `-RemoveHooks` (the settings file
 returns to its previous bytes), or with the removal command the installer printed

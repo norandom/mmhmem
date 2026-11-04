@@ -4,13 +4,14 @@
 $ErrorActionPreference = 'Stop'
 $root = Join-Path (Split-Path $PSScriptRoot -Parent) ('tmp/hooks-onboarding-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
-$names = @('CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'LOCALAPPDATA', 'PATH', 'TEST_CLAUDE_LOG', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS')
+$names = @('XDG_CONFIG_HOME', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'LOCALAPPDATA', 'PATH', 'TEST_CLAUDE_LOG', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS')
 $saved = @{}; foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 function Fail([string]$m) { throw "hooks onboarding: $m" }
 try {
     $env:CLAUDE_CODE_SIMPLE = $null; $env:CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS = $null
     $env:CLAUDE_CONFIG_DIR = Join-Path $root '.claude'
     $env:CODEX_HOME = Join-Path $root '.codex'
+    $env:XDG_CONFIG_HOME = Join-Path $root '.config'
     $env:LOCALAPPDATA = Join-Path $root 'local'
     $env:TEST_CLAUDE_LOG = Join-Path $root 'claude-calls'
     $settings = Join-Path $root '.claude/settings.json'
@@ -65,7 +66,7 @@ try {
     if ($r.Code -ne 0) { Fail "opt-in failed: $($r.Text)" }
     if ((Count-Entries) -ne 1) { Fail 'opt-in did not add exactly one entry' }
     if (-not (Test-Path -LiteralPath $helperCopy)) { Fail 'persistent helper missing' }
-    if ($r.Text -notmatch '/hooks' -or $r.Text -notmatch 'advisory guidance only' -or $r.Text -notmatch 'Remove it with') { Fail "missing approval or advisory text: $($r.Text)" }
+    if ($r.Text -notmatch '/hooks' -or $r.Text -notmatch 'Remove it with') { Fail "missing approval or advisory text: $($r.Text)" }
     if ($r.Text -notmatch [regex]::Escape($helperCopy)) { Fail 'removal command does not name the persistent helper' }
     $r = Invoke-Engine @('-Hooks', 'claude')
     if ($r.Code -ne 0 -or (Count-Entries) -ne 1) { Fail "repeat opt-in: $($r.Text)" }
@@ -105,6 +106,18 @@ try {
     if ($r.Code -ne 0 -or [IO.File]::ReadAllText($codexHooks) -cne $codexInstalled) { Fail "Codex repeat: $($r.Text)" }
     $r = Invoke-Engine @('-RemoveHooks') -AgentName codex
     if ($r.Code -ne 0 -or [IO.File]::ReadAllText($codexHooks) -match 'hook codex') { Fail "Codex hook removal: $($r.Text)" }
+
+    # OpenCode opt-in installs an isolated plugin and supports exact removal.
+    $plugin = Join-Path $env:XDG_CONFIG_HOME 'opencode/plugins/mmhmem-read-routing.js'
+    $r = Invoke-Engine @('-Hooks', 'opencode', '-DryRun') -AgentName opencode
+    if ($r.Code -ne 0 -or (Test-Path $plugin)) { Fail "OpenCode dry-run: $($r.Text)" }
+    $r = Invoke-Engine @('-Hooks', 'opencode') -AgentName opencode
+    if ($r.Code -ne 0 -or -not (Test-Path $plugin)) { Fail "OpenCode opt-in: $($r.Text)" }
+    $pluginBytes = [IO.File]::ReadAllText($plugin)
+    $r = Invoke-Engine @('-Hooks', 'opencode') -AgentName opencode
+    if ($r.Code -ne 0 -or [IO.File]::ReadAllText($plugin) -cne $pluginBytes) { Fail "OpenCode repeat: $($r.Text)" }
+    $r = Invoke-Engine @('-RemoveHooks') -AgentName opencode
+    if ($r.Code -ne 0 -or (Test-Path $plugin)) { Fail "OpenCode removal: $($r.Text)" }
 
     # Refusals happen before any write.
     foreach ($bad in @(@('-Hooks', 'codex'), @('-Hooks', 'bogus'), @('-Hooks', 'claude', '-RemoveHooks'))) {

@@ -65,6 +65,7 @@ run_bootstrap() {
 : > "$TEST_LOG"
 run_bootstrap --dry-run --agent codex
 ! grep -q releases/latest "$TEST_LOG"
+grep -q 'deploy/opencode/mmhmem-read-routing.js' "$TEST_LOG"
 [ ! -e "$scratch/home/.local/bin/mmhmem" ]
 grep -q -- --global "$TEST_ARGS"
 run_bootstrap --agent codex
@@ -122,6 +123,7 @@ PATH="$scratch/bin:$PATH" python3 "$root/scripts/test-install-menus.py" "$root" 
 python3 "$root/scripts/test-worker-check.py"
 python3 "$root/scripts/test_manage_hooks.py"
 python3 "$root/scripts/test_manage_hooks_codex.py"
+python3 "$root/scripts/test_manage_hooks_opencode.py"
 if [ -n "$candidate" ]; then
   python3 "$root/ci/scripts/probe_install.py" --binary "$candidate" --expected-sha256 "$expected_sha256" --source "$root" --report "$report"
 fi

@@ -18,6 +18,7 @@ pub const MAX_INPUT_BYTES: usize = 1024 * 1024;
 pub enum Harness {
     Claude,
     Codex,
+    OpenCode,
 }
 
 impl Harness {
@@ -26,6 +27,7 @@ impl Harness {
         match self {
             Harness::Claude => "claude",
             Harness::Codex => "codex",
+            Harness::OpenCode => "opencode",
         }
     }
 
@@ -36,6 +38,7 @@ impl Harness {
         match self {
             Harness::Claude => "claude-code",
             Harness::Codex => "codex",
+            Harness::OpenCode => "opencode",
         }
     }
 }
@@ -57,6 +60,7 @@ pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
     match harness {
         Harness::Claude => parse_claude(input),
         Harness::Codex => super::codex::parse(input),
+        Harness::OpenCode => super::opencode::parse(input),
     }
 }
 
@@ -65,6 +69,7 @@ pub fn render(harness: Harness, decision: &Decision, path: &Path, project: &str)
     match harness {
         Harness::Claude => render_claude(decision, path, project),
         Harness::Codex => super::codex::render(decision, path, project),
+        Harness::OpenCode => super::opencode::render(decision, path, project),
     }
 }
 

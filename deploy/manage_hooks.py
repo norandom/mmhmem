@@ -770,6 +770,8 @@ def current_user():
 
 
 def run(options):
+    if options.harness == "opencode":
+        return run_opencode(options)
     definition = HARNESSES[options.harness]
     label = definition['label']
     is_codex = options.harness == 'codex'
@@ -925,10 +927,90 @@ def run(options):
     return 0
 
 
+def opencode_policy_files(options, config_dir):
+    files = [os.path.join(config_dir, 'opencode.' + ext) for ext in ('json', 'jsonc')]
+    if options.managed_settings_path:
+        return files + [options.managed_settings_path]
+    system = '/Library/Application Support/opencode' if sys.platform == 'darwin' else '/etc/opencode'
+    files += [os.path.join(system, 'opencode.' + ext) for ext in ('json', 'jsonc')]
+    if sys.platform == 'darwin':
+        files += managed_preference_paths(sys.platform, current_user())  # replaced below for OpenCode domain
+        files = [path.replace('com.anthropic.claudecode', 'ai.opencode.managed') for path in files]
+    return files
+
+
+def opencode_block(options, config_dir, target):
+    import fnmatch
+    for path in opencode_policy_files(options, config_dir):
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, 'rb') as handle:
+                data = plistlib.load(handle) if path.endswith('.plist') else json.loads(handle.read().decode('utf-8-sig'))
+            # Unsupported JSONC is refused conservatively, never skipped.
+            for rule in data.get('policies', []):
+                action, resource = rule.get('action'), rule.get('resource', '')
+                if rule.get('effect') == 'deny' and action in ('plugin.use', 'integration.use'):
+                    if action == 'integration.use':
+                        if not resource.startswith('plugin:'):
+                            continue
+                        resource = resource[7:]
+                    if any(fnmatch.fnmatchcase(name, resource) for name in (target, 'mmhmem-read-routing')):
+                        return 'plugin.use denied in %s' % path
+        except (OSError, ValueError, AttributeError, TypeError) as error:
+            return 'cannot verify plugin policy in %s (%s)' % (path, error)
+    return None
+
+
+def run_opencode(options):
+    config_dir = os.path.join(os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config')), 'opencode')
+    target = os.path.abspath(options.settings_path or os.path.join(config_dir, 'plugins', 'mmhmem-read-routing.js'))
+    if os.path.basename(target) != 'mmhmem-read-routing.js' or '.opencode' in target.split(os.sep):
+        return fail('OpenCode plugin target must be the user mmhmem-read-routing.js file')
+    try:
+        assert_plain_path(target)
+        old = open(target, 'rb').read() if os.path.isfile(target) else None
+        marker = b'// mmhmem read-routing bridge:'
+        if old is not None and not old.startswith(marker):
+            return fail('unmanaged OpenCode plugin at %s; nothing changed' % target)
+        if options.command == 'remove':
+            if old is not None and not options.dry_run:
+                os.unlink(target)
+            say('[mmhmem] %sremove OpenCode plugin %s' % ('[dry-run] ' if options.dry_run else '', target))
+            return 0
+        if options.command == 'status':
+            say('opencode: %s (%s)' % ('installed' if old else 'not installed', target))
+            return 0
+        if not options.binary or not os.path.isabs(options.binary):
+            return fail('--binary must be an absolute path')
+        template = os.path.join(os.path.dirname(__file__), 'opencode', 'mmhmem-read-routing.js')
+        with open(template, encoding='utf-8-sig') as handle:
+            content = handle.read().replace('__MMHMEM_BINARY__', json.dumps(options.binary)).encode('utf-8')
+        if options.command == 'show':
+            say('File: %s\n%s' % (target, content.decode('utf-8')))
+            say('Sees read/shell input; declines only large full reads; no harness approval step.')
+            say('Remove it with: python3 %s remove --harness opencode' % shlex.quote(os.path.abspath(__file__)))
+            return 0
+        block = opencode_block(options, config_dir, target)
+        if block:
+            return fail(block)
+        if old != content and not options.dry_run:
+            os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+            assert_plain_path(target)
+            if old is not None:
+                assert_plain_path(target + '.mmhmem.bak')
+                write_private(target + '.mmhmem.bak', old, 0o600, None)
+            write_private(target, content, 0o600, None)
+        say('[mmhmem] %sOpenCode plugin: %s' % ('[dry-run] ' if options.dry_run else '', target))
+        return 0
+    except (OSError, ValueError, HelperError) as error:
+        return fail(str(error))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Manage mmhmem's read-routing hook entry.")
     parser.add_argument('command', choices=['show', 'install', 'remove', 'status'])
-    parser.add_argument('--harness', choices=sorted(HARNESSES), default='claude')
+    parser.add_argument('--harness', choices=sorted(list(HARNESSES) + ["opencode"]), default='claude')
     parser.add_argument('--binary')
     parser.add_argument('--settings-path')
     parser.add_argument('--managed-settings-path')

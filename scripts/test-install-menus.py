@@ -56,14 +56,14 @@ def terminal_case(answers, dry_run=True):
             pass
 
 
-output = terminal_case('1\n9\n1,3\nn\nn\nn\n')
+output = terminal_case('1\n9\n1,3\nn\nn\nn\nn\n')
 assert '[3] codex' in output and 'Please choose numbers' in output, output
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'codex'}, output
 assert 'harnesses: claude-desktop' not in output, output
 output = terminal_case('2\n3\n')
 assert 'local mode removed' in output and 'harnesses: codex' in output, output
 assert 'shared binary kept' in output, output
-output = terminal_case('1\na\nn\nn\nn\n')
+output = terminal_case('1\na\nn\nn\nn\nn\n')
 assert set(re.search(r'harnesses: ([^\r\n]+)', output)[1].split()) == {'opencode', 'claude-desktop', 'codex'}, output
 output = terminal_case('q\n')
 assert 'running the installer' not in output, output

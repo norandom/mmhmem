@@ -8,9 +8,9 @@ function Get-HookHarnesses([string]$List) {
         switch ($name) {
             'claude' { $out += 'claude' }
             'codex' { $out += 'codex' }
-            'all' { $out += @('claude', 'codex') }
-            'opencode' { throw "-Hooks $name is not available yet; $name currently gets advisory guidance only." }
-            default { throw "unknown hooks harness '$name' (valid: claude, codex, all)" }
+            'all' { $out += @('claude', 'codex', 'opencode') }
+            'opencode' { $out += 'opencode' }
+            default { throw "unknown hooks harness '$name' (valid: claude, codex, opencode, all)" }
         }
     }
     return @($out | Select-Object -Unique)
@@ -64,6 +64,9 @@ function Add-ReadRoutingHook([string]$Source, [string]$Destination, [string]$Bin
         # Persistent copy: the removal command the helper prints names this path.
         New-Item -ItemType Directory -Path (Split-Path -Parent $Destination) -Force | Out-Null
         Copy-Item -LiteralPath $Source -Destination $Destination -Force
+        $pluginDir = Join-Path (Split-Path -Parent $Destination) "opencode"
+        New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $Source) "opencode/mmhmem-read-routing.js") -Destination $pluginDir -Force
         $script = $Destination
     }
     $result = Invoke-HookHelper $script $helperArgs
@@ -72,7 +75,7 @@ function Add-ReadRoutingHook([string]$Source, [string]$Destination, [string]$Bin
     return $result.Code
 }
 
-function Remove-ReadRoutingHook([string]$Source, [string]$Destination, [switch]$DryRun, [string[]]$Harnesses = @('claude', 'codex')) {
+function Remove-ReadRoutingHook([string]$Source, [string]$Destination, [switch]$DryRun, [string[]]$Harnesses = @('claude', 'codex', 'opencode')) {
     foreach ($harness in $Harnesses) {
         $helperArgs = @('remove', '-Harness', $harness)
         if ($DryRun) { $helperArgs += '-DryRun' }
@@ -92,6 +95,6 @@ function Write-HookRefused {
 }
 function Write-HookAdvisory([string]$Harness = 'claude') {
     if ($Harness -eq 'codex') { Write-Host '[mmhmem] Start Codex and approve the new hook in /hooks; until trusted it is skipped. Existing trust and enablement state was not changed.' }
+    elseif ($Harness -eq 'opencode') { Write-Host '[mmhmem] Start a new OpenCode session; installer opt-in enables this plugin with no additional harness approval.' }
     else { Write-Host '[mmhmem] Start a new Claude Code session: hooks are read at startup. Accept the workspace trust dialog if asked and review the hook in /hooks.' }
-    Write-Host '[mmhmem] OpenCode currently gets advisory guidance only (its hook is not available yet).'
 }

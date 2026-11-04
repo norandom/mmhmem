@@ -259,6 +259,84 @@ entry in Codex `/hooks`, observes the redirect without the bypass option,
 updates the binary at the same path, and verifies the entry stays trusted.
 This live evidence is separate from Requirement 7's normal-work measurement.
 
+## Task 4.2: OpenCode v2 bridge (2026-11-04)
+
+Installed `opencode v2.2.5` capability proof passed in an isolated project:
+the v2 plugin registered `ctx.tool.hook("execute.before", ...)`, spawned a
+fixed PowerShell child through `node:child_process`, recorded
+`MMHMEM_SPAWN_OK`, and declined a native read with the exact
+`MMHMEM_PROOF_BLOCK` message. The model received and reported that message.
+Evidence: `tmp/opencode-hooks-proof/proof.log` and `proof-run.log`.
+The current [v2 server plugin documentation](https://opencode.ai/v2/docs/build/plugins/server)
+documents this hook interface. The [policy guide](https://dev.opencode.ai/v2/docs/policies)
+lists `plugin.use`, system configuration directories, and managed preferences.
+
+The production plugin uses a shell-free fixed executable invocation, a
+2-second child timeout, a 16 KiB output cap and a 1 MiB input cap. Transport,
+parse and registration failures return normally; only a valid deny reason
+is thrown, outside the failure-catching block. No summaries run in the hook.
+
+Fresh live sessions used generated 600-line fixtures and the built debug
+binary. No authentication files were copied and no real user configuration
+was changed. `WORKER_MODEL` was set to a fixture marker solely to enable the
+hook eligibility rule; no worker call was requested.
+
+| Case | Observed result | Evidence |
+|---|---|---|
+| Full native read | Declined with the correct `smart_read` suggestion; model reported it and stopped | `tmp/opencode-hooks-live/redirect/live.log`; audit `HOOK_REDIRECT`, reason `large_file`, 2026-11-04 06:49:51 UTC |
+| Exact range, offset 1 / limit 3 | Read succeeded, returned the first three fixture functions | `tmp/opencode-hooks-live/range/live.log`; audit `HOOK_PASS`, reason `range`, 06:50:00 UTC |
+| Missing executable, full native read | Read succeeded; first function identified as `fixture_0` | `tmp/opencode-hooks-live/missing/missing-full.log` |
+
+These are routing and failure checks, not normal-work adoption measurements
+for Requirement 7. An initial setup invocation ran in the repository root;
+its non-evidence log was moved to `tmp/opencode-hooks-live/setup-wrong-cwd.log`.
+
+Plugin tests failed both behavior tests with the temporary feature flag off,
+then passed 2/2 after implementation and flag removal:
+`node --test scripts/test-opencode-hooks.mjs`. The helper contract test
+initially failed with unsupported harness, then passed for both Python and
+PowerShell (`py -3.12 scripts/test_manage_hooks_opencode.py`, 2/2). Native
+hook tests passed 51/51. Extended Windows onboarding passed, exit 0. The
+controller runs broader gates and distribution checks.
+
+Review round 1 found a bootstrap packaging omission: both checkout-free
+installers omitted the new plugin template even though the engine required
+it. The Windows bootstrap regression first failed with “Bootstrap omitted
+the OpenCode plugin template.” Both bootstraps now download the template
+into the staged `deploy/opencode/` directory for installation. Regression
+checks assert the download and exercise OpenCode opt-in through that staged
+bundle. Existing Codex bootstrap checks and hook-removal download counts are
+retained. Linux-consumed artifacts were normalized and verified as LF after
+an earlier gate caught CRLF introduced by a Windows file write.
+
+## Task 5.2: available local activity (2026-11-04)
+
+**Effect: NOT_VERIFIED.** The user confirmed working sessions in Codex,
+Claude Code and OpenCode. The available local audit does not identify a
+normal before/after session pair for each harness, so it cannot establish
+the hook's effect in those sessions. Fixture sessions are not substituted
+for normal work.
+
+The current debug binary's read-only `stats --json` snapshot is saved at
+`tmp/hooks-measurement/stats-before-2026-11-04.json`. Across the available
+local records it reports 7 summary reads, 3 cache hits, 61 exact slices,
+11 direct reads and 27 hook redirects. Estimated avoided input is 42,101
+tokens across all activity; this is an estimate for all recorded reads,
+not measured savings attributable to hooks. The installed binary's stats
+output lacks the new activity fields; the debug build was used for them.
+
+All local hook events found at this checkpoint belong to Codex project
+`proj`, on 2026-11-03 at 19:26–19:38 UTC: 27 redirects, one repeat pass
+and one short-file pass. This fixture-like activity is separate from the
+normal projects' summaries and does not provide a verified redirect-to-
+summary follow-through rate. Claude Code and OpenCode have local read
+activity but no recorded hook redirects in this snapshot.
+
+Still pending: identify the relevant normal session intervals and audit
+store for each harness, establish when its hook was enabled, and compare
+redirects, subsequent summaries, repeat passes and estimated tokens avoided.
+Task 5.2 remains unchecked; no causal improvement or feature GO is claimed.
+
 ### Task 4.1 review remediation — quoted TOML policy keys
 
 Independent review found valid quoted TOML policy keys were not recognised:
@@ -271,3 +349,35 @@ PowerShell key escapes/read errors refuse installation instead of skipping the
 policy source. Regression assertions cover both absent hooks files and exact
 preservation of an existing hooks file under refusal. The manual approval and
 binary-update trust check above remains pending independently.
+
+## Integration validation (2026-11-04)
+
+**Decision: MANUAL_VERIFY_REQUIRED.** Task 4.2 is independently approved and
+verified. Tasks 4.1 and 5.2 remain unchecked for their documented evidence
+gaps; this is not a feature GO.
+
+- Native regression suite: `cargo nextest run`, 344 passed, zero skipped,
+  exit 0 (`tmp/hooks-measurement/opencode-nextest.log`).
+- Static and startup checks: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and the built CLI's `--help`
+  passed; help includes all three hook adapters.
+- Windows installer: `powershell -NoProfile -File scripts/test-install.ps1`,
+  exit 0 (`tmp/opencode-bootstrap-green.log`).
+- Linux installer: canonical Dagger `distribution`, Debian and Alpine,
+  exit 0 (`tmp/hooks-measurement/opencode-distribution-packaging.log`).
+- Plugin and helper contracts: Node bridge 2/2 and Python/PowerShell helper
+  contracts 2/2 passed. Production OpenCode live checks cover redirect,
+  ranged-read pass and missing-binary full-read pass.
+- Independent reviews resolved the quoted TOML policy bypass and missing
+  bootstrap template. No blocking code finding remains in either review.
+
+The adapters, bridge, helper policy checks and installer entry points agree
+on the hook protocol and harness audit names. Hooks remain opt-in, user
+scope, and independent of MCP availability. Service summaries and cache
+remain outside the hook. Temporary live-test authentication was removed;
+the tests did not alter real harness approval or trust state.
+
+Coverage gaps are Requirements 4.5/4.8/6.2's live Codex approval/update-trust
+evidence and Requirements 7.1–7.3's normal-session comparison. The code and
+fixture checks do not substitute for those observations. Complete those
+checks, then rerun feature validation before declaring the spec complete.

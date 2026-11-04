@@ -63,6 +63,7 @@ fn parse_harness(name: &str) -> Option<Harness> {
     match name {
         "claude" => Some(Harness::Claude),
         "codex" => Some(Harness::Codex),
+        "opencode" => Some(Harness::OpenCode),
         _ => None,
     }
 }
@@ -280,7 +281,7 @@ mod tests {
         assert_eq!(parse_harness("Claude"), None);
         assert_eq!(parse_harness("codex"), Some(Harness::Codex));
         assert_eq!(parse_harness("Codex"), None);
-        assert_eq!(parse_harness("opencode"), None);
+        assert_eq!(parse_harness("opencode"), Some(Harness::OpenCode));
         // The CLI argument stays (Req 4.8); audit records carry the
         // agent_harness each harness passes to smart_read (task 5.2 joins them).
         assert_eq!(Harness::Claude.agent_harness(), "claude-code");

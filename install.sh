@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mmhmem one-line installer for Linux and macOS — pipe it to bash:
+# mmhmem one-line installer for Linux and macOS - pipe it to bash:
 #
 #   curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash
 #
@@ -24,7 +24,7 @@ REL="https://github.com/norandom/mmhmem/releases/latest/download"
 
 usage() {
   cat <<'EOF'
-mmhmem one-line installer (Linux / macOS) — latest release, no checkout:
+mmhmem one-line installer (Linux / macOS) - latest release, no checkout:
 
   curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash
 
@@ -152,7 +152,8 @@ fetch "$RAW/deploy/manage_routing.py" "$tree/manage_routing.py"
 fetch "$RAW/deploy/routing_onboarding.py" "$tree/routing_onboarding.py"
 fetch "$RAW/deploy/manage_hooks.py" "$tree/manage_hooks.py"
 if [ "$SKIP_INSTALL" -eq 0 ]; then
-  mkdir -p "$tree/instructions"
+  mkdir -p "$tree/instructions" "$tree/opencode"
+  fetch "$RAW/deploy/opencode/mmhmem-read-routing.js" "$tree/opencode/mmhmem-read-routing.js"
   fetch "$RAW/deploy/instructions/mmhmem-routing.md" "$tree/instructions/mmhmem-routing.md"
   fetch "$RAW/deploy/check_worker.py" "$tree/check_worker.py"
   fetch "$RAW/deploy/codex/skills/mmhmem-recap/SKILL.md" "$tree/codex/skills/mmhmem-recap/SKILL.md"

@@ -18,7 +18,7 @@ cp "$settings" "$scratch/original"
 fail() { echo "hooks onboarding: $*" >&2; exit 1; }
 run_engine() {
   env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SIMPLE -u CLAUDE_CODE_DISABLE_PROJECT_INSTRUCTIONS \
-    HOME="$scratch/home" CODEX_HOME="$scratch/home/.codex" PATH="$scratch/bin:$PATH" \
+    XDG_CONFIG_HOME="$scratch/home/.config" HOME="$scratch/home" CODEX_HOME="$scratch/home/.codex" PATH="$scratch/bin:$PATH" \
     bash "$root/deploy/install_local.sh" --global --agent "${TEST_AGENT:-claude}" --binary "$scratch/bin/mmhmem" "$@" < /dev/null 2>&1
 }
 same_as() { cmp -s "$settings" "$1" || fail "settings changed: $2"; }
@@ -45,7 +45,6 @@ out="$(run_engine --hooks claude)" || fail "opt-in failed: $out"
 [ "$(entries)" = 1 ] || fail 'opt-in did not add exactly one entry'
 [ -f "$helper" ] || fail 'persistent helper missing'
 printf '%s' "$out" | grep -q '/hooks' || fail "missing approval text: $out"
-printf '%s' "$out" | grep -q 'advisory guidance only' || fail "missing advisory text: $out"
 printf '%s' "$out" | grep -q "$helper" || fail 'removal command does not name the persistent helper'
 out="$(run_engine --hooks claude)" || fail "repeat opt-in failed: $out"
 [ "$(entries)" = 1 ] || fail 'repeat opt-in duplicated the entry'
@@ -86,6 +85,21 @@ run_engine --hooks codex > /dev/null
 cmp -s "$hooks_file" "$scratch/codex-installed" || fail 'Codex repeat changed entry'
 run_engine --remove-hooks > /dev/null
 if grep -q 'hook codex' "$hooks_file"; then fail 'Codex removal left entry'; fi
+TEST_AGENT=claude
+
+printf '#!/usr/bin/env bash\nexit 0\n' > "$scratch/bin/opencode"
+chmod +x "$scratch/bin/opencode"
+TEST_AGENT=opencode
+plugin="$scratch/home/.config/opencode/plugins/mmhmem-read-routing.js"
+out="$(run_engine --hooks opencode --dry-run)" || fail "OpenCode dry-run: $out"
+[ ! -e "$plugin" ] || fail 'OpenCode dry run wrote plugin'
+out="$(run_engine --hooks opencode)" || fail "OpenCode install: $out"
+[ -f "$plugin" ] || fail 'OpenCode plugin absent'
+cp "$plugin" "$scratch/plugin-installed"
+run_engine --hooks opencode > /dev/null
+cmp -s "$plugin" "$scratch/plugin-installed" || fail 'OpenCode repeat changed plugin'
+run_engine --remove-hooks > /dev/null
+[ ! -e "$plugin" ] || fail 'OpenCode removal left plugin'
 TEST_AGENT=claude
 
 # Refusals happen before any write.

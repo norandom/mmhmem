@@ -12,7 +12,7 @@ $env:PATH = $scratch + ';' + $env:PATH
 $env:TEMP = $scratch
 $env:TMP = $scratch
 $env:LOCALAPPDATA = Join-Path $scratch 'profile'
-$fixture = @{ DownloadBinary = $false; Install = $false }
+$fixture = @{ DownloadBinary = $false; Install = $false; PluginTemplate = $false }
 function Invoke-WebRequest {
     param([switch]$UseBasicParsing, [Parameter(Position=0)][string]$Uri, [string]$OutFile)
     if ($Uri -like '*/releases/latest/download/mmhmem.exe') {
@@ -21,7 +21,14 @@ function Invoke-WebRequest {
         throw 'Dry run attempted to download a binary'
     }
     $relative = ($Uri -split '/HEAD/')[1]
+    if ($relative -eq 'deploy/opencode/mmhmem-read-routing.js') { $fixture.PluginTemplate = $true }
     if (-not $relative) { throw "Unexpected URL: $Uri" }
+    if ($fixture.ContainsKey('HookHome') -and $relative -eq 'deploy/install_local.ps1') {
+        $source = [IO.File]::ReadAllText((Join-Path $repo $relative)).Replace('$HOME', '$BootstrapHookHome')
+        $source = $source.Replace('$ErrorActionPreference = ''Stop''', ('$ErrorActionPreference = ''Stop''' + "`n" + '$BootstrapHookHome = ''' + $fixture.HookHome.Replace("'", "''") + ''''))
+        [IO.File]::WriteAllText($OutFile, $source, (New-Object Text.UTF8Encoding $false))
+        return
+    }
     if ($fixture.Install -and $relative -eq 'deploy/install_local.ps1') {
         [IO.File]::WriteAllText($OutFile, @'
 param([switch]$Global, [switch]$NonInteractive, [string]$Binary, [string]$Agent, [string]$InstallSource)
@@ -41,12 +48,15 @@ try {
     if ($output -notmatch 'copy SKILL.md' -or $output -notmatch '\.agents[\\/]skills[\\/]mmhmem-recap[\\/]SKILL.md' -or $output -notmatch 'config.toml') {
         throw "Dry run missed registration, skill or recap: $output"
     }
+    if (-not $fixture.PluginTemplate) { throw 'Bootstrap omitted the OpenCode plugin template' }
     if ($fixture.DownloadBinary -or (Test-Path $env:LOCALAPPDATA)) { throw 'Dry run wrote installation state' }
     $output = & (Join-Path $repo 'install.ps1') -Remove -DryRun -Agent codex 6>&1 | Out-String
     if ($output -notmatch 'local mode removed' -or $output -notmatch 'unified-memory') { throw "Removal failed: $output" }
     # One-line installer passes the hook options through (scratch Claude config; nothing is written).
     $originalClaudeDir = $env:CLAUDE_CONFIG_DIR
     $originalCodexDir = $env:CODEX_HOME
+    $originalXdg = $env:XDG_CONFIG_HOME
+    $env:XDG_CONFIG_HOME = $null
     $env:CLAUDE_CONFIG_DIR = Join-Path $scratch 'claude-config'
     $env:CODEX_HOME = Join-Path $scratch 'codex-config'
     try {
@@ -55,7 +65,11 @@ try {
         if ($output -notmatch 'no Claude Code read-routing hook' -or $fixture.DownloadBinary -or (Test-Path $env:CLAUDE_CONFIG_DIR)) { throw "-RemoveHooks bootstrap: $output" }
         $output = & (Join-Path $repo 'install.ps1') -Hooks codex -Agent codex -DryRun 6>&1 | Out-String
         if ($output -notmatch 'hook codex' -or $output -notmatch '/hooks') { throw '-Hooks codex was not passed through to the engine' }
-    } finally { $env:CLAUDE_CONFIG_DIR = $originalClaudeDir; $env:CODEX_HOME = $originalCodexDir }
+        $fixture.HookHome = Join-Path $scratch 'hook-home'
+        $env:XDG_CONFIG_HOME = Join-Path $fixture.HookHome '.config'
+        $output = & (Join-Path $repo 'install.ps1') -Hooks opencode -Agent opencode -DryRun 6>&1 | Out-String
+        if ($output -notmatch 'mmhmem-read-routing' -or $output -notmatch 'Sees read/shell') { throw 'OpenCode bootstrap opt-in missed staged template' }
+    } finally { $fixture.Remove('HookHome'); $env:CLAUDE_CONFIG_DIR = $originalClaudeDir; $env:CODEX_HOME = $originalCodexDir; $env:XDG_CONFIG_HOME = $originalXdg }
     # Actual bootstrap writes, isolated from the user's harness registrations.
     $fixture.Install = $true
     & (Join-Path $repo 'install.ps1') -Agent codex
