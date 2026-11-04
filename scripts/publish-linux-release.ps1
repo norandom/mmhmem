@@ -73,7 +73,7 @@ function New-ReleaseScratch {
 }
 function Invoke-LinuxReleaseValidation {
     [CmdletBinding()]
-    param([string]$Tag,[string]$RunId)
+    param([string]$Tag,[string]$RunId,[string[]]$SupersededAssets=@())
     if ($Tag -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$' -or $Tag.Contains('..') -or $Tag.EndsWith('/') -or $RunId -cnotmatch '^[1-9][0-9]{0,19}$') {throw 'Invalid Tag or RunId'}
     $revision=Resolve-ReleaseTag $Tag
     $run=Get-ReleaseApi "actions/runs/$RunId"
@@ -107,7 +107,7 @@ function Invoke-LinuxReleaseValidation {
         $hashes[$name]=(Get-FileHash -LiteralPath (Get-ReleaseBundleFile $bundle $name) -Algorithm SHA256).Hash.ToLowerInvariant()
         $assets=@($release.assets | Where-Object {$_.name -ceq $name})
         if ($assets.Count -gt 1) {throw "Conflicting duplicate Linux asset: $name"}
-        if ($assets.Count -eq 1) {
+        if ($assets.Count -eq 1 -and $name -cnotin $SupersededAssets) {
             if ($assets[0].state -cne 'uploaded') {throw "Conflicting incomplete Linux asset: $name"}
             $remote=Join-Path $scratch ('remote-'+$name)
             New-Item -ItemType Directory -Path $remote | Out-Null
@@ -118,7 +118,7 @@ function Invoke-LinuxReleaseValidation {
         }
     }
     if ($hashes[$script:LinuxAssetName] -cne $manifest.artifact.sha256) {throw 'Artifact checksum changed after validation'}
-    return [pscustomobject]@{Tag=$Tag;RunId=$RunId;RunAttempt=$attempt;Revision=$revision;ReleaseId=$release.id;ArtifactName=$artifactName;BundleDirectory=$bundle;ScratchDirectory=$scratch;Manifest=$manifest;Hashes=$hashes;ExistingHashes=$existing}
+    return [pscustomobject]@{Tag=$Tag;RunId=$RunId;RunAttempt=$attempt;Revision=$revision;ReleaseId=$release.id;ArtifactName=$artifactName;BundleDirectory=$bundle;ScratchDirectory=$scratch;Manifest=$manifest;Hashes=$hashes;ExistingHashes=$existing;SupersededAssets=$SupersededAssets}
 }
 function Assert-LinuxDeliveryFiles($Context) {
     foreach ($name in @($script:LinuxAssetName,'SHA256SUMS','verification.json')) {
@@ -152,7 +152,10 @@ function Invoke-LinuxReleaseDelivery {
     param([Parameter(Mandatory=$true)]$Context)
     Assert-LinuxDeliveryFiles $Context
     $delivered=@{}
+    # SupersededAssets are validated locally but not delivered (CI replaces the
+    # single-file SHA256SUMS with the manifest covering every release asset).
     foreach ($name in @($script:LinuxAssetName,'SHA256SUMS','verification.json')) {
+        if ($name -cin @($Context.SupersededAssets)) {continue}
         $release=Get-LinuxDeliveryDraft $Context
         $existing=Get-LinuxDeliveryAsset $release $name
         if (-not $existing) {

@@ -40,6 +40,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-publish-linux-release.ps1
+          ./scripts/test-package-release-archives.ps1
           ./scripts/test-publish-ci-release.ps1
       - name: Publish verified artifacts
         shell: pwsh

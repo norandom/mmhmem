@@ -6,6 +6,7 @@ The Linux publisher retains its full provenance and byte-equality checks.
 [CmdletBinding()]
 param([string]$Tag,[string]$RunId)
 . (Join-Path $PSScriptRoot 'publish-linux-release.ps1') -Tag $Tag -RunId $RunId
+. (Join-Path $PSScriptRoot 'package-release-archives.ps1')
 
 function Assert-CiReleaseTag([string]$Value) {
     if ($Value -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {throw 'Only stable vMAJOR.MINOR.PATCH tags can be published'}
@@ -58,6 +59,19 @@ function Send-CiReleaseAsset([string]$ReleaseTag,[string]$Path,[string]$Scratch)
     $null=Invoke-ReleaseGh @('release','download',$ReleaseTag,'--repo',$script:ReleaseRepository,'--pattern',$name,'--dir',$remote)
     if ((Get-FileHash -LiteralPath (Join-Path $remote $name) -Algorithm SHA256).Hash -cne $expected) {throw "Remote bytes differ: $name"}
 }
+# Stage every published asset except SHA256SUMS in one directory: bare
+# transition binaries, verification.json and the four per-target archives.
+# Returns the staged names; hashing is a separate, re-runnable step.
+function Initialize-CiReleaseAssets([string]$ReleaseTag,[hashtable]$Native,[string]$LinuxBundle,[string]$Staging) {
+    New-Item -ItemType Directory -Path $Staging -Force | Out-Null
+    $linux=Get-ReleaseBundleFile $LinuxBundle $script:LinuxAssetName
+    $bare=@{'mmhmem.exe'=$Native['mmhmem.exe'];'mmhmem-macos-x86_64'=$Native['mmhmem-macos-x86_64'];'mmhmem-macos-aarch64'=$Native['mmhmem-macos-aarch64'];($script:LinuxAssetName)=$linux;'verification.json'=(Get-ReleaseBundleFile $LinuxBundle 'verification.json')}
+    foreach ($name in $bare.Keys) {Copy-Item -LiteralPath $bare[$name] -Destination (Join-Path $Staging $name)}
+    $archives=New-ReleaseArchives $ReleaseTag @{'windows'=$Native['mmhmem.exe'];'linux'=$linux;'macos-x86_64'=$Native['mmhmem-macos-x86_64'];'macos-aarch64'=$Native['mmhmem-macos-aarch64']} $Staging
+    $names=[string[]]@(@($bare.Keys)+@($archives | ForEach-Object {Split-Path -Leaf $_}))
+    [Array]::Sort($names,[StringComparer]::Ordinal)
+    return ,$names
+}
 function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if (-not $ReleaseTag) {
         if ($RequestedRun -cnotmatch '^[1-9][0-9]*$') {throw 'Automatic completion requires a run ID'}
@@ -86,19 +100,18 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if ($existing.Count -gt 1) {throw 'Duplicate release records'}
     if ($existing.Count -and -not $existing[0].draft) {Write-Host "$ReleaseTag is already published; no assets changed.";return}
     if (-not $existing.Count) {$null=Invoke-ReleaseGh @('release','create',$ReleaseTag,'--repo',$script:ReleaseRepository,'--verify-tag','--draft','--title',"mmhmem $ReleaseTag",'--generate-notes')}
-    $context=Invoke-LinuxReleaseValidation -Tag $ReleaseTag -RunId $id
+    $context=Invoke-LinuxReleaseValidation -Tag $ReleaseTag -RunId $id -SupersededAssets @('SHA256SUMS')
     if ($context.Manifest.package_version -cne $ReleaseTag.Substring(1)) {throw 'Tag does not match verified binary package version'}
     $null=Invoke-LinuxReleaseDelivery $context
-    $sums=New-Object System.Collections.Generic.List[string]
-    foreach ($name in @($native.Keys | Sort-Object)) {
-        $path=Join-Path $scratch $name
-        Copy-Item -LiteralPath $native[$name] -Destination $path
-        Send-CiReleaseAsset $ReleaseTag $path $scratch
-        $sums.Add(((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$name))
+    $staging=Join-Path $scratch 'assets'
+    $staged=Initialize-CiReleaseAssets $ReleaseTag $native $context.BundleDirectory $staging
+    # Everything except the Linux files already delivered above is uploaded and
+    # re-downloaded byte for byte; SHA256SUMS goes last and covers every asset.
+    foreach ($name in $staged) {
+        if ($name -cin @($script:LinuxAssetName,'verification.json')) {continue}
+        Send-CiReleaseAsset $ReleaseTag (Join-Path $staging $name) $scratch
     }
-    # Keep the verified Linux SHA256SUMS unchanged; native assets have their own manifest.
-    $sumPath=Join-Path $scratch 'SHA256SUMS-native'
-    [IO.File]::WriteAllText($sumPath,($sums -join "`n")+"`n",[Text.UTF8Encoding]::new($false))
+    $sumPath=Write-ReleaseChecksums $staging $staged
     Send-CiReleaseAsset $ReleaseTag $sumPath $scratch
     Assert-LinuxDeliveryFiles $context
     $null=Get-LinuxDeliveryDraft $context

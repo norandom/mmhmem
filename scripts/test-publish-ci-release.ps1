@@ -60,4 +60,18 @@ Assert-Rejected {Send-CiReleaseAsset 'v0.3.0' $path $scratch}
 $script:Published=$true
 Assert-Rejected {Send-CiReleaseAsset 'v0.3.0' $path $scratch}
 if ($script:UploadCount -ne 1) {throw 'Conflict caused an upload'}
-Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection'
+# Staged release assets: archives, bare transition binaries, verification.json.
+$bundle=Join-Path $scratch 'bundle';New-Item -ItemType Directory -Path $bundle | Out-Null
+[IO.File]::WriteAllText((Join-Path $bundle $script:LinuxAssetName),'linux fixture');[IO.File]::WriteAllText((Join-Path $bundle 'verification.json'),'{}')
+foreach ($relative in @('windows/mmhmem.exe')) {[IO.File]::WriteAllText((Join-Path $scratch $relative),'synthetic fixture')}
+$native=Get-CiNativeAssets $scratch
+$staging=Join-Path $scratch 'assets'
+$staged=Initialize-CiReleaseAssets 'v0.3.0' $native $bundle $staging
+$wanted='mmhmem-linux-x86_64,mmhmem-macos-aarch64,mmhmem-macos-x86_64,mmhmem-v0.3.0-aarch64-apple-darwin.tar.gz,mmhmem-v0.3.0-x86_64-apple-darwin.tar.gz,mmhmem-v0.3.0-x86_64-pc-windows-msvc.zip,mmhmem-v0.3.0-x86_64-unknown-linux-musl.tar.gz,mmhmem.exe,verification.json'
+if (($staged -join ',') -cne $wanted) {throw "Unexpected staged asset set: $($staged -join ',')"}
+$sumLines=@([IO.File]::ReadAllText((Write-ReleaseChecksums $staging $staged)).TrimEnd("`n") -split "`n")
+if ($sumLines.Count -ne 9) {throw 'SHA256SUMS must list every staged asset'}
+foreach ($name in $staged) {
+    if ($sumLines -cnotcontains ((Get-FileHash -LiteralPath (Join-Path $staging $name) -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+$name)) {throw "SHA256SUMS missing $name"}
+}
+Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets and SHA256SUMS'

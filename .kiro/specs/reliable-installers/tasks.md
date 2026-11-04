@@ -129,7 +129,7 @@ released.
   - _Requirements: 3.5, 6.2, 6.3, 6.4, 6.5, 6.6_
 
 - [ ] 5. Publish verifiable releases
-- [ ] 5.1 Archive assets per target
+- [x] 5.1 Archive assets per target
   - Change the release build to publish `mmhmem-<tag>-<target>.zip` for Windows and `.tar.gz` for Linux and macOS, plus the existing bare binaries for one transition release, and include all of them in `SHA256SUMS`.
   - Done when `publish-ci-release.ps1` tests show the asset set and that every asset is listed and re-verified after upload.
   - _Requirements: 2.3, 2.8_
