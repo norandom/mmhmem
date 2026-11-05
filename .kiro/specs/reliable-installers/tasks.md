@@ -27,7 +27,8 @@ released.
   - Done when `research.md` names the source, or records that none exists in this repository and which external tool was the likely origin.
   - _Requirements: 2.8_
 
-- [ ] 1.4 Pin and vet the adopted libraries
+- [x] 1.4 Pin and vet the adopted libraries
+  - Status 2026-11-05: the pinned set builds on Linux (musl), macOS (arm64 and x86_64) and Windows on GitHub: CI run 42012757538 and the release-target builds of Installer e2e run 42012757529 on 9bddd39, both green.
   - Add the libraries from `research.md` §6 with exact versions, including `self_update` with `default-features = false` and rustls, `archive-zip`, `archive-tar`, `compression-zip-deflate`, `compression-flate2` and `signatures`.
   - Check with `cargo tree -d` that no second `reqwest`, `rustls` or TLS stack is pulled in, and that the default release build and the `otel` build still pass the pre-commit gate.
   - Record each crate's version, licence and last release date in `research.md`.
@@ -188,7 +189,8 @@ released.
   - _Requirements: 7.3, 7.4_
 
 - [ ] 8. Gate releases on real installs
-- [ ] 8.1 End-to-end harness
+- [x] 8.1 End-to-end harness
+  - Status 2026-11-05: done. Installer e2e run 42012757529 on 9bddd39 is green on ubuntu-latest, macos-15 (arm64), macos-15-intel and windows-latest under PowerShell 5.1 and 7, through every step.
   - Status 2026-11-04: workflow defined (actionlint clean) and every local step verified on Windows under PowerShell 7 and 5.1; open until the job runs green on GitHub after the first push. Phases that run the real installer refuse to run outside GitHub Actions unless MMHMEM_E2E_ALLOW_LOCAL is set.
   - Status 2026-11-05: first GitHub run (41883221749) reached the scenarios on every leg. Fixed: on Linux/macOS the server started by `serve` stopped answering once that step's pwsh exited (Start-Process's redirection is a pwsh-owned pipe; the next request's log line raised BrokenPipeError), and the next phase called it "taken by another program". The server now owns its log files (`scripts/e2e-http-server.py`), and `Start-Server` restarts its own unresponsive server (server.pid) and refuses only a foreign one. A failed leg prints `claude mcp get/list` (`-Phase agent-diagnostics`). Still open until a green run.
   - Write the CI job `.github/workflows/installer-e2e.yml`: build the commit's archives, render the bootstraps with a local base URL using the same renderer, serve them over local HTTP, and create a clean home seeded with agent configs that contain unrelated settings, comments and odd formatting. Install the real `claude`, `codex` and `opencode` CLIs from their official packages.
@@ -197,7 +199,8 @@ released.
   - _Depends: 5.3_
   - _Requirements: 10.1, 10.2_
 
-- [ ] 8.2 End-to-end scenarios
+- [x] 8.2 End-to-end scenarios
+  - Status 2026-11-05: done. Installer e2e run 42012757529 on 9bddd39 passed every scenario on all five matrix entries. The manual run 42014205966 with `sabotage=wrong-hash` failed on all five: each bootstrap refused the archive ("does not match the checksum built into this installer, so it was NOT used") and the gate job failed.
   - Status 2026-11-04: every scenario is implemented (`scripts/e2e-scenarios.ps1`, comparison rules in `scripts/e2e-home-state.ps1`) and wired into the workflow with `E2E_SCENARIOS_ENFORCED: 'true'`; the Rust test-key feature `e2e-release-key` exists and the publisher refuses its marker. Open until the job runs green on GitHub: the scenarios run the real installer, which never runs locally. Decisions: the menu is driven by `ci/e2e/pty-driver` (portable-pty + vt100, one program for pty and ConPTY) rather than `expectrl`, because it gives a screen model instead of a byte stream and answers ConPTY's cursor-position request; "update from the previous release" uses the same commit built with the previous version number (only builds that trust the run's throwaway key can be updated to); Claude Code rewrites `~/.claude.json` itself, so that one file is compared parsed (see the header of `e2e-home-state.ps1`). Run the workflow by hand with `sabotage=wrong-hash` to see the gate fail.
   - Status 2026-11-05: in run 41883221749 both Windows legs passed cancel-at-review, download-404 and bad-hash, then the install rolled back on "Claude Code lists mmhmem but could not connect to it". Cause: outside Windows Terminal Claude Code prints `Status: √ Connected` (U+221A), and the check accepted only `✔` (research.md §8). The check now accepts the fallback tick; the expectation stays `agent_command=pass`. Still open until a green run.
   - Status 2026-11-05 (run 41994007615): install, assertions and rerun passed on every leg; the removal failed on all five because `mmhmem stdio`, kept running by the OpenCode service that setup's own `opencode mcp list` check had started, held the store (Windows: memory.db locked; Unix: -wal/-shm changed). Fixed in setup: the OpenCode check stops the service again when `opencode service status` said `stopped` before it, and never touches one that was already running (research.md §8 "Third e2e run"). The e2e now fails when mmhmem or that service still runs after install, rerun, update, invalid-config or removal, compares the memory store by its database content instead of the -wal/-shm bytes, counts OpenCode's service password file and Claude Code's mmhmem connection log as the agents' own, and on Windows fails when the removed program is left in %TEMP%. Still open until a green run.
