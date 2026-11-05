@@ -14,3 +14,6 @@ are as printed.
 - `opencode/mcp-list-connected.txt`: the same command once the instance is warm.
 - `opencode/mcp-add-project-result.json`: the file OpenCode itself wrote for
   `opencode mcp add mmhmemprobe -- <bin> stdio` in an empty project folder.
+- `opencode/service-status-stopped.txt` and `opencode/service-status-running.txt`:
+  `opencode service status` (2.2.5, captured 2026-11-05 in a throwaway home) with
+  the background service stopped, and while it runs (its address).

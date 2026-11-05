@@ -21,7 +21,8 @@ menu is driven, and its exit code is the program's.
   rerun            the one-liner again without a terminal: exit 0,
                    "Everything is current", home unchanged
   remove           `mmhmem setup` in a terminal, Remove: program, record and
-                   PATH entry gone, seeded files byte-identical, memories kept
+                   PATH entry gone, nothing of mmhmem still running, seeded
+                   files byte-identical, memories kept (same content)
   menu-install     the one-liner in a terminal through every menu screen,
                    all detected agents, confirm (checked by assert-installed)
   install-old      the previous release's one-liner without a terminal
@@ -214,23 +215,49 @@ function Invoke-RerunPhase {
     $failures=@(Compare-HomeState $before (Get-HomeState 'after-rerun'))
     if ($code -ne 0) {$failures+="the second run exited with $code"}
     if (-not (Read-Log 'rerun').Contains('Everything is current')) {$failures+='the second run did not say "Everything is current"'}
+    $failures+=@(Wait-NoLeftoverProcesses | ForEach-Object {"still running after setup finished: $_"})
     $failures+=@(Get-BootstrapLeftovers | ForEach-Object {"the bootstrap left $_"})
     Assert-NoFailures 'rerun' $failures
 }
 
 # -------------------------------------------------------------- remove ---
+# The memory store as "kept" means it: each SQLite database by its content
+# (schema and every row, scripts/e2e-sqlite-digest.py, read from a copy),
+# whatever of it still sits in the -wal file. The -wal and -shm files are
+# SQLite's own journal and index of that database, so they are not compared
+# on their own: which of them exist, and their bytes, change whenever a
+# program opens or closes the store. Every other file byte for byte.
+function Get-StoreDigest([string]$Database) {
+    $python=Get-Python
+    $out=& $python -I (Join-Path $PSScriptRoot 'e2e-sqlite-digest.py') $Database
+    if ($LASTEXITCODE -ne 0 -or -not $out) {throw "could not read the memory store $Database"}
+    return ([string]$out | ConvertFrom-Json)
+}
 function Get-StoreFiles([string]$Dir) {
     $map=[ordered]@{}
     if (-not (Test-Path -LiteralPath $Dir)) {return $map}
     foreach ($rel in (Get-SeedFiles $Dir)) {
         if ($rel -ceq 'install.json' -or $rel -clike 'backups/*') {continue}   # macOS: record folder = store folder
-        $map[$rel]=(Get-FileHash -LiteralPath (Join-Path $Dir $rel) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($rel -clike '*.db-wal' -or $rel -clike '*.db-shm') {continue}
+        $file=Join-Path $Dir $rel
+        if ($rel -clike '*.db') {
+            $d=Get-StoreDigest $file
+            $rows=@($d.rows.PSObject.Properties | Where-Object {$_.Value} | ForEach-Object {"$($_.Name)=$($_.Value)"}) -join ' '
+            Write-Host "  store $rel content $($d.sha256.Substring(0,16)) rows: $rows"
+            $map[$rel]="content:$($d.sha256)"
+            continue
+        }
+        $map[$rel]=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     return $map
 }
 function Invoke-RemovePhase {
     $paths=Get-InstalledPaths
     if (-not (Test-Path -LiteralPath $paths.Program)) {throw 'remove needs an install (run install first)'}
+    # Nothing mmhmem started may still run: it would hold the store and the
+    # program (research.md section 8).
+    $left=Wait-NoLeftoverProcesses
+    if ($left.Count) {Assert-NoFailures 'remove' @($left | ForEach-Object {"still running before the removal: $_"})}
     $store=Get-StoreFiles $paths.DataDir
     if (-not $store.Contains('memory.db')) {throw "no memory store at $($paths.DataDir) before the removal (the check should have created memory.db)"}
     $null=Get-HomeState 'before-remove'   # for the logs
@@ -239,15 +266,23 @@ function Invoke-RemovePhase {
         'expect Also delete my saved memories','send enter',
         'timeout 600','expect enter or q close','send enter','timeout 60','exit 0')
     $failures=New-Object Collections.Generic.List[string]
-    # Windows deletes the running program (and its helper copy) right after
-    # setup closed.
+    # Windows deletes the running program right after setup closed: it was
+    # moved into %TEMP% (.mmhmem.<random>.__relocated__.exe, self_replace)
+    # and a short-lived helper copy (.__selfdelete__.exe) deletes it there.
     $folder=Split-Path -Parent $paths.Program
+    $temp=Join-Path $script:SeedHome 'AppData\Local\Temp'
     for ($i=0;$i -lt 120;$i++) {
-        if (-not (Test-Path -LiteralPath $folder) -or -not @(Get-ChildItem -LiteralPath $folder -Force -File).Count) {break}
+        $inFolder=(Test-Path -LiteralPath $folder) -and @(Get-ChildItem -LiteralPath $folder -Force -File).Count
+        $moved=$script:OnWindows -and (Test-Path -LiteralPath $temp) -and @(Get-ChildItem -LiteralPath $temp -Force -File -Filter '.mmhmem.*' | Where-Object {$_.Name -like '*.__relocated__.exe' -or $_.Name -like '*.__selfdelete__.exe'}).Count
+        if (-not $inFolder -and -not $moved) {break}
         Start-Sleep -Milliseconds 500
     }
     if (Test-Path -LiteralPath $paths.Program) {$failures.Add('the program is still there')}
+    if ($script:OnWindows -and (Test-Path -LiteralPath $temp)) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $temp -Force -File -Filter '.mmhmem.*' | Where-Object {$_.Name -like '*.__relocated__.exe'})) {$failures.Add("the program was moved to $($f.FullName) but not deleted")}
+    }
     if (Test-Path -LiteralPath $paths.Record) {$failures.Add('the install record is still there')}
+    foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after the removal: $p")}
     $after=Get-HomeState 'after-remove'
     $seeded=Read-HomeState 'seeded'
     # Against the seed: everything mmhmem added is gone except its kept backups
@@ -256,7 +291,7 @@ function Invoke-RemovePhase {
     foreach ($f in (Compare-HomeState $seeded $after $kept)) {$failures.Add($f)}
     $now=Get-StoreFiles $paths.DataDir
     foreach ($rel in $store.Keys) {
-        if ($now[$rel] -cne $store[$rel]) {$failures.Add("the memory store file $rel was not kept as it was")}
+        if ($now[$rel] -cne $store[$rel]) {$failures.Add("the memory store file $rel was not kept as it was$(if ($rel -clike '*.db') {' (its content, compared row by row)'})")}
     }
     Assert-NoFailures 'remove' $failures
 }
@@ -337,6 +372,7 @@ function Invoke-UpdatePhase {
     $seeded=Read-HomeState 'seeded'
     $expected=@($script:ManagedSeedFiles | Where-Object {$_ -cne '.claude.json'})+@((Get-MmhmemPatterns)+'HKCU:Path')
     foreach ($f in (Compare-HomeState $seeded (Get-HomeState 'after-update') $expected -ClaudeMode installed)) {$failures.Add($f)}
+    foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
     Assert-NoFailures 'update' $failures
 }
 # Everything mmhmem may add to a home when it installs: the program's
@@ -369,5 +405,6 @@ function Invoke-InvalidConfigPhase {
     # Claude Code's and Codex's server lists and mmhmem's own files change.
     $expected=@('.codex/config.toml')+@(Get-MmhmemPatterns)+'HKCU:Path'
     foreach ($f in (Compare-HomeState $before (Get-HomeState 'after-invalid-config') $expected -ClaudeMode installed)) {$failures.Add($f)}
+    foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
     Assert-NoFailures 'invalid-config' $failures
 }

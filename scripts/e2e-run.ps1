@@ -213,8 +213,21 @@ function Get-UserPathSnapshot {
     } finally {if ($key) {$key.Close()}}
 }
 # Programs still running from the home (mmhmem stdio started by a check, an
-# agent CLI) would keep files open; a new seed starts without them.
+# agent CLI) would keep files open; a new seed starts without them. That
+# includes the home's own OpenCode background service, found by the process
+# id in its state file (never any other OpenCode service). A scenario that
+# left one running has already failed (Wait-NoLeftoverProcesses).
 function Stop-HomeProcesses {
+    $state=Join-Path $script:SeedHome '.local/state/opencode/service.json'
+    if (Test-Path -LiteralPath $state -PathType Leaf) {
+        $id=0
+        try {$id=[int](Read-Json $state).pid} catch {}
+        $p=if ($id) {Get-Process -Id $id -ErrorAction SilentlyContinue} else {$null}
+        if ($p -and $p.ProcessName -like 'opencode*') {
+            Write-Host "Stopping the home's OpenCode service (pid $id) left from an earlier scenario"
+            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+        }
+    }
     $prefix=$script:SeedHome.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
     foreach ($p in @(Get-Process -ErrorAction SilentlyContinue | Where-Object {$_.Path -and $_.Path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)})) {
         Write-Host "Stopping $($p.Path) (pid $($p.Id)) left from an earlier scenario"
@@ -474,6 +487,9 @@ function Invoke-AssertInstalledPhase {
     $now=Get-HomeState "after-$Run"
     foreach ($f in (Compare-ClaudeJson $seeded.claude_json $now.claude_json 'installed' $now.claude_settings)) {$failures.Add($f)}
     $failures.AddRange([string[]]@(Get-BootstrapLeftovers | ForEach-Object {"the bootstrap left $_"}))
+    # The checks start mmhmem (and, through `opencode mcp list`, OpenCode's
+    # background service); setup must not leave either running.
+    $failures.AddRange([string[]]@(Wait-NoLeftoverProcesses | ForEach-Object {"still running after setup finished: $_"}))
     if ($failures.Count) {foreach ($f in $failures) {Write-Host "FAIL: $f"};throw "assert-installed: $($failures.Count) failure(s)"}
     Write-Host "assert-installed ($Run): OK"
 }
@@ -543,7 +559,8 @@ function Invoke-StopPhase {
 
 # ----------------------------------------------------- agent-diagnostics ---
 # Runs only after a failed step (workflow `if: failure()`), never an installer:
-# what the real Claude Code CLI answers for an mmhmem entry, in a throwaway
+# which mmhmem and OpenCode service processes are still running (only
+# listed), and what the real Claude Code CLI answers for an mmhmem entry, in a throwaway
 # isolated home (diag-home/, not the seeded one, so the evidence of the failed
 # phase stays as it was). The entry is ours and has no env values, so the
 # printed output holds no secrets; any `KEY=value` line is masked anyway.
@@ -559,6 +576,9 @@ function Invoke-AgentDiagnosticsPhase {
     } else {
         Write-Host "No installed program at $binary; claude runs without an mmhmem entry"
     }
+    $left=@(Select-LeftoverProcesses (Get-ProcessRows))
+    Write-Host "mmhmem and OpenCode service processes still running: $($left.Count)"
+    foreach ($l in $left) {Write-Host "  $l"}
     $claude=Get-Command claude -ErrorAction SilentlyContinue
     if (-not $claude) {Write-Host 'claude is not on PATH';return}
     $hints=@('WT_SESSION','TERM','CI') | ForEach-Object {"$_=$(if ([Environment]::GetEnvironmentVariable($_)) {'set'} else {'unset'})"}

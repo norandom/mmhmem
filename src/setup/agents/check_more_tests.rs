@@ -1,6 +1,7 @@
 //! More agent-check tests (reliable-installers task 4.2): the OpenCode
-//! poll and race, its hook sample, an unreadable config, a failing server,
-//! and Claude Desktop and Antigravity with pending user steps.
+//! poll and race, its background service, its hook sample, an unreadable
+//! config, a failing server, and Claude Desktop and Antigravity with pending
+//! user steps.
 
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::check_tests::{Fx, codex_fx, fx, outcome, want};
 use super::doubles::Reply;
-use super::doubles_cli::{self, OPENCODE_LIST_BEFORE_INIT};
+use super::doubles_cli::{self, OPENCODE_LIST_BEFORE_INIT, OPENCODE_SERVICE_RUNNING};
 use super::{AgentId, Feature, antigravity, claude_desktop, opencode};
 use crate::setup::check::CheckFailure;
 use crate::setup::record::{CheckResult, CheckStep, StepOutcome};
@@ -68,6 +69,73 @@ fn opencode_never_connected_fails_after_thirty_seconds() {
             .line
             .contains("OpenCode lists mmhmem but did not connect")
     );
+}
+
+/// The `opencode` calls of a check after the install, as argument lists.
+fn opencode_calls(fx: &Fx, before: usize) -> Vec<Vec<String>> {
+    fx.home.runner.calls()[before..]
+        .iter()
+        .filter(|c| c.program_name() == "opencode")
+        .map(|c| c.args.clone())
+        .collect()
+}
+
+#[test]
+fn a_service_the_check_started_is_stopped_after_the_poll() {
+    let (fx, agent) = opencode_fx(&[Feature::Mcp]);
+    let before = fx.home.runner.calls().len();
+    let report = fx.check(&agent, &want(AgentId::OpenCode, &[Feature::Mcp]));
+    assert_eq!(report.result, CheckResult::Pass, "{}", report.line);
+    let calls = opencode_calls(&fx, before);
+    let expected: Vec<Vec<String>> = [
+        ["service", "status"],
+        ["mcp", "list"],
+        ["mcp", "list"],
+        ["service", "stop"],
+    ]
+    .iter()
+    .map(|a| a.iter().map(|s| (*s).to_owned()).collect())
+    .collect();
+    assert_eq!(calls, expected);
+    let stop = fx.home.runner.calls().into_iter().last().unwrap();
+    assert_eq!(stop.cwd.as_deref(), Some(fx.home.home()));
+}
+
+#[test]
+fn a_service_the_check_started_is_stopped_also_when_the_poll_fails() {
+    let (fx, agent) = opencode_fx(&[Feature::Mcp]);
+    let never = vec![Reply::ok(OPENCODE_LIST_BEFORE_INIT)];
+    fx.home.runner.on("opencode", &["mcp", "list"], never);
+    let before = fx.home.runner.calls().len();
+    let report = fx.check(&agent, &want(AgentId::OpenCode, &[Feature::Mcp]));
+    assert_eq!(report.result, CheckResult::Fail);
+    let calls = opencode_calls(&fx, before);
+    assert_eq!(calls.first().unwrap(), &["service", "status"]);
+    assert_eq!(calls.last().unwrap(), &["service", "stop"]);
+}
+
+#[test]
+fn a_service_that_was_running_or_unknown_is_left_running() {
+    let (fx, agent) = opencode_fx(&[Feature::Mcp]);
+    let replies = [
+        Reply::ok(OPENCODE_SERVICE_RUNNING),
+        Reply::exit(1, "", "error: unknown command\n"),
+        Reply::ok("something else\n"),
+    ];
+    for reply in replies {
+        fx.home
+            .runner
+            .on("opencode", &["service", "status"], vec![reply]);
+        let before = fx.home.runner.calls().len();
+        let report = fx.check(&agent, &want(AgentId::OpenCode, &[Feature::Mcp]));
+        assert_eq!(report.result, CheckResult::Pass, "{}", report.line);
+        let calls = opencode_calls(&fx, before);
+        assert_eq!(calls.first().unwrap(), &["service", "status"]);
+        assert!(
+            !calls.iter().any(|a| a[..] == ["service", "stop"]),
+            "{calls:?}"
+        );
+    }
 }
 
 #[test]

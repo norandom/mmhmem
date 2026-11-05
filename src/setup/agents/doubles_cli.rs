@@ -31,6 +31,12 @@ pub(crate) const OPENCODE_LIST_BEFORE_INIT: &str =
 /// `opencode mcp list` once the instance is warm.
 pub(crate) const OPENCODE_LIST_CONNECTED: &str =
     include_str!("../../../tests/fixtures/setup/agents/opencode/mcp-list-connected.txt");
+/// `opencode service status` with the background service stopped.
+pub(crate) const OPENCODE_SERVICE_STOPPED: &str =
+    include_str!("../../../tests/fixtures/setup/agents/opencode/service-status-stopped.txt");
+/// `opencode service status` while the service runs (its address).
+pub(crate) const OPENCODE_SERVICE_RUNNING: &str =
+    include_str!("../../../tests/fixtures/setup/agents/opencode/service-status-running.txt");
 
 /// `name` and command of `… mcp add [flags] <name> -- <command…>`.
 fn added(inv: &Invocation) -> (String, Vec<String>) {
@@ -190,9 +196,12 @@ fn opencode_target(inv: &Invocation, global_dir: &Path) -> PathBuf {
     }
 }
 
-/// Scripts `opencode` (`--version`, `mcp list`, `mcp add [--global]`).
+/// Scripts `opencode` (`--version`, `mcp list`, `mcp add [--global]`,
+/// `service status` and `service stop`).
 /// `mcp list` reproduces the race of research.md §8: the first answer is
-/// "No MCP servers configured", every later one is connected. `mcp add`
+/// "No MCP servers configured", every later one is connected. The
+/// background service starts out stopped; `service stop` prints nothing
+/// (both as captured). `mcp add`
 /// writes the confirmed `mcp.servers.<name> = {type: "local", command: […]}`.
 /// OpenCode 2.2.5 has no `mcp remove`, so that call is not scripted.
 pub(crate) fn opencode(runner: &FakeRunner, env: &Env) {
@@ -202,6 +211,9 @@ pub(crate) fn opencode(runner: &FakeRunner, env: &Env) {
         Reply::ok(OPENCODE_LIST_CONNECTED),
     ];
     runner.on("opencode", &["mcp", "list"], list);
+    let status = vec![Reply::ok(OPENCODE_SERVICE_STOPPED)];
+    runner.on("opencode", &["service", "status"], status);
+    runner.on("opencode", &["service", "stop"], vec![Reply::ok("")]);
     let global_dir = env.config_home().join("opencode");
     let add = Arc::new(move |inv: &Invocation| {
         let (name, command) = added(inv);

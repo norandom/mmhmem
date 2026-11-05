@@ -195,7 +195,8 @@ removed with `[NullString]::Value` in both editions.
 **OpenCode's background service keeps setup's log open (Windows: "The process
 cannot access the file ... install.out").** `opencode mcp list` (the OpenCode
 check) starts OpenCode's managed service, `opencode.exe serve --service`
-(port in `~/.config/opencode/service.json`). It keeps running after the
+(address and process id in `~/.local/state/opencode/service.json`; see the
+third run below). It keeps running after the
 command by design and starts the configured local MCP servers itself. On
 Windows it also inherits the inheritable handles of the process chain, which
 include setup's redirected stdout. Reproduced locally: an isolated home with
@@ -204,12 +205,12 @@ its own service port, a parent with stdout redirected to a file, and
 could not be opened by `ReadAllText` (FileShare.Read). The only leftover was
 `opencode.exe serve --service`, a child of that `opencode mcp list`. With an
 enabled local server in the config, the service also kept that server's
-process running. Stopping the service released the file. The service belongs
-to OpenCode, not to mmhmem, so mmhmem must not stop it. The e2e reads logs
+process running. Stopping the service released the file. The e2e reads logs
 sharing them with a writer, as `Get-Content` does (`Read-Log`).
-Consequence for later phases (not seen yet): in the e2e the service keeps
-`mmhmem stdio` running from the installed program, which can hold the
-program file on Windows during remove or update.
+Consequence for later phases: in the e2e the service keeps `mmhmem stdio`
+running from the installed program. That broke the removal in the third run
+(below); the decision taken here, that mmhmem must not stop the service, is
+revised there: setup stops it again when its own check started it.
 
 **macOS menu ended with exit 1 at the first key read (cancel-at-review).**
 The bootstrap starts setup with stdin from `/dev/tty`. The raw pty output
@@ -223,6 +224,94 @@ swallowed (`unwrap_or(1)`). Fixes: crossterm's `use-dev-tty` feature on macOS
 crate), and setup now prints why the menu stopped. This affected every macOS
 `curl | sh` user, not only CI. The pty driver also notes when the program had
 already ended before a step failed.
+
+### Third e2e run: the removal found mmhmem still running (2026-11-05)
+
+Run 41994007615 (commit 0ee1e2f; Claude Code 2.1.311, OpenCode 2.2.5).
+Install, its assertions and the rerun passed on all five legs; the removal
+failed on all five:
+- Linux and macOS: compared with the seed, `~/.config/opencode/service.json`
+  and Claude Code's `…/claude-cli-nodejs/<home>/mcp-logs-mmhmem/<time>.jsonl`
+  were new, and `memory.db-wal` / `memory.db-shm` had changed.
+- Windows (both legs): `Get-FileHash` on `memory.db` failed with "being used
+  by another process". That was the phase's first read of the store, before
+  the removal ran, so the removal itself was not tried there.
+
+**Cause: setup's own check left OpenCode's service, and mmhmem with it,
+running.** The OpenCode check (`opencode mcp list`) starts the background
+service when it is not running. The service outlives setup and keeps the
+configured `mmhmem stdio` (the installed program) running, with the store
+open. Reproduced locally (Windows 11, OpenCode 2.2.5, throwaway home, a
+debug mmhmem build as the only local server): `opencode service status`
+printed `stopped`; after three `mcp list` calls, `opencode.exe serve
+--service` was running with `mmhmem.exe stdio` as its child, and
+`Get-FileHash` on `memory.db`, `-wal` and `-shm` failed with the CI message.
+After `opencode service stop` (exit 0) both processes were gone and all three
+files were readable. The `-wal` stayed (61 KB): the service ends its servers
+instead of letting them close the database.
+
+OpenCode's service, as 2.2.5 behaves (`opencode service --help`: `start`,
+`restart`, `status`, `stop`, `get`, `set`, `unset`; checked with a dummy MCP
+server and with mmhmem in throwaway homes):
+- `opencode service status` prints `stopped`, or the service's address
+  (`http://127.0.0.1:28894`), with exit 0. It does not start the service.
+- The first start writes `~/.config/opencode/service.json` (only a generated
+  `password`) and `~/.local/state/opencode/service.json` (`id`, `version`,
+  `url`, `pid`, `password`).
+- `opencode service stop` ends the service and the MCP servers it started,
+  and deletes the state file. The password file stays.
+- The throwaway home's service got the same address as the one in this
+  machine's own state file, so the port looks fixed. Local experiments
+  therefore only run while the machine's own OpenCode service is stopped.
+
+**Decision (revises the second run's "mmhmem must not stop it").** The
+installer's check must not leave behind a program it started: the user
+didn't ask for a background service, and it keeps the store and the program
+file in use. Setup now asks `opencode service status` before the poll and,
+only when that said `stopped`, runs `opencode service stop` after it, also
+when the poll failed (`opencode_check.rs`, tests in `check_more_tests.rs`).
+A service that was already running (an open OpenCode, or one the user
+started) is left alone, and so is any other answer (an error, an OpenCode
+without `service`). The one gap is a user starting OpenCode during the few
+seconds of the poll: that session then loses its service. OpenCode's own
+stop command is used rather than ending processes: it also ends the MCP
+servers and cleans up the state file.
+
+**Files the agents write when setup checks them.** Both are written by the
+agent CLIs, not by mmhmem (nothing in `src/` writes either path), and the
+e2e now counts them as the agents' own (`$script:AgentRuntimePatterns`,
+exact paths):
+- `~/.config/opencode/service.json`: OpenCode's service password (above). It
+  stays after the service stops, like OpenCode's other files.
+- `mcp-logs-mmhmem/*.jsonl` under Claude Code's cache folder
+  (`claude-cli-nodejs/<home slug>/`): `claude mcp get mmhmem` connects to the
+  server and logs that connection. Cache folder per OS (env-paths):
+  `~/.cache` (Linux, seen in the run), `~/Library/Caches` (macOS, seen),
+  `%LOCALAPPDATA%\claude-cli-nodejs\Cache` (Windows, the same layout holds
+  Claude Code's logs for other servers on this machine). Removal leaves it,
+  as it leaves the agents' other logs.
+
+**What "memories kept" means.** The memory store's content: the schema and
+every row of each SQLite database, read from a copy of `memory.db` and its
+`-wal` (`scripts/e2e-sqlite-digest.py`), plus every other file in the store
+folder byte for byte. The `-wal` and `-shm` files are SQLite's journal and
+index of that same content: which of them exist and their bytes change
+whenever a program opens or closes the store (above: a stopped server left
+its `-wal`), so comparing their bytes tested SQLite's bookkeeping, not the
+memories. Quiescence is checked on its own: no mmhmem process and no
+OpenCode service may still run after install, rerun, update, invalid-config or removal
+(`Wait-NoLeftoverProcesses`); a failed leg lists them
+(`-Phase agent-diagnostics`).
+
+**Removal while mmhmem still runs (not changed).** On Windows, removing the
+running setup program moves it to `%TEMP%` (`.mmhmem.<random>.__relocated__.exe`,
+self_replace) and a helper deletes it once setup exits. If another mmhmem
+process still runs that file (an open agent session), the helper's delete
+fails silently and the file stays in `%TEMP%`, while setup said it would be
+deleted. On Unix the file is deleted and running sessions go on until they
+end. The e2e now fails when the moved file is left. Telling the user to close
+their AI tools first would need setup to find other running mmhmem
+processes, which it cannot do today; left as a follow-up.
 
 ## 9. Windows `.tgz` report (task 1.3, 2026-11-04)
 

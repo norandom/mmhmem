@@ -156,6 +156,30 @@ try {
     Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'seeded-changed')) 1 'a seeded file never falls under the agent rule' 'changed file: .codex/config.toml'
     Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'seeded-expected') @('.codex/config.toml')) 0 'an expected change is allowed'
     $script:AgentRuntimePatterns=@($script:AgentRuntimePatterns | Where-Object {$_ -cne '.codex/config.toml'})
+    # Files the agent CLIs write when setup checks them (research.md section 8):
+    # OpenCode's service password and Claude Code's log of the mmhmem server.
+    $agentFiles=@('.config/opencode/service.json',
+        '.cache/claude-cli-nodejs/-home-runner-e2e/mcp-logs-mmhmem/2026-11-05T08-28-48-598Z.jsonl',
+        'Library/Caches/claude-cli-nodejs/-Users-runner-e2e/mcp-logs-mmhmem/2026-11-05T08-28-59-268Z.jsonl',
+        'AppData/Local/claude-cli-nodejs/Cache/D--a-e2e-home/mcp-logs-mmhmem/2026-11-05T08-29-00-000Z.jsonl')
+    foreach ($rel in $agentFiles) {
+        $file=Join-Path $script:SeedHome $rel
+        New-Item -ItemType Directory -Path (Split-Path -Parent $file) -Force | Out-Null
+        Write-Utf8 $file '{}'
+    }
+    $agentState=Get-HomeState 'agent-files'
+    Assert-Failures (Compare-HomeState $seeded $agentState @('.codex/config.toml')) 0 "the agents' own service password and MCP logs are allowed"
+    Assert-Failures (Compare-HomeState $seeded $agentState @('.codex/config.toml') -Strict) $agentFiles.Count 'strict allows none of them' 'new file: .config/opencode/service.json'
+    foreach ($rel in $agentFiles) {Remove-Item -LiteralPath (Join-Path $script:SeedHome $rel) -Force}
+    foreach ($rel in @('.config/opencode/other.json','.cache/claude-cli-nodejs/x/mcp-logs-other/a.jsonl','.cache/claude-cli-nodejs/x/mcp-logs-mmhmem/a.txt')) {
+        $file=Join-Path $script:SeedHome $rel
+        New-Item -ItemType Directory -Path (Split-Path -Parent $file) -Force | Out-Null
+        Write-Utf8 $file '{}'
+        Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'agent-near') @('.codex/config.toml')) 1 "only those exact files are the agents' ($rel)" "new file: $rel"
+        Remove-Item -LiteralPath $file -Force
+    }
+    foreach ($dir in @('.cache','Library','AppData')) {Remove-Item -LiteralPath (Join-Path $script:SeedHome $dir) -Recurse -Force -ErrorAction SilentlyContinue}
+    Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'agent-files-gone') @('.codex/config.toml') -Strict) 0 'the agent files are cleaned up again'
     $leftover=Join-Path $script:SeedHome '.claude/skills/unified-memory/SKILL.md'
     New-Item -ItemType Directory -Path (Split-Path -Parent $leftover) -Force | Out-Null
     Write-Utf8 $leftover 'x'
@@ -212,6 +236,49 @@ try {
             Assert-True ($text -cmatch "'[0-9a-f]{64}'") "$name still carries a well-formed SHA-256"
         }
     }
+
+    # ---- programs setup must not leave running.
+    $rows=@(
+        [pscustomobject]@{Id=1;Name='mmhmem.exe';CommandLine='"D:\a\_temp\mmhmem-e2e\home\AppData\Local\Programs\mmhmem\mmhmem.exe" stdio'},
+        [pscustomobject]@{Id=2;Name='mmhmem';CommandLine='/home/runner/work/_temp/mmhmem-e2e/home/.local/bin/mmhmem stdio'},
+        [pscustomobject]@{Id=3;Name='opencode.exe';CommandLine='D:\a\_temp\agent-clis\node_modules\@opencode\cli\bin\opencode.exe serve --service'},
+        [pscustomobject]@{Id=4;Name='opencode';CommandLine='/opt/agent-clis/lib/node_modules/@opencode/cli/bin/opencode serve --service'},
+        [pscustomobject]@{Id=5;Name='opencode';CommandLine='opencode mcp list'},
+        [pscustomobject]@{Id=6;Name='opencode';CommandLine='opencode serve --port 4096'},
+        [pscustomobject]@{Id=7;Name='pwsh';CommandLine='pwsh -command . /home/runner/work/mmhmem/mmhmem/scripts/e2e-run.ps1 -Phase remove'},
+        [pscustomobject]@{Id=8;Name='mmhmem-e2e-pty';CommandLine='/tmp/pty-target/release/mmhmem-e2e-pty remove.pty.txt'},
+        [pscustomobject]@{Id=9;Name='.mmhmem.abcdefgh.__selfdelete__.exe';CommandLine='.mmhmem.abcdefgh.__selfdelete__.exe 123 x'})
+    $left=@(Select-LeftoverProcesses $rows)
+    Assert-True (($left -join '|') -ceq ((1..4 | ForEach-Object {"pid ${_}: $($rows[$_-1].CommandLine)"}) -join '|')) "leftovers are mmhmem and OpenCode's service only ($($left -join ' | '))"
+    Assert-True (@(Get-ProcessRows | Where-Object {$_.Id -eq $PID}).Count -eq 1) 'the process list has this shell'
+
+    # ---- the memory store, compared by content.
+    $python=$null
+    foreach ($candidate in @(@('py','-3'),@('python3'),@('python'))) {
+        if ($python -or -not (Get-Command $candidate[0] -ErrorAction SilentlyContinue)) {continue}
+        $found=& $candidate[0] @($candidate | Select-Object -Skip 1) -I -c 'import sys;print(sys.executable)' 2>$null
+        if ($LASTEXITCODE -eq 0 -and $found) {$python=([string]$found).Trim()}
+    }
+    if (-not $python) {throw 'No Python 3 for the store checks'}
+    function Get-Python {return $python}
+    $storeDir=Join-Path $work 'store'
+    New-Item -ItemType Directory -Path $storeDir | Out-Null
+    $db=Join-Path $storeDir 'memory.db'
+    Write-Utf8 (Join-Path $storeDir 'audit.jsonl') "{}`n"
+    # Rows written and the program ended without closing: they sit in -wal.
+    & $python -I -c "import os,sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute('pragma journal_mode=wal');c.execute('pragma wal_autocheckpoint=0');c.execute('create table t(a)');c.execute('insert into t values (1)');c.commit();os._exit(0)" $db
+    Assert-True (Test-Path -LiteralPath "$db-wal") 'the test store has its rows in -wal'
+    $rawBefore=(Get-FileHash -LiteralPath $db -Algorithm SHA256).Hash
+    $kept=Get-StoreFiles $storeDir
+    Assert-True ((@($kept.Keys) -join ',') -ceq 'audit.jsonl,memory.db') "the store is the database and the other files, not -wal/-shm ($(@($kept.Keys) -join ','))"
+    Assert-True (Test-Path -LiteralPath "$db-wal") 'reading the store leaves it as it was'
+    # Another program opens and closes it: the rows move into memory.db.
+    & $python -I -c "import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute('pragma wal_checkpoint(truncate)');c.close()" $db
+    Assert-True ((Get-FileHash -LiteralPath $db -Algorithm SHA256).Hash -cne $rawBefore) 'the checkpoint changed the bytes of memory.db'
+    $same=Get-StoreFiles $storeDir
+    Assert-True ($same['memory.db'] -ceq $kept['memory.db'] -and $same['audit.jsonl'] -ceq $kept['audit.jsonl']) 'the same memories compare equal'
+    & $python -I -c "import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute('insert into t values (2)');c.commit();c.close()" $db
+    Assert-True ((Get-StoreFiles $storeDir)['memory.db'] -cne $kept['memory.db']) 'one more row is a different store'
 
     # ---- small helpers.
     Assert-True ((ConvertTo-TagPattern 'v0.4.1') -ceq 'v0\.4\.1') 'tag pattern escapes dots only'

@@ -10,12 +10,19 @@
 //!    `✓ mmhmem connected` or [`POLL_LIMIT`] passes: the first answer of a
 //!    new instance comes before servers start, so a missing entry counts as
 //!    a failure only after the limit. The clock is the [`Env`]'s.
+//!    `mcp list` starts OpenCode's background service when it is not
+//!    running, and that service keeps running afterwards, with mmhmem
+//!    started from the installed program (research.md §8). So
+//!    `opencode service status` is asked first, and only when it said
+//!    `stopped` does `opencode service stop` end the service again after
+//!    the poll. A service that was already running (an open OpenCode, or
+//!    one the user started) is never stopped.
 //! 4. With the read hook (plugin) on: `<binary> hook opencode` with the
 //!    plugin's event for a sample `read`.
 //! 5. OpenCode has no command that validates its config: skipped (an
 //!    unreadable file already fails step 1).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{MCP, OpenCode};
@@ -80,17 +87,59 @@ pub(super) fn shown(text: &str) -> Shown {
     result
 }
 
-/// Step 3: polls `opencode mcp list` from the home folder.
+/// What `opencode service status` said about OpenCode's background service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Service {
+    /// `stopped`: not running, so a `mcp list` starts it.
+    Stopped,
+    /// Its address: running already.
+    Running,
+    /// Anything else (an error, an OpenCode without `service`).
+    Unknown,
+}
+
+/// Reads `opencode service status`: `stopped`, or the service's address.
+pub(super) fn service(text: &str) -> Service {
+    match text.trim() {
+        "stopped" => Service::Stopped,
+        t if t.starts_with("http://") || t.starts_with("https://") => Service::Running,
+        _ => Service::Unknown,
+    }
+}
+
+fn service_status(env: &Env, program: &Path) -> Service {
+    let invocation = Invocation::new(program, &["service", "status"]).in_dir(env.home());
+    match env.run(&invocation) {
+        Ok(out) if out.success() => service(&out.stdout),
+        _ => Service::Unknown,
+    }
+}
+
+/// Step 3: polls `opencode mcp list` from the home folder, then stops the
+/// background service again when it was not running before the poll.
 fn poll(env: &Env) -> StepResult {
     let Some(program) = env.find_program("opencode") else {
         return StepResult::Skipped;
     };
+    let started_here = service_status(env, &program) == Service::Stopped;
+    let result = poll_list(env, &program);
+    if started_here {
+        let invocation = Invocation::new(&program, &["service", "stop"]).in_dir(env.home());
+        match env.run(&invocation) {
+            Ok(out) if out.success() => {}
+            other => tracing::debug!("opencode service stop did not succeed: {other:?}"),
+        }
+    }
+    result
+}
+
+fn poll_list(env: &Env, program: &Path) -> StepResult {
     let clock = env.clock();
     let deadline = clock.now() + POLL_LIMIT;
     let mut listed = false;
     loop {
         let left = deadline.saturating_duration_since(clock.now());
-        let invocation = Invocation::new(&program, &["mcp", "list"])
+        let invocation = Invocation::new(program, &["mcp", "list"])
             .in_dir(env.home())
             .timeout(left.clamp(POLL_EVERY, DEFAULT_TIMEOUT));
         match env.run(&invocation) {

@@ -374,3 +374,24 @@ fn a_failing_version_call_does_not_stop_detection() {
         other => panic!("{other:?}"),
     }
 }
+
+/// `opencode service status` (research.md §8): only `stopped` lets the check
+/// stop the service afterwards.
+#[test]
+fn opencode_service_status_is_read() {
+    assert_eq!(
+        verify::service(doubles_cli::OPENCODE_SERVICE_STOPPED),
+        verify::Service::Stopped
+    );
+    assert_eq!(
+        verify::service(doubles_cli::OPENCODE_SERVICE_RUNNING),
+        verify::Service::Running
+    );
+    for other in ["", "error: unknown command service\n", "stopping\n"] {
+        assert_eq!(
+            verify::service(other),
+            verify::Service::Unknown,
+            "{other:?}"
+        );
+    }
+}

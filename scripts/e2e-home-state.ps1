@@ -51,6 +51,12 @@ $script:AgentRuntimePatterns=@(
     '.claude/statsig/*','.claude/todos/*','.claude/shell-snapshots/*','.claude/projects/*',
     '.claude/debug/*','.claude/session-env/*','.claude/ide/*','.claude/plugins/*',
     '.claude/backups/*','.claude.json.backup*',
+    # Claude Code's log of its connection to the mmhmem server, written by
+    # `claude mcp get mmhmem` in its own cache folder (env-paths layout:
+    # Linux, macOS, Windows; research.md section 8, run 41994007615).
+    '.cache/claude-cli-nodejs/*/mcp-logs-mmhmem/*.jsonl',
+    'Library/Caches/claude-cli-nodejs/*/mcp-logs-mmhmem/*.jsonl',
+    'AppData/Local/claude-cli-nodejs/Cache/*/mcp-logs-mmhmem/*.jsonl',
     # Codex: logs, sessions, history and caches.
     '.codex/log/*','.codex/sessions/*','.codex/history.jsonl','.codex/version.json',
     '.codex/models_cache.json','.codex/tmp/*','.codex/.tmp/*','.codex/cache/*','.codex/sqlite/*',
@@ -59,6 +65,10 @@ $script:AgentRuntimePatterns=@(
     '.local/share/opencode/*','.local/state/opencode/*','.cache/opencode/*',
     '.config/opencode/node_modules/*','.config/opencode/package.json',
     '.config/opencode/bun.lock','.config/opencode/.gitignore',
+    # The password of OpenCode's background service, created by OpenCode
+    # when the service first starts (setup's `opencode mcp list` check) and
+    # kept after `opencode service stop` (research.md section 8).
+    '.config/opencode/service.json',
     # npm / npx caches the CLIs' launchers may touch.
     '.npm/*','AppData/Local/npm-cache/*'
 )
@@ -319,4 +329,43 @@ function Get-BootstrapLeftovers {
     $temp=if ($script:OnWindows) {Join-Path $script:SeedHome 'AppData\Local\Temp'} else {Join-Path $script:WorkDirectory 'tmp'}
     if (-not (Test-Path -LiteralPath $temp)) {return @()}
     return @(Get-ChildItem -LiteralPath $temp -Force -Directory | Where-Object {$_.Name -like 'mmhmem-install*'} | ForEach-Object {$_.FullName})
+}
+
+# ---------------------------------------------------- leftover programs ---
+# Programs that must not be left running once setup has finished: mmhmem
+# itself (`mmhmem stdio`, started by a check or by an agent for it) and
+# OpenCode's background service (`opencode serve --service`), which setup's
+# OpenCode check starts through `opencode mcp list` and stops again when it
+# was not running before (research.md section 8). A leftover mmhmem keeps the
+# memory store open (on Windows nothing else can read memory.db then) and the
+# program file in use. Rows: objects with Id, Name and CommandLine.
+function Select-LeftoverProcesses($Rows) {
+    return @($Rows | Where-Object {
+        ([string]$_.Name -match '^mmhmem(\.exe)?$') -or
+        ([string]$_.CommandLine -match '(?i)opencode\S*\s+serve\s+(\S+\s+)*--service(\s|$)')
+    } | ForEach-Object {"pid $($_.Id): $($_.CommandLine)"})
+}
+# Every process of this machine as rows for Select-LeftoverProcesses.
+function Get-ProcessRows {
+    if ($script:OnWindows) {
+        return @(Get-CimInstance Win32_Process | ForEach-Object {
+            [pscustomobject]@{Id=$_.ProcessId;Name=$_.Name;CommandLine=$(if ($_.CommandLine) {$_.CommandLine} else {$_.Name})}
+        })
+    }
+    $rows=foreach ($line in @(& ps -A -o pid= -o args= 2>$null)) {
+        if ([string]$line -match '^\s*(\d+)\s+(.+)$') {
+            $command=$Matches[2]
+            [pscustomobject]@{Id=[int]$Matches[1];Name=((($command -split '\s+')[0]) -split '/')[-1];CommandLine=$command}
+        }
+    }
+    return @($rows)
+}
+# What is still running after up to -Seconds (a program may need a moment
+# to end after setup exits).
+function Wait-NoLeftoverProcesses([int]$Seconds=15) {
+    for ($i=0;;$i++) {
+        $left=@(Select-LeftoverProcesses (Get-ProcessRows))
+        if (-not $left.Count -or $i -ge 2*$Seconds) {return ,$left}
+        Start-Sleep -Milliseconds 500
+    }
 }
