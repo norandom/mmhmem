@@ -95,7 +95,7 @@ Sources are the official docs (URLs below) and the agents' own CLIs on Windows
 
 | Agent | Registration (confirmed) | Non-interactive add / remove | Check command and output |
 |---|---|---|---|
-| Claude Code | User scope is stored in `~/.claude.json` (docs: code.claude.com/docs/en/mcp, scope table). A stdio entry has `command`, `args` and `env`, and `type` is optional | `claude mcp add --scope user --transport stdio mmhmem -- <bin> stdio`; `claude mcp remove mmhmem -s user` (the remove hint is printed by `get`) | `claude mcp get mmhmem` prints `Scope`, `Status: ✔ Connected` (U+2714), `Type`, `Command`, `Args`. `claude mcp list` health-checks every server, including remote ones, and is slow. **Use `get`** |
+| Claude Code | User scope is stored in `~/.claude.json` (docs: code.claude.com/docs/en/mcp, scope table). A stdio entry has `command`, `args` and `env`, and `type` is optional | `claude mcp add --scope user --transport stdio mmhmem -- <bin> stdio`; `claude mcp remove mmhmem -s user` (the remove hint is printed by `get`) | `claude mcp get mmhmem` prints `Scope`, `Status: ✔ Connected` (U+2714; `√` U+221A outside Windows Terminal, see below), `Type`, `Command`, `Args`. `claude mcp list` health-checks every server, including remote ones, and is slow. **Use `get`** |
 | Codex | `[mcp_servers.mmhmem]` with `command`, `args`, optional `env`, `cwd`, `startup_timeout_sec`, `enabled` in `~/.codex/config.toml` (learn.chatgpt.com/docs/extend/mcp, redirected from developers.openai.com/codex/mcp) | `codex mcp add mmhmem -- <bin> stdio`; `codex mcp remove mmhmem` | `codex mcp get mmhmem` (text) and `codex mcp list --json` (array of `{name, enabled, transport{type, command, args, env, env_vars, cwd}, …}`). **`--json` prints env values unmasked**, so it is parsed in memory and never logged. It doesn't report connection status: the check proves connectivity with its own MCP handshake |
 | Codex hooks | `~/.codex/hooks.json` `{hooks:{<Event>:[{matcher, hooks:[{type:"command", command, timeout}]}]}}`. Non-managed hooks must be reviewed and trusted by exact hash in `/hooks` (learn.chatgpt.com/codex/hooks) | — | Approval stays a pending user step |
 | OpenCode | `mcp.servers.<name> = {type:"local", command:[bin, "stdio"], enabled?, environment?, cwd?, timeout?}`. Global `~/.config/opencode/opencode.json` **or** `opencode.jsonc`; both exist on this machine and both are loaded (`opencode debug config` lists them as separate sources). Subfolders are plural: `plugins/`, `commands/`, `skills/` (singular folders still accepted) | `opencode mcp add [--global] mmhmem -- <bin> stdio` writes the entry itself. No remove subcommand in 2.2.5 | `opencode mcp list` prints `✓ <name>  connected`. See the race below |
@@ -126,6 +126,32 @@ Consequences:
   (`%TEMP%\oc-probe`, `%TEMP%\oc-proj-19e1779a`) are locked by it for now.
   The installer runs its OpenCode check from the user's home folder and
   never creates project folders.
+
+### Claude Code's status tick depends on the terminal (2026-11-05)
+
+First real installer-e2e run (41883221749, Claude Code 2.1.311, not signed
+in, isolated USERPROFILE/APPDATA): Codex and OpenCode passed, but both
+Windows legs reported "Claude Code lists mmhmem but could not connect to it"
+and rolled back. `claude mcp get` had exited 0 and shown `Scope: User config`
+(so it read our `~/.claude.json`; no Known Folder mismatch), but the status
+was not `✔ Connected`.
+
+Reproduced locally with Claude Code 2.1.302 in an isolated home, not signed
+in, entry `{type: "stdio", command, args: ["stdio"]}`:
+- with `WT_SESSION` set (Windows Terminal): `Status: ✔ Connected` (U+2714);
+- with `WT_SESSION` unset, as on the GitHub runners and in a plain
+  `powershell.exe`/`cmd.exe` console, also with `CI=true`:
+  `Status: √ Connected` (U+221A), exit 0.
+
+So the CLI did connect; Claude Code swaps its symbols for console fallbacks
+when it does not detect a Unicode terminal. No sign-in is needed for a stdio
+server, the health check is not the problem, and `type: stdio` is fine. The
+check now accepts `✔`, `√` or `✓` followed by `Connected`
+(`claude_code_check.rs`, `check_tests.rs`), which also fixes the same false
+failure for users who run the installer outside Windows Terminal. The e2e
+expectation stays `agent_command=pass` for Claude Code. A failed e2e leg now
+prints `claude mcp get mmhmem` and `claude mcp list` for a throwaway entry
+(`e2e-run.ps1 -Phase agent-diagnostics`, `if: failure()`).
 
 ## 9. Windows `.tgz` report (task 1.3, 2026-11-04)
 

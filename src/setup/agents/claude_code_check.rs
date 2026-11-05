@@ -4,8 +4,8 @@
 //! 1–2. The registration is read from `~/.claude.json` `mcpServers.mmhmem`
 //!    (the bytes Claude Code loads) and started with the MCP check.
 //! 3. `claude mcp get mmhmem`, run from the home folder, must show
-//!    `Scope: User config`, `Status: ✔ Connected` and the installed program
-//!    with `Args: stdio`. Not `claude mcp list`, which health-checks every
+//!    `Scope: User config`, `Status: ✔ Connected` (or the console fallback
+//!    `√ Connected`) and the installed program with `Args: stdio`. Not `claude mcp list`, which health-checks every
 //!    remote server and is slow.
 //! 4. With the read hook on: `<binary> hook claude` on a sample `Read`.
 //! 5. `claude mcp get` exits 0 only when Claude Code loaded its settings, so
@@ -68,6 +68,22 @@ fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
         .map(str::trim)
 }
 
+/// The tick Claude Code puts before `Connected`. It prints `✔` (U+2714) where
+/// it trusts the terminal with Unicode (Windows Terminal, macOS, Linux) and
+/// the fallback `√` (U+221A) in other Windows consoles and pipes without
+/// Windows Terminal: what the CI runners and a plain `powershell.exe` window
+/// get (research.md §8). `✓` (U+2713) is accepted as the same mark.
+const CONNECTED_TICKS: [char; 3] = ['\u{2714}', '\u{221A}', '\u{2713}'];
+
+/// `✔ Connected` (or a fallback tick): the status of a reachable server.
+fn shows_connected(status: &str) -> bool {
+    let mut chars = status.chars();
+    chars
+        .next()
+        .is_some_and(|tick| CONNECTED_TICKS.contains(&tick))
+        && chars.as_str().trim_start().starts_with("Connected")
+}
+
 /// Checks scope, status and command of a `claude mcp get` answer.
 pub(super) fn parse_get(text: &str, binary: &Path, os: Os) -> StepResult {
     let (Some(scope), Some(status)) = (field(text, "Scope"), field(text, "Status")) else {
@@ -76,7 +92,7 @@ pub(super) fn parse_get(text: &str, binary: &Path, os: Os) -> StepResult {
     if !scope.starts_with("User config") {
         return StepResult::Fail(AgentFailure::WrongScope);
     }
-    if !(status.starts_with('\u{2714}') && status.contains("Connected")) {
+    if !shows_connected(status) {
         return StepResult::Fail(AgentFailure::NotConnected);
     }
     let command = field(text, "Command").unwrap_or("");

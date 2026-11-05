@@ -24,6 +24,16 @@ WORKDIR /build
 # component is irrelevant in a build container) and Cargo.lock pins the deps.
 COPY Cargo.toml Cargo.lock clippy.toml ./
 COPY src ./src
+# The files `src/setup/assets.rs` embeds with include_str! (and only those:
+# .dockerignore re-includes exactly these from the otherwise excluded deploy/;
+# tests/docker_context.rs keeps both lists equal to setup::assets::ALL).
+COPY deploy/skills/unified-memory/SKILL.md ./deploy/skills/unified-memory/
+COPY deploy/codex/skills/mmhmem-recap/SKILL.md ./deploy/codex/skills/mmhmem-recap/
+COPY deploy/commands/claude/mmhmem-recap.md ./deploy/commands/claude/
+COPY deploy/commands/opencode/mmhmem-recap.md ./deploy/commands/opencode/
+COPY deploy/commands/codex/mmhmem-recap.md ./deploy/commands/codex/
+COPY deploy/instructions/mmhmem-routing.md ./deploy/instructions/
+COPY deploy/opencode/mmhmem-read-routing.js ./deploy/opencode/
 # Optional compile cache (ci-dependency-cache). Hosted CI passes the pinned
 # sccache URL and SHA-256 plus a BuildKit secret `sccache_env` with the GitHub
 # cache credentials; a plain `docker build` sets neither and runs the

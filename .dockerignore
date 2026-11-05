@@ -7,6 +7,15 @@ target
 scripts
 tests
 deploy
+# ...except the files the binary embeds (src/setup/assets.rs; the Dockerfile
+# copies exactly these; tests/docker_context.rs keeps the lists in sync).
+!deploy/skills/unified-memory/SKILL.md
+!deploy/codex/skills/mmhmem-recap/SKILL.md
+!deploy/commands/claude/mmhmem-recap.md
+!deploy/commands/opencode/mmhmem-recap.md
+!deploy/commands/codex/mmhmem-recap.md
+!deploy/instructions/mmhmem-routing.md
+!deploy/opencode/mmhmem-read-routing.js
 data
 log
 workspace

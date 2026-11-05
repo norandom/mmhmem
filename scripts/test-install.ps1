@@ -7,7 +7,9 @@ $originalTemp = $env:TEMP
 $originalTmp = $env:TMP
 $originalLocal = $env:LOCALAPPDATA
 $originalPath = $env:PATH
-[IO.File]::WriteAllText((Join-Path $scratch 'codex.cmd'), '@exit /b 0')
+# Agent CLI stand-ins: the engine detects an agent by its command, so these checks must not
+# depend on which agents this machine has installed (CI runners have none).
+foreach ($cli in @('codex', 'opencode')) { [IO.File]::WriteAllText((Join-Path $scratch "$cli.cmd"), '@exit /b 0') }
 $env:PATH = $scratch + ';' + $env:PATH
 $env:TEMP = $scratch
 $env:TMP = $scratch

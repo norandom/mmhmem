@@ -520,6 +520,13 @@ jobs:
         run: ./scripts/e2e-run.ps1 -Phase seed
       - name: Invalid opencode.json - only OpenCode skipped, the others installed
         run: ./scripts/e2e-run.ps1 -Phase invalid-config
+      # Diagnostics only: what the real `claude mcp get/list` answer for a
+      # throwaway mmhmem entry in a separate isolated home (no installer runs;
+      # env values are masked). Evidence for research.md §8, never a pass.
+      - name: Agent CLI diagnostics (only after a failure)
+        if: failure()
+        continue-on-error: true
+        run: ./scripts/e2e-run.ps1 -Phase agent-diagnostics
       - name: Stop the server
         if: always()
         run: ./scripts/e2e-run.ps1 -Phase stop

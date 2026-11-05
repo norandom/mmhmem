@@ -29,7 +29,12 @@ Phases (harness, task 8.1):
   seed              create and seed home/, write the SHA-256 manifest and the
                     'seeded' home snapshot; on Windows snapshot
                     HKCU\Environment\Path once per job (a later seed restores it)
-  serve             start a local HTTP server (python -m http.server) on site/
+  serve             start a local HTTP server (scripts/e2e-http-server.py) on
+                    site/; a later phase reuses it, or restarts it if the
+                    process in server.pid stopped answering
+  agent-diagnostics only after a failure: `claude --version`, `claude mcp get
+                    mmhmem` and `claude mcp list` for a throwaway entry in a
+                    separate isolated home (diag-home/), env values masked
   install           run the exact user one-liner without a terminal:
                       curl -fsSL <url>/install.sh | sh
                       irm <url>/install.ps1 | iex
@@ -63,7 +68,7 @@ param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('keygen','release','seed','serve','install','assert-installed','compare-seed','stop',
         'pty-selftest','menu-install','rerun','install-old','update','remove','cancel-at-review','download-404',
-        'bad-hash','bad-signature','invalid-config')]
+        'bad-hash','bad-signature','invalid-config','agent-diagnostics')]
     [string]$Phase,
     [string]$WorkDir,
     [string]$Tag,
@@ -260,15 +265,38 @@ function Test-Port([int]$Number) {
 function Test-Url([string]$Url) {
     try {$r=Invoke-WebRequest -UseBasicParsing -Uri $Url -Method Head -TimeoutSec 10;return ($r.StatusCode -eq 200)} catch {return $false}
 }
+# The server this harness started (server.pid, still running as Python), or $null.
+function Get-OwnServer {
+    $pidFile=Join-Path $WorkDir 'server.pid'
+    if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) {return $null}
+    $id=0
+    if (-not [int]::TryParse(([IO.File]::ReadAllText($pidFile)).Trim(),[ref]$id)) {return $null}
+    $p=Get-Process -Id $id -ErrorAction SilentlyContinue
+    if ($p -and $p.ProcessName -match '^python') {return $p}
+    return $null
+}
 function Start-Server {
     $release=Get-Release
     $url="$($release.base_url)/install.sh"
     if (Test-Url $url) {Write-Host "Server already serving $($release.base_url)";return}
+    # Our own server that stopped answering is replaced; only a process this
+    # harness did not start makes the port "taken".
+    $own=Get-OwnServer
+    if ($own) {
+        Write-Host "The harness's server (pid $($own.Id)) does not answer $url; restarting it"
+        Stop-Process -Id $own.Id -Force
+        $null=$own.WaitForExit(10000)
+        Remove-Item -LiteralPath (Join-Path $WorkDir 'server.pid') -Force
+        for ($i=0;$i -lt 50 -and (Test-Port $release.port);$i++) {Start-Sleep -Milliseconds 200}
+    }
     if (Test-Port $release.port) {throw "Port $($release.port) is taken by another program; the bootstraps were rendered for it"}
     $python=Get-Python
-    $arguments=@('-I','-m','http.server',[string]$release.port,'--bind','127.0.0.1','--directory',"`"$script:Site`"")
-    $options=@{FilePath=$python;ArgumentList=$arguments;PassThru=$true
-        RedirectStandardOutput=(Join-Path $script:Logs 'server.out');RedirectStandardError=(Join-Path $script:Logs 'server.log')}
+    # The server owns its log files (scripts/e2e-http-server.py): it must keep
+    # answering after this step's PowerShell, and any pipe it holds, is gone.
+    $quote={param([string]$s) '"'+$s+'"'}
+    $arguments=@('-I',(& $quote (Join-Path $PSScriptRoot 'e2e-http-server.py')),[string]$release.port,
+        (& $quote $script:Site),(& $quote (Join-Path $script:Logs 'server.out')),(& $quote (Join-Path $script:Logs 'server.log')))
+    $options=@{FilePath=$python;ArgumentList=$arguments;PassThru=$true}
     if ($script:OnWindows) {$options['WindowStyle']='Hidden'}
     $server=Start-Process @options
     Write-Utf8 (Join-Path $WorkDir 'server.pid') ([string]$server.Id)
@@ -280,9 +308,10 @@ function Start-Server {
 }
 
 # ------------------------------------------------- isolated environment ---
-function Get-IsolatedEnvironment {
+# -HomeDir: another throwaway home (agent-diagnostics); default the seeded one.
+function Get-IsolatedEnvironment([string]$HomeDir) {
     $state=Read-Json $script:StateFile
-    $h=$state.home
+    $h=if ($HomeDir) {$HomeDir} else {$state.home}
     $vars=[ordered]@{}
     foreach ($name in @('XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','CLAUDE_CONFIG_DIR','CODEX_HOME','OPENCODE_CONFIG','OPENCODE_CONFIG_DIR','ZDOTDIR')) {$vars[$name]=$null}
     # No auto-updates or optional traffic from the agent CLIs during the run.
@@ -322,9 +351,10 @@ function Get-IsolatedEnvironment {
 }
 # Runs a program with the isolated environment, stdin from an empty file
 # (so there is no terminal), output to logs/<Name>.out|.err. Returns the exit code.
-function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments) {
-    $vars=Get-IsolatedEnvironment
+function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[string]$HomeDir) {
+    $vars=Get-IsolatedEnvironment $HomeDir
     $state=Read-Json $script:StateFile
+    if ($HomeDir) {$state.home=$HomeDir}
     $saved=@{}
     foreach ($k in $vars.Keys) {$saved[$k]=[Environment]::GetEnvironmentVariable($k)}
     $stdin=Join-Path $script:Logs "$Name.stdin";Write-Utf8 $stdin ''
@@ -492,6 +522,46 @@ function Invoke-StopPhase {
     }
     if ($script:OnWindows) {Restore-UserPath}
 }
+
+# ----------------------------------------------------- agent-diagnostics ---
+# Runs only after a failed step (workflow `if: failure()`), never an installer:
+# what the real Claude Code CLI answers for an mmhmem entry, in a throwaway
+# isolated home (diag-home/, not the seeded one, so the evidence of the failed
+# phase stays as it was). The entry is ours and has no env values, so the
+# printed output holds no secrets; any `KEY=value` line is masked anyway.
+function Invoke-AgentDiagnosticsPhase {
+    $binary=(Get-ExpectedLayout).Binary
+    $diag=Join-Path $WorkDir 'diag-home'
+    if (Test-Path -LiteralPath $diag) {Remove-Item -LiteralPath $diag -Recurse -Force}
+    New-Item -ItemType Directory -Path $diag | Out-Null
+    if (Test-Path -LiteralPath $binary -PathType Leaf) {
+        $entry=[ordered]@{type='stdio';command=$binary;args=@('stdio');env=[ordered]@{}}
+        Write-Json (Join-Path $diag '.claude.json') ([ordered]@{mcpServers=[ordered]@{mmhmem=$entry}})
+        Write-Host "Throwaway ~/.claude.json in $diag registers $binary stdio"
+    } else {
+        Write-Host "No installed program at $binary; claude runs without an mmhmem entry"
+    }
+    $claude=Get-Command claude -ErrorAction SilentlyContinue
+    if (-not $claude) {Write-Host 'claude is not on PATH';return}
+    $hints=@('WT_SESSION','TERM','CI') | ForEach-Object {"$_=$(if ([Environment]::GetEnvironmentVariable($_)) {'set'} else {'unset'})"}
+    Write-Host "Terminal hints Claude Code reads for its symbols: $($hints -join ', ')"
+    foreach ($run in @(@('claude-version','--version'),@('claude-mcp-get','mcp get mmhmem'),@('claude-mcp-list','mcp list'))) {
+        try {Invoke-Isolated "diag-$($run[0])" $claude.Source $run[1] $diag 6>&1 | ForEach-Object {
+                # Invoke-Isolated echoes the output; mask env values before it reaches the log.
+                ([string]$_) -replace '^(\s+[A-Za-z_][A-Za-z0-9_]*)=.*$','$1=[masked]'
+            } | Write-Host
+        } catch {Write-Host "diag-$($run[0]): $_"}
+    }
+    foreach ($name in @('claude-mcp-get','claude-mcp-list')) {
+        foreach ($stream in @('out','err')) {
+            $file=Join-Path $script:Logs "diag-$name.$stream"
+            if (Test-Path -LiteralPath $file) {
+                $text=[IO.File]::ReadAllText($file) -replace '(?m)^(\s+[A-Za-z_][A-Za-z0-9_]*)=.*$','$1=[masked]'
+                Write-Utf8 $file $text
+            }
+        }
+    }
+}
 # Puts HKCU\Environment\Path back to the snapshot taken by the first seed.
 function Restore-UserPath {
     if (-not (Test-Path -LiteralPath $script:RegistrySnapshot)) {return}
@@ -511,7 +581,7 @@ function Restore-UserPath {
 # home cannot isolate (on Windows the user PATH lives in HKCU). They run only
 # on a disposable CI runner, or when a maintainer explicitly opts in.
 $machinePhases = @('install','menu-install','rerun','install-old','update','remove','cancel-at-review',
-    'download-404','bad-hash','bad-signature','invalid-config')
+    'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics')
 if ($machinePhases -contains $Phase -and $env:GITHUB_ACTIONS -ne 'true' -and
     $env:MMHMEM_E2E_ALLOW_LOCAL -ne 'I understand this changes my user PATH') {
     throw ("Phase '$Phase' runs the real installer, which changes this machine's user PATH. " +
@@ -539,6 +609,7 @@ switch ($Phase) {
     'bad-signature' {Invoke-BadSignaturePhase}
     'update' {Invoke-UpdatePhase}
     'invalid-config' {Invoke-InvalidConfigPhase}
+    'agent-diagnostics' {Invoke-AgentDiagnosticsPhase}
 }
 # A phase that returns has passed. Native helpers (py, uname, zipsign) leave
 # their own exit codes behind, and the Actions PowerShell wrappers exit with

@@ -56,8 +56,29 @@ fn is_running(pid: u32) -> bool {
     String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
 }
 
+/// Linux (and any Unix with procfs): `/proc/<pid>/stat` is gone once the
+/// process is reaped, and its state field is `Z` while it is a zombie. No
+/// `ps` is needed, so this works in minimal containers (the musl CI image
+/// has none).
 #[cfg(unix)]
 fn is_running(pid: u32) -> bool {
+    if Path::new("/proc/self/stat").exists() {
+        return match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            // The state follows the command name, which may itself hold
+            // spaces or parentheses: read it after the last `)`.
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                .is_some_and(|state| state != "Z" && state != "X"),
+            Err(_) => false,
+        };
+    }
+    is_running_ps(pid)
+}
+
+/// Where there is no procfs (macOS), `ps` is part of the base system.
+#[cfg(unix)]
+fn is_running_ps(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
         .output()

@@ -157,7 +157,12 @@ grep -q manage_hooks.py "$TEST_LOG"
 grep -q manage_routing.py "$TEST_LOG"
 grep -q routing_onboarding.py "$TEST_LOG"
 [ -z "$(ls -A "$scratch/temp")" ]
-bash "$root/install.sh" --help >/dev/null
+# --help also goes through the delegator, so it must use the stubbed network too
+# (a bare call needs the real network and fails in an offline container).
+: > "$TEST_LOG"
+run_bootstrap --help > "$scratch/help"
+grep -q -- '--remove-hooks' "$scratch/help"
+grep -qx 'https://raw.githubusercontent.com/norandom/mmhmem/v9.9.9/install.sh' "$TEST_LOG"
 # Exercise the real registration engine without executing a binary or editing user state.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$scratch/bin/codex"
 chmod +x "$scratch/bin/codex"

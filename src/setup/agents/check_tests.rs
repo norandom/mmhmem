@@ -113,6 +113,32 @@ fn claude_fx() -> (Fx, claude_code::ClaudeCode) {
     (fx, agent)
 }
 
+/// Claude Code 2.1.302 without Windows Terminal (`WT_SESSION` unset, as on
+/// the CI runners and in a plain console) prints `√ Connected` (U+221A).
+#[test]
+fn claude_code_accepts_the_console_fallback_tick() {
+    let (fx, agent) = claude_fx();
+    for (status, passes) in [
+        ("√ Connected", true),
+        ("✓ Connected", true),
+        ("√ Connecting…", false),
+        ("× Failed to connect", false),
+        ("Connected", false),
+    ] {
+        let get = claude_get(&fx, "User config", status);
+        fx.home
+            .runner
+            .on("claude", &["mcp", "get", "mmhmem"], vec![Reply::ok(&get)]);
+        let report = fx.check(&agent, &want(AgentId::ClaudeCode, &[Feature::Mcp]));
+        assert_eq!(
+            report.result == CheckResult::Pass,
+            passes,
+            "{status}: {}",
+            report.line
+        );
+    }
+}
+
 #[test]
 fn claude_code_passes_with_user_scope_connected_and_the_installed_program() {
     let (fx, agent) = claude_fx();
