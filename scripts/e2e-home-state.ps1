@@ -27,7 +27,10 @@ Comparison rules (Compare-HomeState), strict by default:
     entry only where the scenario expects it; every other seeded key and
     every seeded project entry unchanged except Claude's own counters
     ($script:ClaudeCounterKeys); keys Claude adds must not mention mmhmem.
-    With -Strict (scenarios where no tool ran: download-404, bad-hash) even
+    The first time it runs, Claude also moves legacy settings out of
+    ~/.claude.json into ~/.claude/settings.json (Get-ClaudeMoves); that file
+    is then compared parsed too (Compare-ClaudeSettings): everything as
+    before plus exactly those moves. With -Strict (scenarios where no tool ran: download-404, bad-hash) even
     ~/.claude.json must be byte-identical;
   - on Windows, the shell's own caches under %LOCALAPPDATA% / %APPDATA%
     ($script:ShellRuntimePatterns) may appear even with -Strict;
@@ -71,6 +74,20 @@ $script:ShellRuntimePatterns=@(
 )
 # Top-level ~/.claude.json keys that Claude Code itself counts up.
 $script:ClaudeCounterKeys=@('numStartups','tipsHistory')
+# Legacy ~/.claude.json settings Claude Code moves into ~/.claude/settings.json
+# the first time its CLI runs (2.1.311, reproduced in a throwaway home,
+# research.md section 8): "autoUpdates": false is removed and becomes
+# env.DISABLE_AUTOUPDATER "1"; "theme" stays and is copied. These moves, and
+# no others, are Claude's (Get-ClaudeMoves).
+function Get-ClaudeMoves($ClaudeJson) {
+    $moves=@{removed=@{};env=@{};copied=@{}}
+    if ($null -eq $ClaudeJson) {return $moves}
+    $auto=Get-JsonMember $ClaudeJson 'autoUpdates'
+    if ($auto[0] -and $auto[1] -is [bool] -and -not $auto[1]) {$moves.removed['autoUpdates']=$true;$moves.env['DISABLE_AUTOUPDATER']='1'}
+    $theme=Get-JsonMember $ClaudeJson 'theme'
+    if ($theme[0]) {$moves.copied['theme']=$theme[1]}
+    return $moves
+}
 
 # Where mmhmem keeps its things, relative to the home ('/'-separated).
 function Get-MmhmemRelativePaths {
@@ -103,8 +120,10 @@ function Get-HomeState([string]$Name) {
         catch {$files[$rel]='unreadable'}
     }
     $claude=Join-Path $script:SeedHome '.claude.json'
+    $settings=Join-Path $script:SeedHome '.claude/settings.json'
     $state=[ordered]@{name=$Name;files=$files;path=$null
-        claude_json=$(if (Test-Path -LiteralPath $claude -PathType Leaf) {[IO.File]::ReadAllText($claude)} else {$null})}
+        claude_json=$(if (Test-Path -LiteralPath $claude -PathType Leaf) {[IO.File]::ReadAllText($claude)} else {$null})
+        claude_settings=$(if (Test-Path -LiteralPath $settings -PathType Leaf) {[IO.File]::ReadAllText($settings)} else {$null})}
     if ($script:OnWindows) {$state.path=Get-UserPathSnapshot}
     $dir=Join-Path $script:WorkDirectory 'snapshots'
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -117,7 +136,7 @@ function Read-HomeState([string]$Name) {
     $raw=[IO.File]::ReadAllText($path) | ConvertFrom-Json
     $files=[ordered]@{}
     foreach ($p in $raw.files.PSObject.Properties) {$files[$p.Name]=[string]$p.Value}
-    return [ordered]@{name=$raw.name;files=$files;path=$raw.path;claude_json=$raw.claude_json}
+    return [ordered]@{name=$raw.name;files=$files;path=$raw.path;claude_json=$raw.claude_json;claude_settings=$raw.claude_settings}
 }
 
 # ------------------------------------------------------- canonical JSON ---
@@ -163,7 +182,9 @@ function Get-JsonMember($Object,[string]$Name) {
 # -Mode unchanged: mmhmem's server entry must be as before (both absent, or
 # equal); installed: it must be present now. Every other server entry, every
 # seeded key except the counters, and every seeded project must be equal.
-function Compare-ClaudeJson([string]$BeforeText,[string]$AfterText,[ValidateSet('unchanged','installed')][string]$Mode) {
+# A key Claude moves (Get-ClaudeMoves) may be gone only when -AfterSettings
+# (the ~/.claude/settings.json text now) holds it.
+function Compare-ClaudeJson([string]$BeforeText,[string]$AfterText,[ValidateSet('unchanged','installed')][string]$Mode,[string]$AfterSettings) {
     $failures=New-Object Collections.Generic.List[string]
     if ([string]::IsNullOrEmpty($AfterText)) {$failures.Add('~/.claude.json is missing or empty');return ,$failures.ToArray()}
     try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add('the earlier ~/.claude.json is not JSON');return ,$failures.ToArray()}
@@ -179,8 +200,17 @@ function Compare-ClaudeJson([string]$BeforeText,[string]$AfterText,[ValidateSet(
         if ((ConvertTo-CanonicalJson $b[1]) -cne (ConvertTo-CanonicalJson $a[1])) {$failures.Add("~/.claude.json mcpServers.$n changed")}
     }
     $afterNames=Get-JsonNames $after
+    $moves=Get-ClaudeMoves $before
     foreach ($key in (Get-JsonNames $before)) {
         if ($key -ceq 'mcpServers' -or $script:ClaudeCounterKeys -ccontains $key) {continue}
+        if ($afterNames -cnotcontains $key -and $moves.removed.ContainsKey($key)) {
+            $settingsEnv=$null
+            if ($AfterSettings) {try {$settingsEnv=(Get-JsonMember ($AfterSettings | ConvertFrom-Json) 'env')[1]} catch {}}
+            $moved=@($moves.env.Keys | Where-Object {(Get-JsonMember $settingsEnv $_)[1] -cne $moves.env[$_]}).Count -eq 0
+            if ($moved) {Write-Host "  claude-owned: key $key moved by Claude Code into ~/.claude/settings.json"}
+            else {$failures.Add("~/.claude.json lost the key $key (it is not in ~/.claude/settings.json either)")}
+            continue
+        }
         if ($afterNames -cnotcontains $key) {$failures.Add("~/.claude.json lost the key $key");continue}
         if ($key -ceq 'projects') {
             foreach ($p in (Get-JsonNames $before.projects)) {
@@ -204,6 +234,42 @@ function Compare-ClaudeJson([string]$BeforeText,[string]$AfterText,[ValidateSet(
     return ,$failures.ToArray()
 }
 
+# ---------------------------------------------- ~/.claude/settings.json ---
+# Failure messages comparing two ~/.claude/settings.json texts, after Claude
+# Code ran with -ClaudeJson (the ~/.claude.json text before it ran). Every
+# key and every env entry must be as before (parsed: Claude rewrites the
+# formatting); the only additions allowed are Claude's moves out of
+# ~/.claude.json (Get-ClaudeMoves), each with exactly the moved value.
+function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$ClaudeJson) {
+    $failures=New-Object Collections.Generic.List[string]
+    if ([string]::IsNullOrEmpty($AfterText)) {$failures.Add('~/.claude/settings.json is missing or empty');return ,$failures.ToArray()}
+    try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add('the earlier ~/.claude/settings.json is not JSON');return ,$failures.ToArray()}
+    try {$after=$AfterText | ConvertFrom-Json} catch {$failures.Add('~/.claude/settings.json is no longer valid JSON');return ,$failures.ToArray()}
+    $moves=Get-ClaudeMoves $(if ($ClaudeJson) {try {$ClaudeJson | ConvertFrom-Json} catch {$null}} else {$null})
+    $bEnv=(Get-JsonMember $before 'env')[1];$aEnv=(Get-JsonMember $after 'env')[1]
+    foreach ($n in (Get-JsonNames $bEnv)) {
+        $a=Get-JsonMember $aEnv $n
+        if (-not $a[0] -or (ConvertTo-CanonicalJson $bEnv.$n) -cne (ConvertTo-CanonicalJson $a[1])) {$failures.Add("~/.claude/settings.json env.$n changed")}
+    }
+    foreach ($n in (Get-JsonNames $aEnv)) {
+        if ((Get-JsonNames $bEnv) -ccontains $n) {continue}
+        if ($moves.env.ContainsKey($n) -and $aEnv.$n -ceq $moves.env[$n]) {Write-Host "  claude-owned: settings env.$n moved by Claude Code from ~/.claude.json"}
+        else {$failures.Add("~/.claude/settings.json env.$n was added")}
+    }
+    $afterNames=Get-JsonNames $after
+    foreach ($key in (Get-JsonNames $before)) {
+        if ($key -ceq 'env') {continue}
+        if ($afterNames -cnotcontains $key) {$failures.Add("~/.claude/settings.json lost the key $key");continue}
+        if ((ConvertTo-CanonicalJson $before.$key) -cne (ConvertTo-CanonicalJson $after.$key)) {$failures.Add("~/.claude/settings.json key $key changed")}
+    }
+    foreach ($key in $afterNames) {
+        if ($key -ceq 'env' -or (Get-JsonNames $before) -ccontains $key) {continue}
+        if ($moves.copied.ContainsKey($key) -and (ConvertTo-CanonicalJson $after.$key) -ceq (ConvertTo-CanonicalJson $moves.copied[$key])) {Write-Host "  claude-owned: settings key $key copied by Claude Code from ~/.claude.json"}
+        else {$failures.Add("~/.claude/settings.json key $key was added")}
+    }
+    return ,$failures.ToArray()
+}
+
 # ------------------------------------------------------------- compare ---
 # Failure messages between two home states (rules in the header).
 # -Expected: path patterns this scenario may change, add or remove
@@ -221,9 +287,15 @@ function Compare-HomeState($Before,$After,[string[]]$Expected=@(),[switch]$Stric
         $kind=if (-not $b) {'new'} elseif (-not $a) {'removed'} else {'changed'}
         if (Test-AnyLike $rel $Expected) {Write-Host "  expected-$kind  $rel";continue}
         if (-not $Strict -and $rel -ceq '.claude.json' -and $b -and $a) {
-            $claude=Compare-ClaudeJson $Before.claude_json $After.claude_json $ClaudeMode
+            $claude=Compare-ClaudeJson $Before.claude_json $After.claude_json $ClaudeMode $After.claude_settings
             if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}}
             else {Write-Host '  claude-owned  .claude.json rewritten by Claude Code; every unrelated setting is equal (parsed)'}
+            continue
+        }
+        if (-not $Strict -and $rel -ceq '.claude/settings.json' -and $b -and $a) {
+            $claude=Compare-ClaudeSettings $Before.claude_settings $After.claude_settings $Before.claude_json
+            if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}}
+            else {Write-Host '  claude-owned  .claude/settings.json rewritten by Claude Code; only its own moves (parsed)'}
             continue
         }
         if (-not $seeded.Contains($rel) -and $script:OnWindows -and (Test-AnyLike $rel $script:ShellRuntimePatterns)) {Write-Host "  shell-own-$kind  $rel";continue}

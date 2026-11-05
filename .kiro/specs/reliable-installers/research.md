@@ -153,6 +153,77 @@ expectation stays `agent_command=pass` for Claude Code. A failed e2e leg now
 prints `claude mcp get mmhmem` and `claude mcp list` for a throwaway entry
 (`e2e-run.ps1 -Phase agent-diagnostics`, `if: failure()`).
 
+### Second e2e run: three failures after every check passed (2026-11-05)
+
+Run 41977950239 (commit a6c1779; Claude Code 2.1.311, OpenCode 2.2.5). The
+default install passed every agent's check on all legs; three separate causes
+remained.
+
+**Claude Code moves `autoUpdates` out of `~/.claude.json` (Linux: "lost the
+key autoUpdates").** Not mmhmem. Reproduced with the real Claude Code 2.1.311
+(npm package for Windows, and the `claude-code-linux-x64` binary in WSL), each
+in a throwaway home holding only the e2e seed, mmhmem not involved, one
+`claude mcp get <seeded server>`:
+- `~/.claude.json` loses `"autoUpdates": false`; every other seeded key stays
+  (`theme` too). Claude adds its own keys (`firstStartTime`, `machineID`,
+  `migrationVersion`, ...) and saves the old file to
+  `~/.claude/backups/.claude.json.backup.<ms>`.
+- `~/.claude/settings.json` (seeded) is rewritten: every seeded setting stays,
+  `env.DISABLE_AUTOUPDATER: "1"` is added (the moved `autoUpdates: false`) and
+  `theme` is copied from `~/.claude.json`.
+- Windows does the same, so both Windows legs would have failed here too,
+  once the log could be read.
+
+The e2e now allows exactly these moves (`Get-ClaudeMoves` in
+`e2e-home-state.ps1`): `autoUpdates` may be gone from `~/.claude.json` only
+when it was `false` and `~/.claude/settings.json` now has
+`env.DISABLE_AUTOUPDATER = "1"`; `~/.claude/settings.json` is compared parsed
+(`Compare-ClaudeSettings`) and may only gain that env entry and the copied
+`theme` with the same value.
+
+**The isolated environment set empty variables on pwsh 7.** On Linux, Claude
+wrote its backup and migrated settings to `~/backups/` and `~/settings.json`,
+not under `~/.claude/`. Cause: `Invoke-Isolated` cleared `CLAUDE_CONFIG_DIR`,
+`XDG_*`, `CODEX_HOME` and `OPENCODE_CONFIG*` with
+`[Environment]::SetEnvironmentVariable($k, $null)`. PowerShell passes `$null`
+to a `[string]` parameter as `''`. Since .NET 9 an empty value sets an empty
+variable instead of removing it. Checked locally: pwsh 7.6 (.NET 10) leaves
+`FOO=` for a child, while Windows PowerShell 5.1 removes it. Claude took
+`CLAUDE_CONFIG_DIR=''` as the current folder (the home). Variables are now
+removed with `[NullString]::Value` in both editions.
+
+**OpenCode's background service keeps setup's log open (Windows: "The process
+cannot access the file ... install.out").** `opencode mcp list` (the OpenCode
+check) starts OpenCode's managed service, `opencode.exe serve --service`
+(port in `~/.config/opencode/service.json`). It keeps running after the
+command by design and starts the configured local MCP servers itself. On
+Windows it also inherits the inheritable handles of the process chain, which
+include setup's redirected stdout. Reproduced locally: an isolated home with
+its own service port, a parent with stdout redirected to a file, and
+`opencode mcp list` with piped output. After everything exited, the file
+could not be opened by `ReadAllText` (FileShare.Read). The only leftover was
+`opencode.exe serve --service`, a child of that `opencode mcp list`. With an
+enabled local server in the config, the service also kept that server's
+process running. Stopping the service released the file. The service belongs
+to OpenCode, not to mmhmem, so mmhmem must not stop it. The e2e reads logs
+sharing them with a writer, as `Get-Content` does (`Read-Log`).
+Consequence for later phases (not seen yet): in the e2e the service keeps
+`mmhmem stdio` running from the installed program, which can hold the
+program file on Windows during remove or update.
+
+**macOS menu ended with exit 1 at the first key read (cancel-at-review).**
+The bootstrap starts setup with stdin from `/dev/tty`. The raw pty output
+shows one frame drawn, then the terminal restored and exit 1 with no message.
+crossterm's default event reader registers the input fd with mio. On macOS
+that is kqueue, which rejects `/dev/tty` with EINVAL (tokio-rs/mio#1377,
+closed: "It's up to macOS to support tty in kqueue"). Linux epoll accepts it,
+which is why the same scenario passes there. The event-loop error was
+swallowed (`unwrap_or(1)`). Fixes: crossterm's `use-dev-tty` feature on macOS
+(its own reader polls with `select()` on macOS, from the `filedescriptor`
+crate), and setup now prints why the menu stopped. This affected every macOS
+`curl | sh` user, not only CI. The pty driver also notes when the program had
+already ended before a step failed.
+
 ## 9. Windows `.tgz` report (task 1.3, 2026-11-04)
 
 - No mmhmem release has published a `.tgz`, `.tar.gz` or `.zip`. Assets per

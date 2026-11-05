@@ -87,6 +87,52 @@ try {
     $lost.PSObject.Properties.Remove('hasCompletedOnboarding')
     Assert-Failures (Compare-ClaudeJson $seedText ($lost | ConvertTo-Json -Depth 10) 'unchanged') 1 'a lost seeded key fails' 'lost the key hasCompletedOnboarding'
 
+    # ---- Claude Code's own moves into ~/.claude/settings.json (research.md
+    # section 8): autoUpdates false -> env.DISABLE_AUTOUPDATER "1", theme copied.
+    $seedSettings=[IO.File]::ReadAllText((Join-Path $script:SeedHome '.claude/settings.json'))
+    $migrated=$seedSettings | ConvertFrom-Json
+    $migrated.env | Add-Member -NotePropertyName DISABLE_AUTOUPDATER -NotePropertyValue '1'
+    $migrated | Add-Member -NotePropertyName theme -NotePropertyValue 'dark-daltonized'
+    $migratedText=$migrated | ConvertTo-Json -Depth 10
+    $moved=$claudeLike | ConvertFrom-Json
+    $moved.PSObject.Properties.Remove('autoUpdates')
+    $movedText=$moved | ConvertTo-Json -Depth 10
+    Assert-Failures (Compare-ClaudeJson $seedText $movedText 'unchanged' $migratedText) 0 'autoUpdates moved by Claude Code into settings.json passes'
+    Assert-Failures (Compare-ClaudeJson $seedText $movedText 'unchanged' $seedSettings) 1 'autoUpdates gone but not in settings.json fails' 'lost the key autoUpdates'
+    Assert-Failures (Compare-ClaudeJson $seedText $movedText 'unchanged') 1 'autoUpdates gone without a settings.json fails' 'lost the key autoUpdates'
+    $autoTrue=$seedText | ConvertFrom-Json
+    $autoTrue.autoUpdates=$true
+    Assert-Failures (Compare-ClaudeJson ($autoTrue | ConvertTo-Json -Depth 10) $movedText 'unchanged' $migratedText) 1 'only autoUpdates false is a known move' 'lost the key autoUpdates'
+    Assert-Failures (Compare-ClaudeSettings $seedSettings $migratedText $seedText) 0 "Claude Code's settings.json rewrite passes parsed"
+    Assert-Failures (Compare-ClaudeSettings $seedSettings $seedSettings $seedText) 0 'an unchanged settings.json passes'
+    Assert-Failures (Compare-ClaudeSettings $seedSettings $migratedText ($autoTrue | ConvertTo-Json -Depth 10)) 1 'the env entry needs autoUpdates false before' 'env.DISABLE_AUTOUPDATER was added'
+    $extraEnv=$migratedText | ConvertFrom-Json
+    $extraEnv.env | Add-Member -NotePropertyName MMHMEM_X -NotePropertyValue '1'
+    Assert-Failures (Compare-ClaudeSettings $seedSettings ($extraEnv | ConvertTo-Json -Depth 10) $seedText) 1 'another env entry fails' 'env.MMHMEM_X was added'
+    $userEnv=$migratedText | ConvertFrom-Json
+    $userEnv.env.EDITOR_HINT='nano'
+    Assert-Failures (Compare-ClaudeSettings $seedSettings ($userEnv | ConvertTo-Json -Depth 10) $seedText) 1 "the user's env entry is strict" 'env.EDITOR_HINT changed'
+    $otherTheme=$migratedText | ConvertFrom-Json
+    $otherTheme.theme='light'
+    Assert-Failures (Compare-ClaudeSettings $seedSettings ($otherTheme | ConvertTo-Json -Depth 10) $seedText) 1 'a copied theme must have the same value' 'key theme was added'
+    $lostHooks=$migratedText | ConvertFrom-Json
+    $lostHooks.PSObject.Properties.Remove('hooks')
+    Assert-Failures (Compare-ClaudeSettings $seedSettings ($lostHooks | ConvertTo-Json -Depth 10) $seedText) 1 'a lost seeded setting fails' 'lost the key hooks'
+    $newKey=$migratedText | ConvertFrom-Json
+    $newKey | Add-Member -NotePropertyName enabledPlugins -NotePropertyValue ([pscustomobject]@{x=$true})
+    Assert-Failures (Compare-ClaudeSettings $seedSettings ($newKey | ConvertTo-Json -Depth 10) $seedText) 1 'any other new key fails' 'key enabledPlugins was added'
+
+    # ---- a log a program left running still writes to (OpenCode's service).
+    $held=New-Object IO.FileStream((Join-Path $script:Logs 'held.out'),[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+    try {
+        $bytes=[Text.Encoding]::UTF8.GetBytes("still running`n");$held.Write($bytes,0,$bytes.Length);$held.Flush()
+        $refused=$false
+        try {$null=[IO.File]::ReadAllText((Join-Path $script:Logs 'held.out'))} catch {$refused=$true}
+        # Only Windows enforces the sharing mode between processes.
+        if ($script:OnWindows) {Assert-True $refused 'ReadAllText refuses a log another program holds for writing'}
+        Assert-True ((Read-Log 'held').Contains('still running')) 'Read-Log reads a log another program holds for writing'
+    } finally {$held.Dispose()}
+
     # ---- home states.
     $seeded=Get-HomeState 'seeded'
     Assert-True ($seeded.files.Count -eq 12) 'every seeded file is in the state'
@@ -130,6 +176,16 @@ try {
         Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'path-ok') @('.codex/config.toml','.claude.json','HKCU:Path')) 0 'an expected PATH change is allowed'
         $script:FakePath.value='C:\a;C:\b'
     }
+    # Claude Code's first run: ~/.claude.json loses autoUpdates, which lands in
+    # the seeded ~/.claude/settings.json.
+    Write-Utf8 (Join-Path $script:SeedHome '.claude.json') $movedText
+    Write-Utf8 (Join-Path $script:SeedHome '.claude/settings.json') $migratedText
+    $movedState=Get-HomeState 'claude-moved'
+    Assert-True ($movedState.claude_settings -ceq $migratedText -and (Read-HomeState 'claude-moved').claude_settings -ceq $migratedText) 'a state keeps the settings.json text'
+    Assert-Failures (Compare-HomeState $seeded $movedState @('.codex/config.toml')) 0 "Claude Code's moves into settings.json pass parsed"
+    Assert-Failures (Compare-HomeState $seeded $movedState @('.codex/config.toml') -Strict) 2 'strict compares both files by bytes' 'changed file: .claude/settings.json'
+    Write-Utf8 (Join-Path $script:SeedHome '.claude/settings.json') ($extraEnv | ConvertTo-Json -Depth 10)
+    Assert-Failures (Compare-HomeState $seeded (Get-HomeState 'claude-moved-extra') @('.codex/config.toml')) 1 'an env entry Claude does not move fails' 'env.MMHMEM_X was added'
 
     # ---- broken releases for download-404 and bad-hash.
     $tag='v0.0.9'

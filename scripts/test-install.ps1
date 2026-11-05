@@ -169,3 +169,7 @@ Write-Host ("PROBE agent=$Agent model=$WorkerModel url=$WorkerUrl key=$WorkerApi
     $env:LOCALAPPDATA = $originalLocal
     $env:PATH = $originalPath
 }
+# Every failure above throws. Some checks run native commands that are meant to fail, and
+# a runner's `shell: powershell` exits with the last $LASTEXITCODE, so report success
+# explicitly.
+exit 0

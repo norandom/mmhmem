@@ -13,6 +13,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 
 use super::{App, Control, Key};
 use crate::setup::ui::flow::{Flow, Newest};
+use crate::setup::ui::text;
 
 /// How often the loop looks for the release answer while no key comes.
 const POLL: Duration = Duration::from_millis(200);
@@ -50,8 +51,13 @@ pub fn run_terminal(flow: Flow, lookup: Lookup) -> Result<(i32, Box<Flow>), Term
         let _ = tx.send(lookup());
     });
     let mut app = App::new(flow);
-    let code = event_loop(&mut terminal, &mut app, &rx).unwrap_or(1);
+    let result = event_loop(&mut terminal, &mut app, &rx);
     drop(restore);
+    // Said on the normal screen, so the user sees why the menu closed.
+    let code = result.unwrap_or_else(|error| {
+        eprintln!("{}", text::menu_stopped(&error.to_string()));
+        1
+    });
     Ok((code, Box::new(app.into_flow())))
 }
 

@@ -62,11 +62,18 @@ function Assert-NoFailures([string]$Phase,$Failures) {
     if ($list.Count) {foreach ($f in $list) {Write-Host "FAIL: $f"};throw "${Phase}: $($list.Count) failure(s)"}
     Write-Host "${Phase}: OK"
 }
+# A run's output. On Windows a program an agent CLI leaves running keeps the
+# log open for writing: `opencode mcp list` starts OpenCode's own background
+# service (`opencode serve --service`), which stays up by design and
+# inherits setup's output handle (research.md section 8). ReadAllText would
+# refuse the file; it is read sharing it with that writer, as Get-Content does.
 function Read-Log([string]$Name) {
     $text=''
     foreach ($ext in @('out','err')) {
         $file=Join-Path $script:Logs "$Name.$ext"
-        if (Test-Path -LiteralPath $file) {$text+=[IO.File]::ReadAllText($file)+"`n"}
+        if (-not (Test-Path -LiteralPath $file)) {continue}
+        $stream=New-Object IO.FileStream($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        try {$text+=(New-Object IO.StreamReader($stream,$true)).ReadToEnd()+"`n"} finally {$stream.Dispose()}
     }
     return $text
 }

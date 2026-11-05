@@ -288,7 +288,14 @@ fn run_script(script: &Script, prefix: &str) -> Result<i32, String> {
             started.elapsed().as_secs_f32()
         );
         if let Err(e) = session.run(step, limit) {
-            failure = Some(format!("line {line} ({text}): {e}"));
+            // A program that ended early explains a screen that never came.
+            let ended = match (step, session.exit) {
+                (Step::Exit(_), _) | (_, None) => String::new(),
+                (_, Some(code)) => {
+                    format!(" (the program had already ended with exit code {code})")
+                }
+            };
+            failure = Some(format!("line {line} ({text}): {e}{ended}"));
             break;
         }
         session.dump(&format!("after line {line}: {text}"));

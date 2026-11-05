@@ -349,6 +349,15 @@ function Get-IsolatedEnvironment([string]$HomeDir) {
     $vars['PATH']=$kept -join $sep
     return $vars
 }
+# Sets (or, for $null, removes) a variable of this process. A $null passed
+# as a [string] reaches .NET as '', and pwsh 7 (.NET 9 and later) then sets
+# an EMPTY variable instead of removing it: Claude Code took
+# CLAUDE_CONFIG_DIR='' for the current folder (research.md section 8).
+# [NullString]::Value removes it in both editions.
+function Set-ProcessVariable([string]$Name,$Value) {
+    if ($null -eq $Value) {[Environment]::SetEnvironmentVariable($Name,[NullString]::Value)}
+    else {[Environment]::SetEnvironmentVariable($Name,[string]$Value)}
+}
 # Runs a program with the isolated environment, stdin from an empty file
 # (so there is no terminal), output to logs/<Name>.out|.err. Returns the exit code.
 function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[string]$HomeDir) {
@@ -360,7 +369,7 @@ function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[str
     $stdin=Join-Path $script:Logs "$Name.stdin";Write-Utf8 $stdin ''
     $out=Join-Path $script:Logs "$Name.out";$err=Join-Path $script:Logs "$Name.err"
     try {
-        foreach ($k in $vars.Keys) {[Environment]::SetEnvironmentVariable($k,$vars[$k])}
+        foreach ($k in $vars.Keys) {Set-ProcessVariable $k $vars[$k]}
         $options=@{FilePath=$FilePath;ArgumentList=$Arguments;PassThru=$true;WorkingDirectory=$state.home
             RedirectStandardInput=$stdin;RedirectStandardOutput=$out;RedirectStandardError=$err}
         if ($script:OnWindows) {$options['NoNewWindow']=$true}
@@ -372,7 +381,7 @@ function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[str
         }
         $code=$process.ExitCode
     } finally {
-        foreach ($k in $saved.Keys) {[Environment]::SetEnvironmentVariable($k,$saved[$k])}
+        foreach ($k in $saved.Keys) {Set-ProcessVariable $k $saved[$k]}
     }
     Write-Utf8 (Join-Path $script:Logs "$Name.exit") ([string]$code)
     Write-Host "----- $Name output (exit $code) -----"
@@ -462,7 +471,8 @@ function Invoke-AssertInstalledPhase {
     foreach ($f in $compare) {$failures.Add($f)}
     # Claude Code may rewrite ~/.claude.json itself: compared parsed.
     $seeded=Read-HomeState 'seeded'
-    foreach ($f in (Compare-ClaudeJson $seeded.claude_json (Get-HomeState "after-$Run").claude_json 'installed')) {$failures.Add($f)}
+    $now=Get-HomeState "after-$Run"
+    foreach ($f in (Compare-ClaudeJson $seeded.claude_json $now.claude_json 'installed' $now.claude_settings)) {$failures.Add($f)}
     $failures.AddRange([string[]]@(Get-BootstrapLeftovers | ForEach-Object {"the bootstrap left $_"}))
     if ($failures.Count) {foreach ($f in $failures) {Write-Host "FAIL: $f"};throw "assert-installed: $($failures.Count) failure(s)"}
     Write-Host "assert-installed ($Run): OK"
@@ -473,6 +483,7 @@ function Invoke-AssertInstalledPhase {
 # backups, program, agent caches) are listed but are not failures.
 function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry) {
     $expected=Read-SeedManifest $script:Manifest
+    $seedDir=Join-Path $script:Root 'ci/e2e/seed/home'
     $failures=New-Object System.Collections.Generic.List[string]
     $same=0
     foreach ($rel in $expected.Keys) {
@@ -485,9 +496,16 @@ function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry) {
         $hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($hash -ceq $expected[$rel]) {$same++;continue}
         if ($allowedHere) {Write-Host "allowed-changed  $rel";continue}
-        if ($rel -ceq '.claude.json') {
-            # Claude Code rewrites this file itself (e2e-home-state.ps1): parsed.
-            $claude=@(Compare-ClaudeJson ([IO.File]::ReadAllText((Join-Path (Join-Path $script:Root 'ci/e2e/seed/home') $rel))) ([IO.File]::ReadAllText($path)) 'unchanged')
+        if ($rel -ceq '.claude.json' -or $rel -ceq '.claude/settings.json') {
+            # Claude Code rewrites these files itself (e2e-home-state.ps1): parsed.
+            $seedClaude=[IO.File]::ReadAllText((Join-Path $seedDir '.claude.json'))
+            # Not @(...): that would wrap the returned array once more.
+            $claude=if ($rel -ceq '.claude.json') {
+                $settings=Join-Path $script:SeedHome '.claude/settings.json'
+                Compare-ClaudeJson $seedClaude ([IO.File]::ReadAllText($path)) 'unchanged' $(if (Test-Path -LiteralPath $settings -PathType Leaf) {[IO.File]::ReadAllText($settings)} else {$null})
+            } else {
+                Compare-ClaudeSettings ([IO.File]::ReadAllText((Join-Path $seedDir $rel))) ([IO.File]::ReadAllText($path)) $seedClaude
+            }
             if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}} else {Write-Host "claude-owned     $rel (rewritten by Claude Code; every unrelated setting equal, parsed)"}
             continue
         }

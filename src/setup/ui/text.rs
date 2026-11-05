@@ -155,6 +155,9 @@ pub const NO_TERMINAL: &str = "No interactive terminal was found, so mmhmem is \
 using the standard choices.";
 pub const DUMB_TERMINAL: &str = "This terminal cannot show a menu, so mmhmem will \
 ask numbered questions instead.";
+/// Contains `{reason}`.
+pub const MENU_STOPPED: &str = "The menu stopped because the terminal did not answer \
+({reason}).";
 pub const PROMPT_CHOICE: &str = "Type a number and press enter:";
 pub const BAD_CHOICE: &str = "That is not one of the choices shown. Please try again.";
 pub const HELP_HOME: &str = "Type a number to choose, or q to quit.";
@@ -308,6 +311,11 @@ pub fn change_path(folder: &str) -> String {
     fill(CHANGE_PATH_ADD, &[("folder", folder)])
 }
 
+/// Why the menu stopped (reading keys or drawing failed).
+pub fn menu_stopped(reason: &str) -> String {
+    fill(MENU_STOPPED, &[("reason", reason)])
+}
+
 /// "Update to v1.2.3".
 pub fn update_to(version: &str) -> String {
     fill(ACTION_UPDATE_TO, &[("version", version)])
@@ -357,6 +365,7 @@ pub const ALL: &[&str] = &[
     DONE,
     NO_TERMINAL,
     DUMB_TERMINAL,
+    MENU_STOPPED,
     PROMPT_CHOICE,
     BAD_CHOICE,
     HELP_HOME,
