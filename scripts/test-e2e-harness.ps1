@@ -251,6 +251,19 @@ try {
     $left=@(Select-LeftoverProcesses $rows)
     Assert-True (($left -join '|') -ceq ((1..4 | ForEach-Object {"pid ${_}: $($rows[$_-1].CommandLine)"}) -join '|')) "leftovers are mmhmem and OpenCode's service only ($($left -join ' | '))"
     Assert-True (@(Get-ProcessRows | Where-Object {$_.Id -eq $PID}).Count -eq 1) 'the process list has this shell'
+    # Piped the way the phases use it: one item per leftover, nothing when none.
+    $realRows=${function:Get-ProcessRows}
+    try {
+        function Get-ProcessRows {return @($rows | Where-Object {$_.Id -ge 5})}
+        $piped=@(Wait-NoLeftoverProcesses -Seconds 0 | ForEach-Object {"left: $_"})
+        Assert-True ($piped.Count -eq 0) "no leftovers pipe no items ($($piped -join ' | '))"
+        function Get-ProcessRows {return $rows}
+        $piped=@(Wait-NoLeftoverProcesses -Seconds 0 | ForEach-Object {"left: $_"})
+        Assert-True ($piped.Count -eq 4) "each leftover pipes as its own item ($($piped.Count))"
+        function Get-ProcessRows {return @($rows[1])}
+        $left=Wait-NoLeftoverProcesses -Seconds 0
+        Assert-True ($left.Count -eq 1) 'one leftover counts as one'
+    } finally {${function:Get-ProcessRows}=$realRows}
 
     # ---- the memory store, compared by content.
     $python=$null

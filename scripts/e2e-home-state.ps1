@@ -361,11 +361,12 @@ function Get-ProcessRows {
     return @($rows)
 }
 # What is still running after up to -Seconds (a program may need a moment
-# to end after setup exits).
+# to end after setup exits). One pipeline item per process, none when all
+# ended: callers pipe it into ForEach-Object.
 function Wait-NoLeftoverProcesses([int]$Seconds=15) {
     for ($i=0;;$i++) {
         $left=@(Select-LeftoverProcesses (Get-ProcessRows))
-        if (-not $left.Count -or $i -ge 2*$Seconds) {return ,$left}
+        if (-not $left.Count -or $i -ge 2*$Seconds) {return $left}
         Start-Sleep -Milliseconds 500
     }
 }
