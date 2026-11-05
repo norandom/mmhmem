@@ -313,6 +313,63 @@ end. The e2e now fails when the moved file is left. Telling the user to close
 their AI tools first would need setup to find other running mmhmem
 processes, which it cannot do today; left as a follow-up.
 
+### Fourth e2e run: the update's Enter on the Review was lost (2026-11-05)
+
+Run 42007203740 (commit 5c246cf): four legs passed; macOS arm64 failed in
+`update` ("the screen did not show /enter or q close/" after 900 s).
+
+**What the program did with the two Enters.** The script was `select
+Update to v0.4.1`, `send enter`, `expect Review: this is what will
+change|Everything is current`, `send enter`. The home screen of a current
+install also says "Everything is current. Nothing needs to change.", so the
+expect matched the home screen at once and both Enters were sent within
+the same 0.1 s, at 0.5 s (driver.out). `update.pty.raw` (88 KB) shows:
+- the first Enter worked: the old program updated itself, restored the
+  terminal (`ESC[?1049l` at byte 2774), and the restarted program entered
+  the alternate screen again (`ESC[?1049h` at 2788) and drew the Review
+  ("The mmhmem program was updated to v0.4.1", empty plan, legend "enter
+  make these changes");
+- after that only empty redraws (`ESC[?25l` about every 250 ms, 3343 in
+  all) until the driver killed it: the restarted program never got a key.
+  No echo between the two programs either, so the byte was not typed
+  while the terminal was in normal mode.
+- The `.screen` dumps after lines 10 to 12 show the home screen because
+  they were taken at 0.5 s, before the Review came; there is no dump at
+  the timeout.
+
+Most likely the second Enter was read by the old program (the logs record
+no input, so this is inferred): the old program and the restarted one are
+the only readers of the terminal. Both crossterm readers read everything waiting (the `mio`
+reader until `WouldBlock`, the `/dev/tty` reader up to 1 KiB) and queue
+the parsed keys in the process; the old program ended after the first
+Enter, so a second Enter already read went with it. On macOS x86_64 in the
+same run (same script, same reader) the second Enter arrived after the old
+program's last read, stayed in the terminal's queue, and the restarted
+program read it: it **confirmed a Review that was never on the screen**
+(driver.out: `expect enter or q close` at 0.9 s → 4.7 s, exit 0). Same
+keys, two outcomes, decided by timing: lost on one machine,
+misapplied on the other.
+
+**Fixes.**
+- Product (`app_term.rs`): the Review only takes keys pressed after it is
+  drawn. Just before it appears (also as the restarted program's first
+  screen), every key already waiting is read and dropped. Enter there
+  makes changes, so a key typed before the user could see the changes is
+  never applied to them, on any platform. Keys on other screens are not
+  touched, so fast typing through Agents and Features keeps working. A
+  zero poll timeout is not used: crossterm's `/dev/tty` reader returns
+  without looking at the terminal for it.
+- Product (`flow_home.rs`, `text.rs`): a current install with a newer
+  release known no longer says "Everything is current" on the home screen,
+  which contradicted "Update to …" below it; it says "Your tools are set up
+  as you chose. A newer version of mmhmem is available."
+- e2e (`Invoke-UpdatePhase`): after the update the script waits for lines
+  only the restarted program's Review shows ("The mmhmem program was
+  updated to <tag>", the title and the Review legend) before Enter. The
+  other menu scripts already wait for their next screen's own title or
+  option (Agents, Features, Review, "Also delete my saved memories",
+  "The update did not finish", "enter or q close").
+
 ## 9. Windows `.tgz` report (task 1.3, 2026-11-04)
 
 - No mmhmem release has published a `.tgz`, `.tar.gz` or `.zip`. Assets per

@@ -63,6 +63,20 @@ fn home_update_note() {
 }
 
 #[test]
+fn home_current_with_update_available() {
+    let fx = with_clis();
+    let mut app = fx.app(Newest::Unknown);
+    press(&mut app, &[Enter, Enter, Enter, Enter]);
+    // The check times are real ones; show the home on a record without them.
+    let mut stored = fx.deps.store.load().expect("load").expect("record");
+    for rec in stored.agents.values_mut() {
+        rec.last_check = None;
+    }
+    fx.save(&stored);
+    insta::assert_snapshot!(snap(&fx, Newest::Known(tag("v0.5.0")), &[]));
+}
+
+#[test]
 fn home_drift() {
     let fx = with_clis();
     let mut app = fx.app(Newest::Unknown);

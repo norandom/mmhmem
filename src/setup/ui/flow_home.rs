@@ -79,7 +79,12 @@ impl Flow {
         let record = self.loaded.record.as_ref();
         let mut notes = self.loaded.notes.clone();
         if self.loaded.current {
-            notes.push(text::REVIEW_NOTHING.to_owned());
+            // "Everything is current" would contradict "Update to …" below.
+            notes.push(if self.newer_release().is_some() {
+                text::HOME_UPDATE_AVAILABLE.to_owned()
+            } else {
+                text::REVIEW_NOTHING.to_owned()
+            });
         }
         if !self.is_installed() && !self.any_detected() {
             notes.push(text::NO_AGENT.to_owned());

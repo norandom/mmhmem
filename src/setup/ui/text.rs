@@ -143,6 +143,9 @@ pub const CHANGES_MADE: &str = "{agent}: {count} change(s) made.";
 pub const BACKUPS_IN: &str = "Your original files were backed up to {dir}.";
 
 pub const REVIEW_NOTHING: &str = "Everything is current. Nothing needs to change.";
+/// The home line instead of [`REVIEW_NOTHING`] when a newer release is known.
+pub const HOME_UPDATE_AVAILABLE: &str =
+    "Your tools are set up as you chose. A newer version of mmhmem is available.";
 pub const REVIEW_BACKUP: &str = "Every file is backed up before it is changed.";
 pub const CONFIRM: &str = "Make these changes? (y/n)";
 pub const CANCELLED: &str = "Nothing was changed.";
@@ -357,6 +360,7 @@ pub const ALL: &[&str] = &[
     FEATURE_WORKER,
     FEATURE_WORKER_HELP,
     REVIEW_NOTHING,
+    HOME_UPDATE_AVAILABLE,
     REVIEW_BACKUP,
     CONFIRM,
     CANCELLED,

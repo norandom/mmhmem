@@ -3,6 +3,15 @@
 //! panic hook that restores the terminal), a drop guard that restores it on
 //! every other way out, and the event loop. The newest-release lookup runs
 //! on its own thread so an offline machine never blocks the menu.
+//!
+//! **Keys typed ahead of the Review.** Enter on the Review makes the
+//! changes, so the Review only takes keys pressed after it is on the
+//! screen: keys typed before it is drawn (while the update downloads, while
+//! the plan is made, or while the program restarts after an update) are
+//! discarded, whichever process read them. Without this, an Enter pressed
+//! twice on "Update to …" was either lost with the old program or confirmed
+//! a Review nobody had seen, depending on timing (research.md §8, fourth
+//! e2e run).
 
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -11,12 +20,16 @@ use std::time::Duration;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use super::{App, Control, Key};
+use super::{App, Control, Key, Screen};
 use crate::setup::ui::flow::{Flow, Newest};
 use crate::setup::ui::text;
 
 /// How often the loop looks for the release answer while no key comes.
 const POLL: Duration = Duration::from_millis(200);
+/// How long one look for typed-ahead keys waits. Not zero: crossterm's
+/// `/dev/tty` reader (macOS) does not look at the terminal at all for a
+/// zero timeout.
+const DISCARD_POLL: Duration = Duration::from_millis(1);
 
 /// The newest-release lookup, run off the UI thread.
 pub type Lookup = Box<dyn FnOnce() -> Newest + Send>;
@@ -66,11 +79,16 @@ fn event_loop(
     app: &mut App,
     newest: &Receiver<Newest>,
 ) -> std::io::Result<i32> {
+    let mut shown = None;
     loop {
         if let Ok(answer) = newest.try_recv() {
             app.set_newest(answer);
         }
+        if discards_typed_ahead(shown, app.screen()) {
+            discard_pending_keys()?;
+        }
         terminal.draw(|frame| app.draw(frame))?;
+        shown = Some(app.screen());
         if app.is_working() {
             app.work();
             continue;
@@ -90,6 +108,20 @@ fn event_loop(
     }
 }
 
+/// Whether keys typed before `next` is drawn must be dropped: only when
+/// the Review (where Enter makes the changes) is about to appear.
+fn discards_typed_ahead(shown: Option<Screen>, next: Screen) -> bool {
+    next == Screen::Review && shown != Some(Screen::Review)
+}
+
+/// Reads and drops every key that is already waiting.
+fn discard_pending_keys() -> std::io::Result<()> {
+    while event::poll(DISCARD_POLL)? {
+        let _ = event::read()?;
+    }
+    Ok(())
+}
+
 fn key_of(press: KeyEvent) -> Key {
     if press.modifiers.contains(KeyModifiers::CONTROL) && press.code == KeyCode::Char('c') {
         return Key::Quit;
@@ -103,5 +135,29 @@ fn key_of(press: KeyEvent) -> Key {
         KeyCode::Char('q' | 'Q') => Key::Quit,
         KeyCode::Char('d' | 'D') => Key::Diff,
         _ => Key::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Screen, discards_typed_ahead};
+
+    #[test]
+    fn only_a_review_that_appears_drops_typed_ahead_keys() {
+        // The restarted program opens on the Review.
+        assert!(discards_typed_ahead(None, Screen::Review));
+        assert!(discards_typed_ahead(Some(Screen::Home), Screen::Review));
+        assert!(discards_typed_ahead(Some(Screen::Features), Screen::Review));
+        // Keys pressed while the Review is shown are kept.
+        assert!(!discards_typed_ahead(Some(Screen::Review), Screen::Review));
+        for screen in [
+            Screen::Home,
+            Screen::Agents,
+            Screen::Features,
+            Screen::Progress,
+        ] {
+            assert!(!discards_typed_ahead(None, screen));
+            assert!(!discards_typed_ahead(Some(Screen::Review), screen));
+        }
     }
 }

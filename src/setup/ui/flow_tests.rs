@@ -120,7 +120,11 @@ fn a_newer_release_offers_the_update_hook_and_changes_nothing() {
     install(&fx);
     let before = fx.digest();
     let mut flow = fx.flow(Newest::Known(tag("v0.5.0")));
-    let actions = flow.home().actions;
+    let home = flow.home();
+    // The tools are current, but the program is not: no "Everything is current".
+    assert!(home.notes.contains(&text::HOME_UPDATE_AVAILABLE.to_owned()));
+    assert!(!home.notes.contains(&text::REVIEW_NOTHING.to_owned()));
+    let actions = home.actions;
     assert_eq!(actions[0], HomeAction::UpdateTo(tag("v0.5.0")));
     assert!(!actions.contains(&HomeAction::Install));
     assert_eq!(flow.begin(&actions[0]), Next::Note(text::UPDATE_NO_KEY));

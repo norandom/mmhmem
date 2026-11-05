@@ -370,6 +370,10 @@ visible: `↑↓ move · space select · enter continue · esc back · q quit`.
   A plain `mmhmem setup` without a terminal changes nothing and tells the
   user to run it in a terminal, so an AI agent running it in a
   non-interactive shell cannot change configs unasked.
+- **Typed-ahead keys:** the Review only takes keys pressed after it is
+  drawn; keys waiting when it appears (typed during an update, a restart
+  or planning) are dropped, so they never confirm changes the user has not
+  seen (research.md §8, fourth e2e run).
 - **Wording:** all text is in `ui/text.rs`, written for people who don't
   know the project (1.4).
 

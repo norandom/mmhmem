@@ -352,8 +352,14 @@ function Invoke-UpdatePhase {
     $current=Get-ReleaseInfo
     $paths=Get-InstalledPaths
     $oldRecord=Read-Json (Join-Path $WorkDir 'old-record.json')
+    # Each expect names only the screen it waits for: the home screen can say
+    # "Everything is current" too, so an Enter sent on that text came before
+    # the Review existed (run 42007203740, macOS arm64). The restarted program
+    # drops keys typed before its Review is drawn, so wait for the Review's
+    # own lines: the update line and the Review legend.
     Invoke-UpdateMenu 'update' $current.tag $current.tag @(
-        'timeout 600','expect Review: this is what will change|Everything is current','send enter',
+        'timeout 600',"expect The mmhmem program was updated to $(ConvertTo-TagPattern $current.tag)",
+        'expect Review: this is what will change','expect enter make these changes','send enter',
         'timeout 900','expect enter or q close','send enter','timeout 60','exit 0')
     $failures=New-Object Collections.Generic.List[string]
     $record=Read-Json $paths.Record
