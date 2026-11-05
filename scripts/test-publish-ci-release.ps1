@@ -91,4 +91,134 @@ Assert-Rejected {Initialize-CiReleaseAssets 'v0.3.0' (Get-CiNativeAssets $scratc
 [IO.File]::WriteAllText($e2eBinary,'synthetic fixture')
 $winHash=(Get-FileHash -LiteralPath (Join-Path $staging 'mmhmem-v0.3.0-x86_64-pc-windows-msvc.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not [IO.File]::ReadAllText((Join-Path $staging 'install.ps1')).Contains($winHash)) {throw 'install.ps1 does not embed the staged archive hash'}
-Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets, SHA256SUMS and no e2e-key builds'
+# Installer e2e gate (task 8.3, Requirement 10.5): a release needs the newest
+# push run of installer-e2e.yml on main for the exact commit, green, with its
+# aggregate job `installer-e2e` green. Fixtures are API-shaped objects.
+function New-E2ERun([long]$Id,[string]$Event='push',[string]$Conclusion='success',[string]$Status='completed') {
+    return [pscustomobject]@{id=$Id;head_sha=$revision;event=$Event;head_branch='main';status=$Status;conclusion=$Conclusion;path='.github/workflows/installer-e2e.yml';repository=[pscustomobject]@{full_name='norandom/mmhmem'};head_repository=[pscustomobject]@{full_name='norandom/mmhmem'}}
+}
+function New-GateJob([string]$Conclusion='success',[string]$Name='installer-e2e') {return [pscustomobject]@{name=$Name;status='completed';conclusion=$Conclusion}}
+function Assert-RejectedWith([scriptblock]$Action,[string]$Expected) {
+    $message=$null
+    try {& $Action} catch {$message=$_.Exception.Message}
+    if ($null -eq $message) {throw "Accepted, expected refusal: $Expected"}
+    if (-not $message.Contains($Expected)) {throw "Refused for the wrong reason: $message (expected: $Expected)"}
+}
+$script:E2ERuns=@(New-E2ERun 789)
+$script:E2EJobs=@((New-GateJob),[pscustomobject]@{name='e2e windows-pwsh-7';status='completed';conclusion='success'})
+$script:CiRun=[pscustomobject]$validRun
+$script:ApiCalls=New-Object System.Collections.Generic.List[string]
+$script:GhCalls=New-Object System.Collections.Generic.List[string]
+$script:MockDraftAssets=@()
+$script:DraftState=$true
+function Get-ReleaseApi([string]$Endpoint) {
+    $script:ApiCalls.Add($Endpoint)
+    if ($Endpoint -like 'actions/workflows/installer-e2e.yml/runs?*') {return [pscustomobject]@{workflow_runs=@($script:E2ERuns)}}
+    if ($Endpoint -like 'actions/runs/*/jobs?*') {return [pscustomobject]@{jobs=@($script:E2EJobs)}}
+    if ($Endpoint -ceq 'actions/runs/123') {return $script:CiRun}
+    if ($Endpoint -like 'releases?per_page=100*') {return @([pscustomobject]@{id=456;tag_name='v0.3.0'})}
+    if ($Endpoint -ceq 'releases/456') {return [pscustomobject]@{id=456;tag_name='v0.3.0';draft=$script:DraftState;assets=@($script:MockDraftAssets)}}
+    throw "Unexpected endpoint: $Endpoint"
+}
+function Invoke-ReleaseGh([string[]]$Arguments) {
+    $script:GhCalls.Add(($Arguments -join ' '))
+    if ($Arguments[0] -ceq 'run' -and $Arguments[1] -ceq 'download') {throw 'MOCK: reached the artifact download'}
+    if ($Arguments[0] -ceq 'release' -and $Arguments[1] -ceq 'edit') {return ''}
+    throw "Unexpected mocked command: $($Arguments -join ' ')"
+}
+$script:TagRevision=$revision
+function Resolve-ReleaseTag([string]$Tag) {return $script:TagRevision}
+function Open-ReleaseSigning([string]$Directory) {return [pscustomobject]@{KeyFile=$null}}
+function Close-ReleaseSigning($State) {}
+$script:InstallerE2EWaitAttempts=1
+# The run object itself.
+$good=New-E2ERun 789
+Assert-InstallerE2ERun $good $revision
+foreach ($change in @(@('event','workflow_dispatch'),@('event','pull_request'),@('event','workflow_call'),@('head_sha',('b'*40)),@('head_branch','feature'),@('status','in_progress'),@('conclusion','failure'),@('conclusion','cancelled'),@('path','.github/workflows/ci.yml'),@('id','1;x'))) {
+    $bad=$good.PSObject.Copy();$bad.($change[0])=$change[1]
+    Assert-RejectedWith {Assert-InstallerE2ERun $bad $revision} 'green installer e2e run'
+}
+$bad=$good.PSObject.Copy();$bad.head_repository=[pscustomobject]@{full_name='fork/mmhmem'}
+Assert-RejectedWith {Assert-InstallerE2ERun $bad $revision} 'green installer e2e run'
+# The aggregate job decides, not only the run conclusion.
+foreach ($jobs in @(@(),@((New-GateJob 'failure')),@((New-GateJob 'skipped')),@((New-GateJob),(New-GateJob)),@((New-GateJob 'success' 'e2e linux-x86_64')))) {
+    $script:E2EJobs=$jobs
+    Assert-RejectedWith {Assert-InstallerE2ERun $good $revision} 'installer-e2e job to pass'
+}
+$script:E2EJobs=@((New-GateJob))
+# Lookup: only push runs on main for the exact commit; the newest one decides.
+$script:ApiCalls.Clear()
+if ((Get-InstallerE2ERun $revision).id -ne 789) {throw 'Green push run was not found'}
+if ($script:ApiCalls[0] -cne "actions/workflows/installer-e2e.yml/runs?branch=main&event=push&head_sha=$revision&per_page=100") {throw "Unexpected installer e2e query: $($script:ApiCalls[0])"}
+# A green workflow_dispatch run (where sabotage=wrong-hash lives) is never evidence,
+# even if the API returned it despite event=push.
+$script:E2ERuns=@((New-E2ERun 900 'workflow_dispatch'))
+Assert-RejectedWith {Get-InstallerE2ERun $revision} 'none finished in time'
+$script:E2ERuns=@((New-E2ERun 700 'push' 'failure'),(New-E2ERun 900 'workflow_dispatch'))
+Assert-RejectedWith {Assert-InstallerE2ERun (Get-InstallerE2ERun $revision) $revision} 'green installer e2e run'
+# An older green run does not hide a newer red or unfinished one.
+$script:E2ERuns=@((New-E2ERun 700),(New-E2ERun 701 'push' 'failure'))
+Assert-RejectedWith {Assert-InstallerE2ERun (Get-InstallerE2ERun $revision) $revision} 'green installer e2e run'
+$script:E2ERuns=@((New-E2ERun 700),(New-E2ERun 701 'push' '' 'in_progress'))
+Assert-RejectedWith {Get-InstallerE2ERun $revision} 'none finished in time'
+$script:E2ERuns=@()
+Assert-RejectedWith {Get-InstallerE2ERun $revision} 'none finished in time'
+Assert-RejectedWith {Get-InstallerE2ERun 'main'} 'Invalid revision'
+# Publishing refuses a commit without a green installer run: with green main CI
+# the publisher stops before any artifact download, release creation or upload.
+foreach ($runs in @(@(),@((New-E2ERun 900 'workflow_dispatch')),@((New-E2ERun 701 'push' 'failure')),@((New-E2ERun 701 'push' '' 'in_progress')))) {
+    $script:E2ERuns=$runs;$script:GhCalls.Clear();$script:ApiCalls.Clear()
+    Assert-RejectedWith {Invoke-CiRelease 'v0.3.0' '123'} 'installer e2e run'
+    if ($script:GhCalls.Count -ne 0) {throw "gh was called without a green installer run: $($script:GhCalls -join '; ')"}
+    if (@($script:ApiCalls | Where-Object {$_ -like 'releases*'}).Count -ne 0) {throw 'Releases were read without a green installer run'}
+}
+$script:E2ERuns=@((New-E2ERun 789));$script:E2EJobs=@((New-GateJob 'failure'));$script:GhCalls.Clear()
+Assert-RejectedWith {Invoke-CiRelease 'v0.3.0' '123'} 'installer-e2e job to pass'
+if ($script:GhCalls.Count -ne 0) {throw 'gh was called with a red installer-e2e job'}
+# With both gates green the publisher goes on to the artifact download.
+$script:E2EJobs=@((New-GateJob));$script:GhCalls.Clear()
+Assert-RejectedWith {Invoke-CiRelease 'v0.3.0' '123'} 'MOCK: reached the artifact download'
+# The main CI gate still applies on its own.
+$script:CiRun=[pscustomobject]$validRun;$script:CiRun.conclusion='failure';$script:GhCalls.Clear()
+Assert-RejectedWith {Invoke-CiRelease 'v0.3.0' '123'} 'successful trusted main CI'
+if ($script:GhCalls.Count -ne 0) {throw 'gh was called with red main CI'}
+$script:CiRun=[pscustomobject]$validRun
+# Draft until attestation: the build step never publishes, -PublishDraft does,
+# after re-checking the tag, both gates and the exact draft asset set.
+$publisherText=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'publish-ci-release.ps1'))
+$buildBody=$publisherText.Substring($publisherText.IndexOf('function Invoke-CiRelease'))
+$buildBody=$buildBody.Substring(0,$buildBody.IndexOf('function Publish-CiReleaseDraft'))
+if ($buildBody.Contains('--draft=false')) {throw 'The build step must leave the release a draft'}
+$verifiedNames='SHA256SUMS,SHA256SUMS.sig,mmhmem.exe'
+function Set-Draft([string[]]$Names,[string]$State='uploaded') {$script:MockDraftAssets=@($Names | ForEach-Object {[pscustomobject]@{name=$_;state=$State}})}
+function Get-EditCount {return @($script:GhCalls | Where-Object {$_ -ceq 'release edit v0.3.0 --repo norandom/mmhmem --draft=false --latest'}).Count}
+Set-Draft @('mmhmem.exe','SHA256SUMS.sig','SHA256SUMS');$script:GhCalls.Clear()
+Publish-CiReleaseDraft 'v0.3.0' '123' $revision $verifiedNames
+if ((Get-EditCount) -ne 1 -or $script:GhCalls.Count -ne 1) {throw "Draft was not published exactly once: $($script:GhCalls -join '; ')"}
+$refusals=@(
+    @{Why='extra asset';Setup={Set-Draft @('mmhmem.exe','SHA256SUMS.sig','SHA256SUMS','unverified.bin')};Expect='Draft assets differ'},
+    @{Why='missing asset';Setup={Set-Draft @('mmhmem.exe','SHA256SUMS')};Expect='Draft assets differ'},
+    @{Why='incomplete asset';Setup={Set-Draft @('mmhmem.exe','SHA256SUMS.sig','SHA256SUMS') 'new'};Expect='Incomplete release asset'},
+    @{Why='already published';Setup={$script:DraftState=$false};Expect='no longer a draft'},
+    @{Why='tag moved';Setup={$script:TagRevision='c'*40};Expect='Tag changed'},
+    @{Why='installer run turned red';Setup={$script:E2ERuns=@((New-E2ERun 789),(New-E2ERun 790 'push' 'failure'))};Expect='green installer e2e run'},
+    @{Why='installer run re-running';Setup={$script:E2ERuns=@((New-E2ERun 789 'push' '' 'in_progress'))};Expect='none finished in time'},
+    @{Why='CI turned red';Setup={$script:CiRun=[pscustomobject]$validRun;$script:CiRun.conclusion='failure'};Expect='successful trusted main CI'}
+)
+foreach ($case in $refusals) {
+    Set-Draft @('mmhmem.exe','SHA256SUMS.sig','SHA256SUMS');$script:DraftState=$true;$script:TagRevision=$revision
+    $script:E2ERuns=@((New-E2ERun 789));$script:E2EJobs=@((New-GateJob));$script:CiRun=[pscustomobject]$validRun;$script:GhCalls.Clear()
+    & $case.Setup
+    Assert-RejectedWith {Publish-CiReleaseDraft 'v0.3.0' '123' $revision $verifiedNames} $case.Expect
+    if ((Get-EditCount) -ne 0) {throw "Draft was published despite: $($case.Why)"}
+}
+Assert-RejectedWith {Publish-CiReleaseDraft 'v0.3.0' '123' $revision ''} 'No verified asset list'
+Assert-RejectedWith {Publish-CiReleaseDraft 'v0.3.0' '123' 'main' $verifiedNames} 'Invalid revision'
+Assert-RejectedWith {Publish-CiReleaseDraft 'v0.3.0' 'x' $revision $verifiedNames} 'Invalid run ID'
+# Workflow order: build the draft (only step with the key) -> attest -> publish.
+$workflow=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\.github\workflows\release.yml'))
+$atDraft=$workflow.IndexOf('id: draft');$atAttest=$workflow.IndexOf('uses: actions/attest-build-provenance@');$atPublish=$workflow.IndexOf('./scripts/publish-ci-release.ps1 -PublishDraft')
+if ($atDraft -lt 0 -or $atAttest -le $atDraft -or $atPublish -le $atAttest) {throw 'release.yml must build the draft, attest, then publish'}
+if ($workflow.IndexOf('MMHMEM_RELEASE_SIGNING_KEY',$atAttest) -ge 0) {throw 'Only the draft step may see the signing key'}
+if ($workflow.Substring($atAttest).Contains('continue-on-error')) {throw 'Attestation and publication must not continue on error'}
+Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets, SHA256SUMS, no e2e-key builds, installer e2e gate (push runs only, newest decides, aggregate job), draft until attestation'

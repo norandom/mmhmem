@@ -2,9 +2,13 @@
 <#
 Publish version tags from the successful, trusted main CI run's artifacts.
 The Linux publisher retains its full provenance and byte-equality checks.
+A release needs green main CI AND a green installer e2e gate for the exact
+tag commit (Requirement 10.5). It is built as a draft; the workflow attests
+the archives and only then calls this script again with -PublishDraft, which
+re-checks the evidence and the draft and publishes it as the last step.
 #>
 [CmdletBinding()]
-param([string]$Tag,[string]$RunId)
+param([string]$Tag,[string]$RunId,[string]$DraftRevision,[string]$DraftAssets,[switch]$PublishDraft)
 . (Join-Path $PSScriptRoot 'publish-linux-release.ps1') -Tag $Tag -RunId $RunId
 . (Join-Path $PSScriptRoot 'package-release-archives.ps1')
 . (Join-Path $PSScriptRoot 'sign-release-assets.ps1')
@@ -35,6 +39,48 @@ function Assert-CiReleaseRun($Run,[string]$Revision) {
     if ($Run.head_sha -cne $Revision -or $Run.event -cne 'push' -or $Run.head_branch -cne 'main' -or
         $Run.status -cne 'completed' -or $Run.conclusion -cne 'success' -or $Run.path -cne '.github/workflows/ci.yml' -or
         $Run.repository.full_name -cne $script:ReleaseRepository -or $Run.head_repository.full_name -cne $script:ReleaseRepository) {throw 'Release requires successful trusted main CI for the exact tag commit'}
+}
+# Installer e2e gate (task 8.3, Requirement 10.5). Only a push run on main of
+# installer-e2e.yml counts: a workflow_dispatch run (the only kind that can
+# carry sabotage=wrong-hash) or a pull_request run is never evidence. The
+# newest push run for the commit decides, so an older green run cannot hide a
+# newer red one, and its aggregate job `installer-e2e` must have passed.
+$script:InstallerE2EWorkflow='.github/workflows/installer-e2e.yml'
+$script:InstallerE2EGateJob='installer-e2e'
+# 90 x 20 s: installer e2e starts with CI on the same push and may end later.
+$script:InstallerE2EWaitAttempts=90
+function Get-InstallerE2ERun([string]$Revision,[int]$Attempts=$script:InstallerE2EWaitAttempts) {
+    if ($Revision -cnotmatch '^[0-9a-f]{40}$') {throw 'Invalid revision'}
+    for ($attempt=0;$attempt -lt $Attempts;$attempt++) {
+        if ($attempt) {Start-Sleep -Seconds 20}
+        $runs=Get-ReleaseApi "actions/workflows/installer-e2e.yml/runs?branch=main&event=push&head_sha=$Revision&per_page=100"
+        $matches=@($runs.workflow_runs | Where-Object {$_.head_sha -ceq $Revision -and $_.event -ceq 'push' -and $_.head_branch -ceq 'main'})
+        if ($matches.Count) {
+            $run=$matches | Sort-Object id -Descending | Select-Object -First 1
+            if ($run.status -ceq 'completed') {return $run}
+        }
+    }
+    throw 'Release requires a completed installer e2e run (push to main) for the exact tag commit; none finished in time'
+}
+function Assert-InstallerE2ERun($Run,[string]$Revision) {
+    if ($Run.head_sha -cne $Revision -or $Run.event -cne 'push' -or $Run.head_branch -cne 'main' -or
+        $Run.status -cne 'completed' -or $Run.conclusion -cne 'success' -or $Run.path -cne $script:InstallerE2EWorkflow -or
+        $Run.repository.full_name -cne $script:ReleaseRepository -or $Run.head_repository.full_name -cne $script:ReleaseRepository -or
+        [string]$Run.id -cnotmatch '^[1-9][0-9]*$') {throw 'Release requires a green installer e2e run (push to main) for the exact tag commit'}
+    $jobs=@((Get-ReleaseApi "actions/runs/$($Run.id)/jobs?filter=latest&per_page=100").jobs | Where-Object {$_.name -ceq $script:InstallerE2EGateJob})
+    if ($jobs.Count -ne 1 -or $jobs[0].status -cne 'completed' -or $jobs[0].conclusion -cne 'success') {throw "Release requires the $($script:InstallerE2EGateJob) job to pass in installer e2e run $($Run.id)"}
+}
+# The draft must hold exactly the verified assets, all fully uploaded:
+# anything else would be published without having been checked.
+function Assert-CiDraftAssets($Release,[string[]]$Expected) {
+    $names=[string[]]@($Release.assets | Where-Object {$null -ne $_} | ForEach-Object {
+        if ($_.state -cne 'uploaded') {throw "Incomplete release asset: $($_.name)"}
+        [string]$_.name
+    })
+    $want=[string[]]@($Expected)
+    [Array]::Sort($names,[StringComparer]::Ordinal)
+    [Array]::Sort($want,[StringComparer]::Ordinal)
+    if (($names -join ',') -cne ($want -join ',')) {throw "Draft assets differ from the verified set: draft [$($names -join ',')], verified [$($want -join ',')]"}
 }
 function Get-CiNativeAssets([string]$Root) {
     $windows=@(Get-ChildItem -LiteralPath (Join-Path $Root 'windows') -File -Recurse)
@@ -99,6 +145,12 @@ function Write-AttestationSubjects([string[]]$Paths) {
     $list=($Paths | ForEach-Object {$_.Replace('\','/')}) -join "`n"
     [IO.File]::AppendAllText($env:GITHUB_OUTPUT,"archives<<MMHMEM_ARCHIVES`n$list`nMMHMEM_ARCHIVES`n",(New-Object Text.UTF8Encoding($false)))
 }
+# Handed to the attestation and -PublishDraft steps of the workflow.
+function Write-CiDraftOutputs([string]$ReleaseTag,[string]$Revision,[string]$RunId,[string[]]$Names) {
+    if (-not $env:GITHUB_OUTPUT) {return}
+    $text="tag=$ReleaseTag`nrevision=$Revision`nci_run=$RunId`nassets=$($Names -join ',')`n"
+    [IO.File]::AppendAllText($env:GITHUB_OUTPUT,$text,(New-Object Text.UTF8Encoding($false)))
+}
 function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if (-not $ReleaseTag) {
         if ($RequestedRun -cnotmatch '^[1-9][0-9]*$') {throw 'Automatic completion requires a run ID'}
@@ -107,6 +159,8 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
         $tags=@(& git tag --points-at $run.head_sha)
         if ($LASTEXITCODE -ne 0) {throw 'Cannot inspect tags'}
         $tags=@($tags | Where-Object {$_ -cmatch '^v[0-9]+\.[0-9]+\.[0-9]+$'})
+        # One draft per job: the attestation and publish steps take one tag.
+        if ($tags.Count -gt 1) {throw 'The commit has more than one version tag; publish each with workflow_dispatch'}
         foreach ($candidate in $tags) {Invoke-CiRelease $candidate $RequestedRun}
         if (-not $tags.Count) {Write-Host 'Successful CI commit has no version tag; nothing to publish.'}
         return
@@ -119,6 +173,9 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     $revision=Resolve-ReleaseTag $ReleaseTag
     $run=Get-CiReleaseRun $revision $RequestedRun
     Assert-CiReleaseRun $run $revision
+    # Requirement 10.5: no artifact download, no draft and no upload without
+    # a green installer e2e run for the same commit.
+    Assert-InstallerE2ERun (Get-InstallerE2ERun $revision) $revision
     $id=[string]$run.id
     foreach ($entry in @(@('windows','mmhmem-x86_64-pc-windows-msvc'),@('macos','mmhmem-macos'))) {
         $destination=Join-Path $scratch $entry[0]
@@ -156,13 +213,34 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     Send-CiReleaseAsset $ReleaseTag $sumPath $scratch
     Send-CiReleaseAsset $ReleaseTag $sigPath $scratch
     Assert-LinuxDeliveryFiles $context
-    $null=Get-LinuxDeliveryDraft $context
+    $verified=[string[]]@(@($staged)+@('SHA256SUMS','SHA256SUMS.sig'))
+    Assert-CiDraftAssets (Get-LinuxDeliveryDraft $context) $verified
     if ((Resolve-ReleaseTag $ReleaseTag) -cne $revision) {throw 'Tag changed before publication'}
-    $null=Invoke-ReleaseGh @('release','edit',$ReleaseTag,'--repo',$script:ReleaseRepository,'--draft=false','--latest')
+    # The release stays a draft: the workflow attests the archives, then
+    # publishes with -PublishDraft as its last step.
+    Write-CiDraftOutputs $ReleaseTag $revision $id $verified
     } finally {Close-ReleaseSigning $signing}
-    Write-Host "Published $ReleaseTag from successful CI run $id ($revision)"
+    Write-Host "Verified draft $ReleaseTag from successful CI run $id ($revision); it is published after attestation"
+}
+# Last step of the workflow, after the attestation; never sees the signing key.
+# Re-reads the evidence (a re-run can turn a green run red) and the draft.
+function Publish-CiReleaseDraft([string]$ReleaseTag,[string]$RequestedRun,[string]$Revision,[string]$AssetList) {
+    Assert-CiReleaseTag $ReleaseTag
+    if ($Revision -cnotmatch '^[0-9a-f]{40}$') {throw 'Invalid revision'}
+    if ($RequestedRun -cnotmatch '^[1-9][0-9]*$') {throw 'Invalid run ID'}
+    $expected=[string[]]@($AssetList -split ',' | Where-Object {$_})
+    if (-not $expected.Count) {throw 'No verified asset list'}
+    if ((Resolve-ReleaseTag $ReleaseTag) -cne $Revision) {throw 'Tag changed before publication'}
+    Assert-CiReleaseRun (Get-ReleaseApi "actions/runs/$RequestedRun") $Revision
+    Assert-InstallerE2ERun (Get-InstallerE2ERun $Revision 1) $Revision
+    $release=Get-ReleaseByTag $ReleaseTag
+    if ($release.draft -isnot [bool] -or -not $release.draft) {throw 'Refusing to publish: the release is no longer a draft'}
+    Assert-CiDraftAssets $release $expected
+    $null=Invoke-ReleaseGh @('release','edit',$ReleaseTag,'--repo',$script:ReleaseRepository,'--draft=false','--latest')
+    Write-Host "Published $ReleaseTag ($Revision) from successful CI run $RequestedRun"
 }
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference='Stop'
-    Invoke-CiRelease $Tag $RunId
+    if ($PublishDraft) {Publish-CiReleaseDraft $Tag $RunId $DraftRevision $DraftAssets}
+    else {Invoke-CiRelease $Tag $RunId}
 }

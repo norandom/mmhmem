@@ -94,10 +94,22 @@ you sign. Then delete the private key copies you do not need.
 
 Push a stable `vMAJOR.MINOR.PATCH` tag as before. The `plan` job runs without
 secrets; the `publish` job then waits for approval of the `release`
-environment, installs the pinned zipsign, signs every archive, writes
-`SHA256SUMS`, signs it as `SHA256SUMS.sig`, uploads (`SHA256SUMS.sig` last) and
-attests build provenance for every archive. Verify an archive's provenance
-with `gh attestation verify <archive> --repo norandom/mmhmem`.
+environment. It requires, for the exact tag commit, a successful main CI run
+and a successful `Installer e2e` run triggered by the push to `main` whose
+`installer-e2e` job passed; it waits up to 30 minutes for each. A run started
+by hand (`workflow_dispatch`, for example with `sabotage=wrong-hash`) or by a
+pull request never counts, and the newest push run decides. It then installs
+the pinned zipsign, signs every archive, writes `SHA256SUMS`, signs it as
+`SHA256SUMS.sig`, uploads and re-downloads every asset (`SHA256SUMS.sig` last)
+into a draft release, and attests build provenance for every archive. Only
+then does the last step re-check the tag, both runs and the exact draft asset
+list, and publish the draft. Verify an archive's provenance with
+`gh attestation verify <archive> --repo norandom/mmhmem`.
+
+If the installer e2e run for the tag commit failed, fix the cause on `main`
+and tag the fixed commit; re-running the failed jobs until they pass and then
+starting the release with `workflow_dispatch` (input `tag`) also works,
+because the newest attempt of the push run is what counts.
 
 ## 5. Rotate keys
 

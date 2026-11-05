@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to publish from its successful main CI run
+        description: Existing version tag to publish from its successful main CI and installer e2e runs
         required: true
         type: string
 
@@ -56,7 +56,9 @@ jobs:
     needs: plan
     if: needs.plan.outputs.publish == 'true'
     runs-on: windows-latest
-    timeout-minutes: 45
+    # Up to 30 min waiting for CI plus up to 30 min for installer e2e (both
+    # start on the same push, so the waits usually overlap), then the build.
+    timeout-minutes: 90
     # The signing key exists only as a secret of this environment, which must
     # have required reviewers (docs/release-signing.md).
     environment: release
@@ -86,8 +88,12 @@ jobs:
           ./scripts/test-package-release-archives.ps1
           ./scripts/test-sign-release-assets.ps1
           ./scripts/test-publish-ci-release.ps1
-      - name: Publish verified artifacts
-        id: publish
+      # Requires green main CI AND a green installer e2e gate (push run of
+      # installer-e2e.yml, job `installer-e2e`) for the exact tag commit, waiting
+      # for either if it is still running. Signs, uploads and re-verifies every
+      # asset, and leaves the release a DRAFT. No outputs when already published.
+      - name: Build and verify the draft release
+        id: draft
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,10 +102,22 @@ jobs:
           # Only this step sees the key (secret of the `release` environment).
           MMHMEM_RELEASE_SIGNING_KEY: ${{ secrets.MMHMEM_RELEASE_SIGNING_KEY }}
         run: ./scripts/publish-ci-release.ps1 -Tag $env:RELEASE_TAG -RunId $env:SOURCE_RUN
-      # Provenance for the exact signed archive bytes that were published.
+      # Provenance for the exact signed archive bytes in the draft.
       # actions/attest-build-provenance v4.2.2
       - name: Attest archives
-        if: steps.publish.outputs.archives != ''
+        if: steps.draft.outputs.tag != ''
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
-          subject-path: ${{ steps.publish.outputs.archives }}
+          subject-path: ${{ steps.draft.outputs.archives }}
+      # Last step: runs only when signing, upload verification and attestation
+      # succeeded. Re-checks the tag, both gates and the exact draft asset set.
+      - name: Publish the draft release
+        if: steps.draft.outputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.draft.outputs.tag }}
+          RELEASE_REVISION: ${{ steps.draft.outputs.revision }}
+          SOURCE_RUN: ${{ steps.draft.outputs.ci_run }}
+          RELEASE_ASSETS: ${{ steps.draft.outputs.assets }}
+        run: ./scripts/publish-ci-release.ps1 -PublishDraft -Tag $env:RELEASE_TAG -RunId $env:SOURCE_RUN -DraftRevision $env:RELEASE_REVISION -DraftAssets $env:RELEASE_ASSETS
