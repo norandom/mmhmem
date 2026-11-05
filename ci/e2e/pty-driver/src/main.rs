@@ -57,6 +57,13 @@ impl Session {
             .map_err(|e| format!("cannot open a pseudo-terminal: {e}"))?;
         let mut cmd = CommandBuilder::new(&script.program);
         cmd.args(&script.args);
+        // On Windows portable-pty starts from the environment saved in the
+        // registry, which replaces this process's PATH (the job's agent
+        // programs) and other variables. The program gets exactly ours.
+        cmd.env_clear();
+        for (name, value) in std::env::vars_os() {
+            cmd.env(name, value);
+        }
         if let Ok(dir) = std::env::current_dir() {
             cmd.cwd(dir);
         }

@@ -5,6 +5,7 @@
 //! release, the binary, the `PATH` entry, and per agent the selected features,
 //! every file or config entry mmhmem manages, pending user steps and the last
 //! functional check. Submodules: `record_types.rs` (validated values),
+//! `record_check.rs` (the stored check result),
 //! `record_store.rs` (location, atomic save, load) and `record_drift.rs`
 //! (normalization, drift detection, recovery scan).
 //!
@@ -19,11 +20,13 @@
 //! entry (which may contain a worker key) is stored only as the hash of its
 //! normalized value; worker settings appear only as `worker_configured`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[path = "record_check.rs"]
+mod check;
 #[path = "record_drift.rs"]
 mod drift;
 #[path = "record_store.rs"]
@@ -31,6 +34,7 @@ mod store;
 #[path = "record_types.rs"]
 mod types;
 
+pub use check::{CheckDetail, CheckResult, CheckStep, LastCheck, StepOutcome};
 pub use drift::{
     Drift, DriftReport, Observation, Probe, Recovery, RecoveryReport, detect_drift, normalize_json,
     normalize_text, observe, observe_in, path_entry_hash, recovery_scan,
@@ -138,71 +142,6 @@ pub enum PendingUserStep {
     ImportAntigravitySnippet,
 }
 
-/// The overall result of a functional check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CheckResult {
-    /// Everything passed.
-    Pass,
-    /// Something failed.
-    Fail,
-    /// Passed, but user steps are pending.
-    UserStepsPending,
-}
-
-/// One step of the functional check (design.md §6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CheckStep {
-    /// Read back the registration.
-    Registration,
-    /// Start the server and run `initialize`.
-    Handshake,
-    /// `tools/list`.
-    ToolsList,
-    /// The `status` tool.
-    StatusTool,
-    /// The agent's own check command.
-    AgentCommand,
-    /// The hook sample.
-    HookSample,
-    /// The agent's config load.
-    ConfigLoad,
-}
-
-/// The outcome of one check step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StepOutcome {
-    /// The step passed.
-    Pass,
-    /// The step failed.
-    Fail,
-    /// The step did not run.
-    Skipped,
-}
-
-/// One step's outcome in [`LastCheck::details`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckDetail {
-    /// Which step.
-    pub step: CheckStep,
-    /// How it went.
-    pub outcome: StepOutcome,
-}
-
-/// The last functional check of an agent (Requirement 5.5).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LastCheck {
-    /// When it ran.
-    pub at: UtcTimestamp,
-    /// The overall result.
-    pub result: CheckResult,
-    /// Per-step outcomes.
-    #[serde(default)]
-    pub details: Vec<CheckDetail>,
-}
-
 /// Everything recorded for one agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentRecord {
@@ -218,6 +157,11 @@ pub struct AgentRecord {
     /// The last functional check.
     #[serde(default)]
     pub last_check: Option<LastCheck>,
+    /// The features chosen in a run that skipped this agent because one of
+    /// its files could not be read (nothing of it was changed or checked).
+    /// The next run plans them again; empty once the agent was set up.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub skipped: BTreeSet<Feature>,
 }
 
 /// What a managed entry points at. Equal targets mean the same entry.

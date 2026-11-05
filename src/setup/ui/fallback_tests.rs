@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::setup::agents::{AgentId, Feature};
+use crate::setup::record::CheckResult;
 use crate::setup::ui::fixtures::{Fx, fx, with_clis};
 use crate::setup::ui::flow::{EXIT_CANCELLED, Newest};
 
@@ -232,6 +233,53 @@ fn the_default_install_needs_no_questions() {
         runs.iter()
             .any(|a| a.starts_with(&["mcp".into(), "get".into()]))
     );
+}
+
+#[test]
+fn the_default_install_skips_a_tool_with_an_invalid_config_and_checks_only_the_others() {
+    let fx = with_clis();
+    let config = fx.write(&[".config", "opencode", "opencode.json"], "{ not json");
+    let (code, out) = unattended(&fx);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("OpenCode was skipped:") && l.contains("opencode.json")),
+        "{out}"
+    );
+    assert!(!out.contains("✘ OpenCode"), "{out}");
+    assert!(!out.contains("✔ OpenCode"), "{out}");
+    assert!(!out.contains(text::NEXT_OPENCODE), "{out}");
+    assert!(out.contains("✔ Claude Code"), "{out}");
+    assert!(out.contains("✔ Codex"), "{out}");
+    assert_skipped_opencode_unchanged(&fx, &config);
+}
+
+/// Claude Code and Codex are set up and passed; OpenCode is not set up,
+/// its folder holds only the untouched `config`, and its CLI was not used
+/// for a check.
+fn assert_skipped_opencode_unchanged(fx: &Fx, config: &std::path::Path) {
+    let record = fx.deps.store.load().expect("load").expect("record");
+    for id in [AgentId::ClaudeCode, AgentId::Codex] {
+        let rec = &record.agents[&id];
+        assert_eq!(rec.features.get(&Feature::Mcp), Some(&true));
+        assert_eq!(
+            rec.last_check.as_ref().map(|c| c.result),
+            Some(CheckResult::Pass)
+        );
+    }
+    let opencode = &record.agents[&AgentId::OpenCode];
+    assert!(!opencode.features.values().any(|on| *on), "{opencode:?}");
+    assert!(opencode.managed.is_empty() && opencode.last_check.is_none());
+    assert_eq!(
+        std::fs::read_to_string(config).expect("config"),
+        "{ not json"
+    );
+    let folder: Vec<_> = std::fs::read_dir(config.parent().expect("folder"))
+        .expect("list")
+        .collect();
+    assert_eq!(folder.len(), 1, "only opencode.json is there");
+    let runs = fx.home.runner.args_of("opencode");
+    assert!(!runs.iter().any(|a| a.contains(&"mcp".into())), "{runs:?}");
 }
 
 #[test]

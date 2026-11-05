@@ -224,6 +224,11 @@ Backups go in a `backups/<timestamp>/` folder next to it.
   with the disk to finish or undo them (5.2).
 - **No secrets:** the record never stores worker keys (5.7). Worker
   settings are kept in the record only as a "configured: yes/no" flag.
+- **Skipped agents (3.4):** an agent whose `plan()` returned an
+  `AgentProblem` is neither applied nor checked, and no feature is recorded
+  for it; an entry from an earlier install stays as it was. What the user
+  chose for it is kept as `"skipped": ["mcp", …]` (left out when empty), so
+  the next run plans it again and sets it up once the file is fixed.
 - **Rebuild:** if the record is missing or unreadable, the installer scans
   each agent's known locations for mmhmem entries and shows what it found,
   and the user confirms before anything is adopted (5.6). This is also how

@@ -2,6 +2,7 @@
 //! doubles, flow dependencies with a fixed clock, records in given states,
 //! a digest of the whole temporary folder and `TestBackend` rendering.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -156,6 +157,7 @@ pub(crate) fn agent_record(
             result,
             details: Vec::new(),
         }),
+        skipped: BTreeSet::new(),
     }
 }
 

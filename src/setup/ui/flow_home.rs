@@ -202,13 +202,22 @@ impl Flow {
         }
     }
 
-    /// The recorded choices (for updates and changes).
+    /// The recorded choices (for updates and changes): the features that
+    /// are on, or, for an agent an earlier run skipped, what was chosen then.
     pub(super) fn recorded_selection(&self) -> Selection {
-        self.loaded
-            .record
-            .as_ref()
-            .map(Selection::from_record)
-            .unwrap_or_default()
+        let Some(record) = self.loaded.record.as_ref() else {
+            return Selection::new();
+        };
+        let mut selection = Selection::from_record(record);
+        for (id, rec) in record.agents.iter().filter(|(_, r)| !r.skipped.is_empty()) {
+            for feature in selection.features(*id) {
+                selection.deselect(*id, feature);
+            }
+            for feature in &rec.skipped {
+                selection.select(*id, *feature);
+            }
+        }
+        selection
     }
 
     /// Every detected agent with the required feature, plus what an earlier

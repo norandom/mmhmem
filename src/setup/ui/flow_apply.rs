@@ -3,16 +3,20 @@
 //!
 //! [`Flow::confirm`] applies the reviewed plan unchanged
 //! ([`crate::setup::plan::apply`]), runs [`Checker::run`] for the selected
-//! agents (which rolls back an agent whose check fails and stores each
-//! `last_check`), records the release and binary, drops agents that are no
+//! agents that were not skipped at planning (which rolls back an agent whose
+//! check fails and stores each `last_check`), records the release and
+//! binary, drops agents that are no
 //! longer selected and have nothing left, saves the record and builds the
 //! progress lines: one line per agent's changes, where the backups are, the
 //! check results with pending user steps, and the next step per agent.
 
+use std::collections::BTreeSet;
+
+use super::review::Planned;
 use super::{Flow, text};
-use crate::setup::agents::{AgentId, Selection};
+use crate::setup::agents::{AgentId, Feature, Selection};
 use crate::setup::plan::{ApplyReport, Outcome, apply_with};
-use crate::setup::record::{CheckResult, InstallRecord, Scope};
+use crate::setup::record::{AgentRecord, CheckResult, InstallRecord, Scope};
 use crate::setup::verify::{Checker, VerifyReport};
 
 /// What a confirm did.
@@ -78,8 +82,15 @@ impl Flow {
             env: &self.deps.env,
             store: &self.deps.store,
         };
-        let verify = checker.run(&self.selection, &mut applied, &mut record);
-        self.finish_record(&mut record, &planned.plan);
+        // An agent skipped at planning changed nothing: it is not checked.
+        let mut checked = self.selection.clone();
+        for (id, _) in &planned.problems {
+            for feature in self.selection.features(*id) {
+                checked.deselect(*id, feature);
+            }
+        }
+        let verify = checker.run(&checked, &mut applied, &mut record);
+        self.finish_record(&mut record, &planned);
         let mut progress = self.progress_of(&applied, &verify, &planned.problems);
         if !record.agents.is_empty() {
             progress.next_steps.extend(self.path_next_step());
@@ -120,8 +131,37 @@ impl Flow {
 
     /// The release, the program and the `PATH` entry of this install;
     /// agents that are no longer selected and manage nothing leave the
-    /// record.
-    fn finish_record(&self, record: &mut InstallRecord, plan: &crate::setup::plan::Plan) {
+    /// record. An agent skipped at planning keeps its entry as it was (no
+    /// feature is claimed for it) and only remembers what was chosen, so the
+    /// next run plans it again ([`Flow::recorded_selection`]).
+    fn finish_record(&self, record: &mut InstallRecord, planned: &Planned) {
+        let skipped: Vec<AgentId> = planned.problems.iter().map(|(id, _)| *id).collect();
+        for (id, entry) in &mut record.agents {
+            if !skipped.contains(id) {
+                entry.skipped.clear();
+            }
+        }
+        for id in &skipped {
+            let chosen = self.selection.features(*id);
+            if let Some(entry) = record.agents.get_mut(id) {
+                let on: BTreeSet<Feature> = entry
+                    .features
+                    .iter()
+                    .filter_map(|(f, on)| on.then_some(*f))
+                    .collect();
+                entry.skipped = if chosen == on {
+                    BTreeSet::new()
+                } else {
+                    chosen
+                };
+            } else if !chosen.is_empty() {
+                let entry = AgentRecord {
+                    skipped: chosen,
+                    ..AgentRecord::default()
+                };
+                record.agents.insert(*id, entry);
+            }
+        }
         let selected = self.selection.agents();
         record
             .agents
@@ -130,7 +170,7 @@ impl Flow {
             return;
         }
         record.release = Some(self.deps.version.clone());
-        self.finish_install(record, plan);
+        self.finish_install(record, &planned.plan);
     }
 
     fn progress_of(
