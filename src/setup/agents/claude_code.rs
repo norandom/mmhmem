@@ -49,7 +49,7 @@ use crate::setup::edit::json::{self as edit_json, JsonEditError};
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{
-    ElementMatcher, EntryState, HookHarness, KeySegment, Observation, Scope, Sha256Hex, Target,
+    ElementMatcher, EntryState, HookHarness, KeySegment, Observation, Os, Scope, Sha256Hex, Target,
     key_path, observe_in,
 };
 use crate::setup::ui::text::changes::{self as say, What};
@@ -245,7 +245,10 @@ impl ClaudeCode {
         let text = chain.text(file)?.unwrap_or_default();
         let want = hook_group(&self.binary_text());
         let matcher = ElementMatcher::MmhmemHook(HookHarness::Claude);
-        let planned = hook_entry::install(&text, &HOOK_POINTER, matcher, &want).map_err(&err)?;
+        // Exec form: no shell reads it, so the OS does not matter.
+        let os = Os::current();
+        let planned =
+            hook_entry::install(&text, &HOOK_POINTER, matcher, &want, os).map_err(&err)?;
         Ok(Proposal {
             target: hook_target(paths),
             file: file.clone(),

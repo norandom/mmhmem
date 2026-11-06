@@ -503,3 +503,28 @@ their hashes. Several mmhmem handlers now hash as a set no record matches
 file and an install can collapse them. The e2e harness strips mmhmem's
 handlers, not groups (`Remove-MmhmemHookHandlers`,
 `scripts/e2e-home-state.ps1`).
+
+**G3, a quote in the binary path breaks the Codex hook.** Codex runs the hook
+`command` string through PowerShell on Windows (codex-cli 0.166.0,
+`manage_hooks.ps1:284`) and through the POSIX shell elsewhere
+(`manage_hooks.py` `shlex.quote`). Setup quoted `'` correctly for each shell
+but recognised its own entry by taking the path up to the next `'`, so
+`C:\Users\O'Brien\...\mmhmem.exe` (`''`) or `/home/o'brien/...` (`'"'"'`) was
+never found again: every run appended another entry and removal missed them.
+PowerShell also ends a single-quoted string at `‘ ’ ‚ ‛`, which were not
+escaped. The old installer refused such paths for Codex. Chosen instead:
+correct quoting, because it is always possible. In a PowerShell single-quoted
+string a doubled quote character (any of the five) stands for that
+character, so doubling each of them quotes every path; in a POSIX
+single-quoted string only `'` is special. Only paths with a control character
+(a line break could end the command) or that are not Unicode are refused,
+before anything is written, with a plain message
+(`AgentProblem::UnsafeBinaryPath`). Recognition now reads the command with a small tokenizer
+for each shell (`src/setup/record_shell.rs`: plain words, single and double
+quotes, POSIX backslashes; anything that would expand or chain is not
+plain): a handler is mmhmem's when either reading is `<mmhmem binary> hook
+<harness>`, and a hand-edited but equivalent quoting under the OS's own shell
+counts as up to date and is kept (so Codex does not ask for approval again).
+Claude Code's exec form (`command` = path, `args`) and OpenCode's plugin
+(the path substituted as a JSON string literal, `opencode.rs`
+`plan_plugin`) involve no shell quoting and are not affected.

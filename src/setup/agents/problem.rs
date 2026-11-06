@@ -59,6 +59,14 @@ pub enum AgentProblem {
         /// The profile folders.
         profiles: Vec<PathBuf>,
     },
+    /// The binary path cannot be put into the Codex hook's shell command
+    /// safely (`record_shell.rs`); nothing is written for the agent.
+    UnsafeBinaryPath {
+        /// The installed binary.
+        binary: PathBuf,
+        /// Fixed reason, e.g. "the path contains a control character".
+        reason: &'static str,
+    },
 }
 
 /// `a, b, c` for a list of paths.
@@ -91,6 +99,13 @@ impl fmt::Display for AgentProblem {
                 f,
                 "more than one profile was found: {}; choose one",
                 list(profiles)
+            ),
+            Self::UnsafeBinaryPath { binary, reason } => write!(
+                f,
+                "the Codex hook cannot run mmhmem from {}: {reason}; \
+                 install mmhmem in a folder without such characters or turn the read hook off",
+                // Control characters are shown escaped (`\n`), not printed.
+                binary.display().to_string().escape_debug()
             ),
         }
     }

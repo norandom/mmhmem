@@ -312,21 +312,21 @@ fn invalid_files_skip_codex_without_echoing_their_content() {
 fn hook_shape_matches_the_shipped_entry_and_the_record_matcher() {
     let bin = Path::new("/opt/my tools/mmhmem");
     assert_eq!(
-        hook_command(bin, Os::Linux),
+        hook_command(bin, Os::Linux).unwrap(),
         "'/opt/my tools/mmhmem' hook codex"
     );
     assert_eq!(
-        hook_command(Path::new("/usr/bin/mmhmem"), Os::Linux),
+        hook_command(Path::new("/usr/bin/mmhmem"), Os::Linux).unwrap(),
         "/usr/bin/mmhmem hook codex"
     );
     let win = Path::new("C:\\Users\\me\\bin\\mmhmem.exe");
     assert_eq!(
-        hook_command(win, Os::Windows),
+        hook_command(win, Os::Windows).unwrap(),
         "& 'C:\\Users\\me\\bin\\mmhmem.exe' hook codex"
     );
     for os in [Os::Linux, Os::Windows] {
         let codex = Codex::new(if os == Os::Windows { win } else { bin });
-        let group = codex.hook_group(os);
+        let group = codex.hook_group(os).unwrap();
         assert_eq!(group["matcher"], "^(Bash|shell)$");
         assert_eq!(group["hooks"][0]["type"], "command");
         assert_eq!(group["hooks"][0]["timeout"], 10);

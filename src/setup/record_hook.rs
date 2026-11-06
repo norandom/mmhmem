@@ -14,7 +14,7 @@
 
 use serde_json::{Value, json};
 
-use super::{ElementMatcher, HookHarness};
+use super::{ElementMatcher, HookHarness, Os};
 
 /// Whether `path` names the mmhmem binary (`mmhmem` or `mmhmem.exe`).
 pub fn is_mmhmem_binary(path: &str) -> bool {
@@ -34,22 +34,22 @@ pub fn is_own_handler(handler: &Value, harness: HookHarness) -> bool {
                 && args.len() == 2
                 && args.iter().zip(want).all(|(a, w)| a.as_str() == Some(w))
         }
-        None => shell_form_matches(command, &want),
+        None => shell_binary(command, &want).is_some(),
     }
 }
 
-/// `[& ]<path> hook <harness>` with the path bare or quoted.
-fn shell_form_matches(command: &str, want: &[&str; 2]) -> bool {
-    let rest = command.trim();
-    let rest = rest.strip_prefix('&').map_or(rest, str::trim_start);
-    let (path, tail) = match rest.chars().next() {
-        Some(q @ ('\'' | '"')) => match rest[1..].find(q) {
-            Some(end) => (&rest[1..=end], &rest[end + 2..]),
-            None => return false,
-        },
-        _ => rest.split_once(' ').unwrap_or((rest, "")),
-    };
-    is_mmhmem_binary(path) && tail.split_whitespace().eq(want.iter().copied())
+/// The mmhmem binary a shell-form command `[& ]<path> hook <harness>` runs,
+/// with the path bare or quoted for PowerShell or the POSIX shell
+/// (`record_shell.rs`); `None` when it is not such a command.
+fn shell_binary(command: &str, want: &[&str; 2]) -> Option<String> {
+    super::shell::readings(command)
+        .into_iter()
+        .find_map(|words| {
+            let [bin, rest @ ..] = words.as_slice() else {
+                return None;
+            };
+            (is_mmhmem_binary(bin) && rest == want).then(|| bin.clone())
+        })
 }
 
 /// Every mmhmem handler in the hook groups `groups`, as
@@ -72,7 +72,30 @@ pub fn handler_view(group: &Value, handler: usize) -> Value {
     }
 }
 
-/// Whether handler `have` already does what `want` describes.
-pub fn same_handler(have: &Value, want: &Value) -> bool {
-    have == want
+/// Whether handler `have` already does what `want` describes: equal, or
+/// equal but for a shell-form `command` that `os`'s shell reads as the same
+/// words (a hand-edited quoting, which setup keeps rather than rewriting,
+/// so Codex does not ask for the hook to be approved again).
+pub fn same_handler(have: &Value, want: &Value, os: Os) -> bool {
+    if have == want {
+        return true;
+    }
+    let (Some(have), Some(want)) = (have.as_object(), want.as_object()) else {
+        return false;
+    };
+    let (Some(theirs), Some(ours)) = (shell_form(have), shell_form(want)) else {
+        return false;
+    };
+    let others_equal = have.len() == want.len()
+        && have
+            .iter()
+            .all(|(k, v)| k == "command" || want.get(k) == Some(v));
+    let words = |text| super::shell::words_for(text, os);
+    others_equal && words(ours).is_some() && words(theirs) == words(ours)
+}
+
+/// The `command` of a shell-form handler (one without `args`).
+fn shell_form(handler: &serde_json::Map<String, Value>) -> Option<&str> {
+    let text = handler.get("command")?.as_str()?;
+    handler.get("args").is_none().then_some(text)
 }

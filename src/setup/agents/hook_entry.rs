@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::setup::edit::json::{self as ejson, JsonEditError};
-use crate::setup::record::{ElementMatcher, own_handlers, same_handler};
+use crate::setup::record::{ElementMatcher, Os, own_handlers, same_handler};
 
 /// The planned text of an install.
 pub(crate) struct Installed {
@@ -79,9 +79,10 @@ fn update_handler(
     (g, h): (usize, usize),
     have: &Value,
     want: &Value,
+    os: Os,
 ) -> Result<String, JsonEditError> {
     let mut out = text.to_owned();
-    if same_handler(have, want) {
+    if same_handler(have, want, os) {
         return Ok(out);
     }
     let inner = Some(("hooks", h));
@@ -97,12 +98,14 @@ fn update_handler(
 }
 
 /// Plans mmhmem's handler `want_group` (`{matcher, hooks: [handler]}`) into
-/// the array at `path` of `text`.
+/// the array at `path` of `text`. `os` decides how a shell-form command
+/// is read when comparing it with `want_group`'s.
 pub(crate) fn install(
     text: &str,
     path: &[&str],
     matcher: ElementMatcher,
     want_group: &Value,
+    os: Os,
 ) -> Result<Installed, JsonEditError> {
     let groups = groups_at(text, path)?;
     let own = own_handlers(&groups, matcher);
@@ -129,7 +132,7 @@ pub(crate) fn install(
     let mut after = text.to_owned();
     if in_place {
         let want = &want_group["hooks"][0];
-        after = update_handler(&after, path, keep, &groups[g]["hooks"][h], want)?;
+        after = update_handler(&after, path, keep, &groups[g]["hooks"][h], want, os)?;
         if let Some(m) = want_matcher.filter(|_| !right_matcher(g)) {
             after = ejson::nested_set(&after, path, g, None, "matcher", m)?;
         }

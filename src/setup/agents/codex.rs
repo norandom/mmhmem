@@ -13,7 +13,10 @@
 //!   timeout 10 s: the shape of `manage_hooks.ps1` and `manage_hooks.py`),
 //!   new in its own group with matcher `^(Bash|shell)$`. mmhmem owns the
 //!   handler, never the group: one in a user's group is updated or removed
-//!   there alone (`hook_entry.rs`).
+//!   there alone (`hook_entry.rs`). The path is quoted for the shell Codex
+//!   uses (PowerShell on Windows, the POSIX shell elsewhere) and the entry is
+//!   recognised by reading the command back (`record_shell.rs`); a path with
+//!   a control character skips Codex before anything is written.
 //! - `prompts/mmhmem-recap.md`, and in `~/.agents/skills` the
 //!   `unified-memory` and `mmhmem-recap` skills.
 //!
@@ -43,7 +46,8 @@ use crate::setup::edit::json::JsonEditError;
 use crate::setup::edit::toml::{self as etoml, McpServerEntry, TomlEditError};
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{
-    ElementMatcher, HookHarness, KeySegment, ManagedEntry, Os, Scope, Target, key_path,
+    ElementMatcher, HookHarness, KeySegment, ManagedEntry, Os, Scope, Target, codex_command,
+    key_path,
 };
 use crate::setup::ui::text::changes::{self as say, What};
 
@@ -141,18 +145,14 @@ fn json_problem(file: &Path) -> impl Fn(JsonEditError) -> AgentProblem + '_ {
     }
 }
 
-/// The hook command: PowerShell form on Windows, quoted shell form elsewhere.
-fn hook_command(binary: &Path, os: Os) -> String {
-    let bin = binary.to_string_lossy();
-    if os == Os::Windows {
-        return format!("& '{}' hook codex", bin.replace('\'', "''"));
-    }
-    let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
-    if !bin.is_empty() && bin.chars().all(plain) {
-        format!("{bin} hook codex")
-    } else {
-        format!("'{}' hook codex", bin.replace('\'', "'\"'\"'"))
-    }
+/// The hook command: PowerShell form on Windows, quoted shell form
+/// elsewhere (`record_shell.rs`). A path that cannot be quoted safely skips
+/// Codex before anything is written.
+fn hook_command(binary: &Path, os: Os) -> Result<String, AgentProblem> {
+    codex_command(binary, os).map_err(|why| AgentProblem::UnsafeBinaryPath {
+        binary: binary.to_path_buf(),
+        reason: why.reason(),
+    })
 }
 
 fn change(
@@ -210,15 +210,15 @@ impl Codex {
         }
     }
 
-    fn hook_group(&self, os: Os) -> Value {
-        json!({
+    fn hook_group(&self, os: Os) -> Result<Value, AgentProblem> {
+        Ok(json!({
             "matcher": HOOK_MATCHER,
             "hooks": [{
                 "type": "command",
-                "command": hook_command(&self.binary, os),
+                "command": hook_command(&self.binary, os)?,
                 "timeout": HOOK_TIMEOUT,
             }],
-        })
+        }))
     }
 
     fn plan_mcp(&self, p: &Paths, chain: &mut FileChain, rec: Option<&AgentRecord>) -> Planned {
@@ -259,12 +259,13 @@ impl Codex {
         let before = chain.bytes(file)?;
         let mut text = chain.text(file)?.unwrap_or_else(|| "{}\n".to_owned());
         let problem = json_problem(file);
-        let want = self.hook_group(env.os());
+        let want = self.hook_group(env.os())?;
         let target = hook_target(file);
         let prior = rec
             .and_then(|r| r.managed.iter().find(|e| e.target == target))
             .and_then(|e| e.missing_parents);
-        let planned = hook_entry::install(&text, &HOOK_PATH, OWN_HOOK, &want).map_err(&problem)?;
+        let planned =
+            hook_entry::install(&text, &HOOK_PATH, OWN_HOOK, &want, env.os()).map_err(&problem)?;
         let missing = if planned.found {
             prior.unwrap_or(0)
         } else {
@@ -470,3 +471,7 @@ impl Agent for Codex {
 #[cfg(test)]
 #[path = "codex_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "codex_quote_tests.rs"]
+mod quote_tests;

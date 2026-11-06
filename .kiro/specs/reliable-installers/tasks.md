@@ -102,6 +102,7 @@ released.
   - _Requirements: 3.1, 3.4, 6.6, 7.3_
 
 - [x] 3.4 (P) Codex
+  - Status 2026-11-06 (follow-up G3): the hook command quotes the binary path for PowerShell (all five single quotes) or the POSIX shell and is recognised by reading it back, so a path with `'` or `’` installs once and is removed; control characters are refused before writing (research.md "Note 2026-11-06"). Tests: `src/setup/agents/codex_quote_tests.rs`, `src/setup/record_shell_tests.rs`.
   - Plan `[mcp_servers.mmhmem]` with `toml_edit`, the skills, the recap prompt and the optional `hooks.json` entry. Mark hook approval as a pending user step.
   - Done when tests cover install, the old marker block, an existing duplicate table, removal and an invalid `config.toml`.
   - _Boundary: agent-codex_
