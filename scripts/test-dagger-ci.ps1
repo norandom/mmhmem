@@ -105,9 +105,9 @@ try {
     $nativeJobs = @{ windows = 'mmhmem-x86_64-pc-windows-msvc'; macos = 'mmhmem-macos' }
     foreach ($os in @('windows', 'macos')) {
         $job = Get-WorkflowJob $workflow $os
-        Assert-True (-not $job.Contains('uses: actions/cache@v4')) "$os still uses the combined cache action"
-        Assert-True $job.Contains('uses: actions/cache/restore@v4') "$os cache restore step missing"
-        Assert-True $job.Contains('uses: actions/cache/save@v4') "$os cache save step missing"
+        Assert-True (-not $job.Contains('uses: actions/cache@')) "$os still uses the combined cache action"
+        Assert-True $job.Contains('uses: actions/cache/restore@') "$os cache restore step missing"
+        Assert-True $job.Contains('uses: actions/cache/save@') "$os cache save step missing"
         Assert-True $job.Contains('id: cargo-cache') "$os cache restore step has no id"
         Assert-True $job.Contains("key: cargo-$os-1.98.1-`${{ hashFiles('Cargo.lock') }}") "$os primary cache key wrong"
         Assert-True ([regex]::IsMatch($job, "restore-keys: \|?\s*cargo-$os-1\.98\.1-\r?\n")) "$os restore-key prefix wrong"
@@ -116,8 +116,8 @@ try {
         foreach ($path in @('~/.cargo/registry', '~/.cargo/git', 'target')) {
             Assert-True ([regex]::Matches($job, '(?m)^\s+' + [regex]::Escape($path) + '\r?$').Count -eq 2) "$os cache path $path not on both restore and save"
         }
-        $restoreAt = $job.IndexOf('actions/cache/restore@v4'); $saveAt = $job.IndexOf('actions/cache/save@v4')
-        $clippyAt = $job.IndexOf('cargo clippy'); $uploadAt = $job.IndexOf('actions/upload-artifact@v4')
+        $restoreAt = $job.IndexOf('actions/cache/restore@'); $saveAt = $job.IndexOf('actions/cache/save@')
+        $clippyAt = $job.IndexOf('cargo clippy'); $uploadAt = $job.IndexOf('actions/upload-artifact@')
         Assert-True ($restoreAt -ge 0 -and $restoreAt -lt $clippyAt -and $uploadAt -lt $saveAt) "$os cache steps are not around the cargo steps"
         $summary = [regex]::Match($job, '(?ms)- name: Report cargo cache status\r?\n(.*?)(?=^      - |\z)')
         Assert-True $summary.Success "$os cache summary step missing"
@@ -130,6 +130,12 @@ try {
         Assert-True $summaryText.Contains('GITHUB_STEP_SUMMARY') "$os cache summary not written to the job summary"
         Assert-True $job.Contains("name: $($nativeJobs[$os])`n") "$os artifact name changed"
         Assert-True (-not $job.Contains('secrets.')) "$os job reads secrets"
+    }
+    # Floating actions/* tags ran on the deprecated Node.js 20; every one is pinned to a commit.
+    foreach ($file in @('ci.yml', 'release.yml', 'installer-e2e.yml')) {
+        $text = [IO.File]::ReadAllText((Join-Path $repo ".github/workflows/$file"))
+        $floating = [regex]::Matches($text, '(?m)uses: (actions/[^@\s]+@(?![0-9a-f]{40}\b)\S+)') | ForEach-Object { $_.Groups[1].Value }
+        Assert-True (-not $floating) "$file uses unpinned actions: $($floating -join ', ')"
     }
     Assert-True ((Get-WorkflowJob $workflow 'windows').Contains("path: target/release/mmhmem.exe`n")) 'Windows artifact path changed'
     Assert-True ((Get-WorkflowJob $workflow 'macos').Contains("path: |`n            target/release/mmhmem`n            target/x86_64-apple-darwin/release/mmhmem`n")) 'macOS artifact paths changed'
@@ -169,12 +175,12 @@ try {
     Assert-True $gateArgs.Contains($cacheOptions) 'Gate lacks the cache options (read-write on push, read-only otherwise)'
     Assert-True $exportArgs.Contains($cacheOptions) 'Export cache options differ from the gate (bundle would be rebuilt)'
     Assert-True ($exportArgs.IndexOf('--cache-mode=') -lt $exportArgs.IndexOf(' export ')) 'Export cache options are not static-release options'
-    $credentialStep = @($gateSteps | Where-Object { $_.Contains('uses: actions/github-script@v7') })
+    $credentialStep = @($gateSteps | Where-Object { $_.Contains('uses: actions/github-script@') })
     Assert-True ($credentialStep.Count -eq 1) 'Cache credential export step missing'
     foreach ($name in @('ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN')) {
         Assert-True $credentialStep[0].Contains("core.exportVariable('$name', process.env.$name || '')") "Credential export lacks $name"
     }
-    Assert-True ($gateJob.IndexOf('actions/github-script@v7') -lt $gateJob.IndexOf('id: gate')) 'Cache credentials exported after the gate'
+    Assert-True ($gateJob.IndexOf('actions/github-script@') -lt $gateJob.IndexOf('id: gate')) 'Cache credentials exported after the gate'
     foreach ($step in $gateSteps) {
         $run = [regex]::Match($step, '(?ms)^        run: (.*)$').Groups[1].Value
         Assert-True (-not ($run.Contains('ACTIONS_RUNTIME_TOKEN') -or $run.Contains('ACTIONS_RESULTS_URL') -or $run.Contains('secrets.'))) 'A gate run body references cache credentials'
@@ -183,7 +189,7 @@ try {
     Assert-True ([regex]::IsMatch($locJob, '(?m)^    continue-on-error: true\r?$')) 'LOC job can change the workflow verdict'
     Assert-True (-not [regex]::IsMatch($locJob, '(?m)^    needs:')) 'LOC job waits for another job'
     Assert-True (-not [regex]::IsMatch($workflow, '(?m)^    needs:.*loc-report')) 'A job depends on the LOC job'
-    Assert-True ($locJob.Contains('uses: actions/cache@v4') -and $locJob.Contains('path: ~/.cargo/bin/tokei') -and $locJob.Contains('key: tokei-15.0.0-')) 'LOC job does not cache the pinned tokei binary'
+    Assert-True ($locJob.Contains('uses: actions/cache@') -and $locJob.Contains('path: ~/.cargo/bin/tokei') -and $locJob.Contains('key: tokei-15.0.0-')) 'LOC job does not cache the pinned tokei binary'
     Assert-True ($locJob.Contains("if: steps.tokei-cache.outputs.cache-hit != 'true'") -and $locJob.Contains('cargo install tokei --locked --version 15.0.0')) 'LOC job compiles tokei even on a cache hit'
     Assert-True ($locJob.Contains('tokei --files') -and $locJob.Contains('GITHUB_STEP_SUMMARY')) 'LOC report not written to the job summary'
     Assert-True (-not $locJob.Contains('secrets.')) 'LOC job reads secrets'

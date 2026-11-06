@@ -35,7 +35,8 @@ jobs:
     outputs:
       publish: ${{ steps.decide.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
           fetch-depth: 0
@@ -70,7 +71,8 @@ jobs:
     steps:
       # Always execute trusted default-branch publication code. Binaries come
       # exclusively from the exact tagged commit's successful main CI run.
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
           fetch-depth: 0

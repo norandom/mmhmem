@@ -58,7 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Capture clean checkout provenance
         id: provenance
         shell: bash
@@ -78,7 +79,7 @@ jobs:
       # containers only as secrets (env://). Read-write on pushes to main,
       # read-only on pull requests.
       - name: Expose the GitHub cache service to sccache
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
@@ -112,7 +113,7 @@ jobs:
           workdir: ci
           args: static-release --src .. --revision=${{ steps.provenance.outputs.revision }} --validation-id=${{ steps.provenance.outputs.validation_id }} --source-clean=true --cargo-jobs=4 --cache-mode=${{ github.event_name == 'push' && 'read-write' || 'read-only' }} --cache-url=env://ACTIONS_RESULTS_URL --cache-token=env://ACTIONS_RUNTIME_TOKEN export --path=../tmp/linux-static
       - name: Upload verified Linux bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Publisher identity: linux-static-<commit>-<run_id>-<run_attempt>.
           name: linux-static-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -128,10 +129,11 @@ jobs:
     timeout-minutes: 20
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Restore the pinned tokei binary
         id: tokei-cache
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/tokei
           key: tokei-15.0.0-${{ runner.os }}
@@ -161,7 +163,8 @@ jobs:
       E2E_WORKER_MODEL: ${{ secrets.E2E_WORKER_MODEL }}
       E2E_WORKER_API_KEY: ${{ secrets.E2E_WORKER_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust 1.98.1 (matches rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -177,7 +180,7 @@ jobs:
         run: cargo test --test e2e_measurement
       - name: Upload measured-savings report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-measurement-report
           path: target/e2e/**/report.md
@@ -188,7 +191,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: PowerShell installer regression checks
         shell: powershell
         run: ./scripts/test-install.ps1
@@ -198,7 +202,7 @@ jobs:
           toolchain: 1.98.1
       - name: Restore cargo registry and target (prefix fallback survives version-only lockfile changes)
         id: cargo-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -214,7 +218,7 @@ jobs:
       - name: Release build (x86_64-pc-windows-msvc)
         run: cargo build --release --locked
       - name: Upload release binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mmhmem-x86_64-pc-windows-msvc
           path: target/release/mmhmem.exe
@@ -223,7 +227,7 @@ jobs:
       # Push-only, so pull requests cannot overwrite main's caches.
       - name: Save cargo registry and target (only without an exact hit)
         if: success() && github.event_name == 'push' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -247,7 +251,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust 1.98.1 (matches rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -256,7 +261,7 @@ jobs:
         run: rustup target add x86_64-apple-darwin
       - name: Restore cargo registry and target (prefix fallback survives version-only lockfile changes)
         id: cargo-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -274,7 +279,7 @@ jobs:
       - name: Release build (x86_64-apple-darwin, cross)
         run: cargo build --release --locked --target x86_64-apple-darwin
       - name: Upload release binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mmhmem-macos
           path: |
@@ -285,7 +290,7 @@ jobs:
       # Push-only, so pull requests cannot overwrite main's caches.
       - name: Save cargo registry and target (only without an exact hit)
         if: success() && github.event_name == 'push' && steps.cargo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
