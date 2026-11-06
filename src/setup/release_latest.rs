@@ -10,6 +10,8 @@
 //! the API's error is returned. A tag that is not a stable
 //! `vMAJOR.MINOR.PATCH` is refused either way (Requirement 2.1).
 
+use std::time::Duration;
+
 use self_update::reqwest::blocking::Client;
 use self_update::reqwest::header::LOCATION;
 use self_update::reqwest::redirect::Policy;
@@ -45,14 +47,29 @@ pub fn latest_release(
     source: &ReleaseSource,
     target: Target,
 ) -> Result<LatestRelease, ReleaseError> {
-    super::off_runtime(|| match from_api(source, target) {
+    latest_release_within(source, target, TIMEOUT)
+}
+
+/// [`latest_release`] with a per-request `timeout` (the background update
+/// notice in `mmhmem stdio` uses a short one).
+pub fn latest_release_within(
+    source: &ReleaseSource,
+    target: Target,
+    timeout: Duration,
+) -> Result<LatestRelease, ReleaseError> {
+    super::off_runtime(|| match from_api(source, target, timeout) {
         Ok(latest) => Ok(latest),
-        Err(api) => from_redirect(source, target).map_err(|_| api),
+        Err(api) => from_redirect(source, target, timeout).map_err(|_| api),
     })
 }
 
-fn from_api(source: &ReleaseSource, target: Target) -> Result<LatestRelease, ReleaseError> {
+fn from_api(
+    source: &ReleaseSource,
+    target: Target,
+    timeout: Duration,
+) -> Result<LatestRelease, ReleaseError> {
     let releases = super::configure(source, target)
+        .timeout(timeout)
         .build()
         .and_then(|u| u.get_latest_release())
         .map_err(|e| super::lookup_error(&e))?;
@@ -72,7 +89,11 @@ fn from_api(source: &ReleaseSource, target: Target) -> Result<LatestRelease, Rel
     })
 }
 
-fn from_redirect(source: &ReleaseSource, target: Target) -> Result<LatestRelease, ReleaseError> {
+fn from_redirect(
+    source: &ReleaseSource,
+    target: Target,
+    timeout: Duration,
+) -> Result<LatestRelease, ReleaseError> {
     let failed = |reason: &str| ReleaseError::Lookup {
         reason: reason.to_string(),
     };
@@ -84,7 +105,7 @@ fn from_redirect(source: &ReleaseSource, target: Target) -> Result<LatestRelease
     );
     let client = Client::builder()
         .redirect(Policy::none())
-        .timeout(TIMEOUT)
+        .timeout(timeout)
         .user_agent(concat!("mmhmem/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|_| failed("the connection could not be set up"))?;

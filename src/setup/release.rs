@@ -65,7 +65,7 @@ mod sums;
 mod target;
 
 pub use error::ReleaseError;
-pub use latest::{LatestRelease, LookupVia, latest_release};
+pub use latest::{LatestRelease, LookupVia, latest_release, latest_release_within};
 pub use local::LocalRelease;
 pub use target::Target;
 

@@ -42,6 +42,7 @@ fn spawn_cmd(data_dir: &Path, roots: Option<&str>, worker: Option<(&str, &str)>)
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mmhmem"));
     cmd.arg("stdio")
         .env("AGENT_MEM_DATA_DIR", data_dir)
+        .env("MMHMEM_NO_UPDATE_CHECK", "1")
         .env_remove("AGENT_MEM_LOG_FILE")
         .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT");
     match roots {

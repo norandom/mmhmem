@@ -29,6 +29,7 @@ impl StdioMcp {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mmhmem"))
             .arg("stdio")
             .env("AGENT_MEM_DATA_DIR", data_dir)
+            .env("MMHMEM_NO_UPDATE_CHECK", "1")
             .env("AGENT_MEM_AUDIT_MAX_BYTES", max_bytes.to_string())
             .env("AGENT_MEM_AUDIT_ROTATE_KEEP", keep.to_string())
             .env_remove("AGENT_MEM_TOKEN")

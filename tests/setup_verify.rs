@@ -106,6 +106,7 @@ impl CommandRunner for Clis {
                 let real = invocation
                     .clone()
                     .env("AGENT_MEM_DATA_DIR", self.data.to_string_lossy())
+                    .env("MMHMEM_NO_UPDATE_CHECK", "1")
                     .env("WORKER_MODEL", "verify-test-model")
                     .env("WORKER_API_URL", "")
                     .env("WORKER_API_KEY", "");

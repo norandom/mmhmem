@@ -15,3 +15,6 @@ mod session_response;
 mod tool_support;
 
 mod instructions;
+
+#[cfg(test)]
+mod update_notice_tests;

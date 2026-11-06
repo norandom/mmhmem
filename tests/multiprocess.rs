@@ -40,6 +40,7 @@ impl StdioMcp {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mmhmem"))
             .arg("stdio")
             .env("AGENT_MEM_DATA_DIR", data_dir)
+            .env("MMHMEM_NO_UPDATE_CHECK", "1")
             .env_remove("AGENT_MEM_TOKEN")
             .env_remove("AGENT_MEM_ALLOWED_ROOTS")
             // Blank — not removed: removed worker vars fall back to the

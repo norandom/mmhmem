@@ -423,7 +423,10 @@ impl McpServer {
 
 impl McpServer {
     /// session_resume_or_handoff core: resume (and maybe checkpoint).
-    async fn resume_or_handoff(&self, p: &ResumeParams) -> Result<CallToolResult, ErrorData> {
+    pub(crate) async fn resume_or_handoff(
+        &self,
+        p: &ResumeParams,
+    ) -> Result<CallToolResult, ErrorData> {
         let bus = &self.state.services.bus;
         let view = bus
             .resume(&p.project, &p.agent_harness, p.workspace_task_id.as_deref())
@@ -463,6 +466,12 @@ impl McpServer {
         }
         let mut md = super::session_response::resume(&p.project, &view);
         md.push_str(&self.worker_notice());
+        // Resume path only, never on a checkpoint save; reads a cache file,
+        // never the network (services::update_check).
+        if let Some(line) = self.state.update_notice.as_ref().and_then(|n| n.line()) {
+            md.push_str("\n\n");
+            md.push_str(&line);
+        }
         ok_text(md)
     }
 

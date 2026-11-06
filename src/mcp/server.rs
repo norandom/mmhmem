@@ -35,6 +35,7 @@ use crate::services::session_bus::SessionBus;
 use crate::services::shunt::ShuntEngine;
 use crate::services::stats::{OtelSink, StatsCollector};
 use crate::services::status::StatusService;
+use crate::services::update_check::UpdateNotice;
 use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter};
 use crate::storage::db::Db;
@@ -73,6 +74,9 @@ pub struct AppState {
     pub telemetry: Arc<Telemetry>,
     /// Whether a worker model is configured (Req 8 notice gate).
     pub worker_configured: bool,
+    /// Session-start update notice (local mode only; `mmhmem stdio` sets
+    /// it, `build` leaves it off, so serve mode never notes).
+    pub update_notice: Option<UpdateNotice>,
     /// Service graph.
     pub services: Services,
 }
@@ -115,6 +119,7 @@ impl AppState {
             audit,
             telemetry,
             worker_configured,
+            update_notice: None,
             services: Services {
                 bus,
                 memory,

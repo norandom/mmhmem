@@ -11,7 +11,9 @@
 //! pure parser `Config::from_env_local` (research.md F2). The serve
 //! profile never touches this module (Req 7.4). The worker API key from
 //! any source never appears in logs or diagnostics (Req 7.5) — redaction
-//! is source-agnostic in `Config::redacted_debug`.
+//! is source-agnostic in `Config::redacted_debug`. One non-worker key is
+//! read too: `update_check` (`false` turns off the local-mode update
+//! notice, see `services::update_check`); it is not part of `Config`.
 
 use std::path::Path;
 
@@ -31,6 +33,9 @@ pub struct MmhmemFile {
     pub worker_api_url: Option<String>,
     /// `worker_api_key` — worker bearer key (never logged, Req 7.5).
     pub worker_api_key: Option<String>,
+    /// `update_check` — `false` turns off the session-start update notice
+    /// and its once-a-day release lookup (local mode only).
+    pub update_check: Option<bool>,
 }
 
 impl MmhmemFile {
@@ -52,6 +57,7 @@ impl MmhmemFile {
             worker_model: p.worker_model.or(g.worker_model),
             worker_api_url: p.worker_api_url.or(g.worker_api_url),
             worker_api_key: p.worker_api_key.or(g.worker_api_key),
+            update_check: p.update_check.or(g.update_check),
         })
     }
 
@@ -358,5 +364,18 @@ mod tests {
             Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file)).expect("ok");
         assert_eq!(cfg.worker_api_url, "p-url");
         let _ = ENV_WORKER_API_URL; // referenced for the doc link
+    }
+
+    #[test]
+    fn update_check_key_merges_project_over_global() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let global = write_file(dir.path(), "g.json", r#"{"update_check":false}"#);
+        let file = MmhmemFile::load(&global, &dir.path().join("none")).expect("ok");
+        assert_eq!(file.update_check, Some(false));
+        let project = write_file(dir.path(), "p.json", r#"{"update_check":true}"#);
+        let file = MmhmemFile::load(&global, &project).expect("ok");
+        assert_eq!(file.update_check, Some(true));
+        let empty = write_file(dir.path(), "e.json", "{}");
+        assert_eq!(MmhmemFile::load(&empty, &empty).unwrap().update_check, None);
     }
 }

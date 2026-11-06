@@ -66,7 +66,9 @@ It shows the installed and the newest version, asks once, then downloads the
 new release, checks its signature and checksum, and keeps your tools and
 choices. If the new version needs to change files in your tools, it lists
 them and asks before changing anything; otherwise it only checks your tools.
-Start new agent sessions afterwards.
+Start new agent sessions afterwards. When a newer release exists, agents see a
+one-line note at session start; nothing installs itself
+([update notice](docs/configuration.md#update-notice)).
 
 `mmhmem setup` and the install command above offer the same update when
 mmhmem is already set up. `mmhmem update` exists since v0.5.1: to update from

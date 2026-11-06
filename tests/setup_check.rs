@@ -22,6 +22,7 @@ const SECRET: &str = "check-test-secret-6b1e";
 fn registration(data: &Path, args: &[&str]) -> Registration {
     Registration::new(BIN, args)
         .with_env("AGENT_MEM_DATA_DIR", data.to_string_lossy())
+        .with_env("MMHMEM_NO_UPDATE_CHECK", "1")
         .with_env("WORKER_API_URL", "")
         .with_env("WORKER_MODEL", "")
         .with_env("WORKER_API_KEY", "")
@@ -281,7 +282,8 @@ fn registration_read_from_written_config_starts_the_real_server() {
         "args": ["stdio"],
         "env": {
             "AGENT_MEM_DATA_DIR": data.path().to_string_lossy(),
-            "WORKER_API_URL": "", "WORKER_MODEL": "", "WORKER_API_KEY": ""
+            "WORKER_API_URL": "", "WORKER_MODEL": "", "WORKER_API_KEY": "",
+            "MMHMEM_NO_UPDATE_CHECK": "1"
         }
     }}});
     let bytes = serde_json::to_vec_pretty(&config).unwrap();

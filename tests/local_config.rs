@@ -109,6 +109,7 @@ impl StdioMcp {
 fn spawn_with(data_dir: Option<&Path>, env: &[(&str, String)]) -> StdioMcp {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mmhmem"));
     cmd.arg("stdio")
+        .env("MMHMEM_NO_UPDATE_CHECK", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -294,6 +295,7 @@ async fn fail_fast_on_unusable_data_dir() {
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mmhmem"));
     cmd.arg("stdio")
+        .env("MMHMEM_NO_UPDATE_CHECK", "1")
         .env("AGENT_MEM_DATA_DIR", &bad_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
