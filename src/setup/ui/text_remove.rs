@@ -31,6 +31,11 @@ settings were left as they are";
 pub const KEPT_FOR_SKIPPED: &str = "The mmhmem program and the list of what setup \
 installed were kept, because not every tool could be cleaned up. Fix the file named \
 above, then run mmhmem setup and choose Remove again.";
+pub const KEPT_IN_USE: &str = "The mmhmem program could not be deleted yet, because \
+it is still running (an AI tool or another window still uses it). So the program, its \
+place on your PATH and the list of what setup installed were kept; your tools no longer \
+use mmhmem. Close your AI tools and any other mmhmem window, then run mmhmem setup and \
+choose Remove again.";
 pub const RECORD_DELETED: &str = "Deleted the list of what setup installed.";
 /// Contains `{dir}`.
 pub const BACKUPS_KEPT: &str = "Copies of your settings from before the removal are \
@@ -114,6 +119,7 @@ pub const ALL: &[&str] = &[
     CONFIRM,
     FILE_UNREADABLE,
     KEPT_FOR_SKIPPED,
+    KEPT_IN_USE,
     RECORD_DELETED,
     BACKUPS_KEPT,
     MEMORIES_KEPT,

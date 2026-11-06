@@ -157,11 +157,13 @@ pub struct AgentRecord {
     /// The last functional check.
     #[serde(default)]
     pub last_check: Option<LastCheck>,
-    /// The features chosen in a run that skipped this agent because one of
-    /// its files could not be read (nothing of it was changed or checked).
-    /// The next run plans them again; empty once the agent was set up.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub skipped: BTreeSet<Feature>,
+    /// The features chosen in a run that did not set this agent up: it was
+    /// skipped because one of its files could not be read, or its check
+    /// failed and its files were restored. The next run offers them again;
+    /// `Some` of an empty set means "nothing chosen" (every feature was
+    /// switched off). `None` once the agent was set up as chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<BTreeSet<Feature>>,
 }
 
 /// What a managed entry points at. Equal targets mean the same entry.

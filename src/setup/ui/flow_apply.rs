@@ -90,7 +90,7 @@ impl Flow {
             }
         }
         let verify = checker.run(&checked, &mut applied, &mut record);
-        self.finish_record(&mut record, &planned);
+        self.finish_record(&mut record, &planned, &applied);
         let mut progress = self.progress_of(&applied, &verify, &planned.problems);
         if !record.agents.is_empty() {
             progress.next_steps.extend(self.path_next_step());
@@ -139,12 +139,19 @@ impl Flow {
     /// agents that are no longer selected and manage nothing leave the
     /// record. An agent skipped at planning keeps its entry as it was (no
     /// feature is claimed for it) and only remembers what was chosen, so the
-    /// next run plans it again ([`Flow::recorded_selection`]).
-    fn finish_record(&self, record: &mut InstallRecord, planned: &Planned) {
+    /// next run plans it again ([`Flow::recorded_selection`]); choosing no
+    /// feature at all is remembered too. An agent whose changes were undone
+    /// (its check failed) keeps the choice it remembered before this run.
+    fn finish_record(&self, record: &mut InstallRecord, planned: &Planned, applied: &ApplyReport) {
         let skipped: Vec<AgentId> = planned.problems.iter().map(|(id, _)| *id).collect();
+        let undone = |id: AgentId| {
+            applied
+                .agent(Scope::Agent(id))
+                .is_some_and(|a| a.outcome != Outcome::Applied)
+        };
         for (id, entry) in &mut record.agents {
-            if !skipped.contains(id) {
-                entry.skipped.clear();
+            if !skipped.contains(id) && !undone(*id) {
+                entry.skipped = None;
             }
         }
         for id in &skipped {
@@ -155,14 +162,10 @@ impl Flow {
                     .iter()
                     .filter_map(|(f, on)| on.then_some(*f))
                     .collect();
-                entry.skipped = if chosen == on {
-                    BTreeSet::new()
-                } else {
-                    chosen
-                };
+                entry.skipped = (chosen != on).then_some(chosen);
             } else if !chosen.is_empty() {
                 let entry = AgentRecord {
-                    skipped: chosen,
+                    skipped: Some(chosen),
                     ..AgentRecord::default()
                 };
                 record.agents.insert(*id, entry);

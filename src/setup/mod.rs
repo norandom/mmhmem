@@ -14,6 +14,7 @@ pub mod plan;
 pub mod record;
 pub mod release;
 pub mod release_keys;
+pub mod running;
 pub mod ui;
 pub mod user_path;
 pub mod verify;

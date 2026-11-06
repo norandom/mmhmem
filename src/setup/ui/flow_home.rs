@@ -169,8 +169,19 @@ impl Flow {
         }
         if installed {
             actions.extend([HomeAction::Change, HomeAction::Check, HomeAction::Remove]);
+        } else if self.program_left() {
+            actions.push(HomeAction::Remove);
         }
         actions
+    }
+
+    /// A removal that kept the program (it was still running) left a record
+    /// with no tool but the program or its `PATH` entry: Remove finishes it.
+    fn program_left(&self) -> bool {
+        self.loaded
+            .record
+            .as_ref()
+            .is_some_and(|r| r.agents.is_empty() && (r.binary.is_some() || r.path_entry.is_some()))
     }
 
     /// The newest release when it is newer than the installed one.
@@ -222,11 +233,14 @@ impl Flow {
             return Selection::new();
         };
         let mut selection = Selection::from_record(record);
-        for (id, rec) in record.agents.iter().filter(|(_, r)| !r.skipped.is_empty()) {
+        for (id, rec) in &record.agents {
+            let Some(skipped) = &rec.skipped else {
+                continue;
+            };
             for feature in selection.features(*id) {
                 selection.deselect(*id, feature);
             }
-            for feature in &rec.skipped {
+            for feature in skipped {
                 selection.select(*id, *feature);
             }
         }

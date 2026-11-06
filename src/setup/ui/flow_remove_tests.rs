@@ -478,3 +478,7 @@ fn a_program_folder_that_existed_before_the_install_is_kept() {
     assert_eq!(flow.exit_code(), 0, "{:?}", flow.progress());
     assert!(!fx.deps.binary.exists() && folder.is_dir());
 }
+
+/// A program still running elsewhere (removal keeps it).
+#[path = "flow_remove_running_tests.rs"]
+mod running;

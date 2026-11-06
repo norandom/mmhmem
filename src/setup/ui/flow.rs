@@ -80,6 +80,10 @@ pub const EXIT_CANCELLED: i32 = 2;
 /// The clock that names a run (and its backup folder).
 pub type Clock = Arc<dyn Fn() -> UtcTimestamp + Send + Sync>;
 
+/// Whether a program other than this setup is running the mmhmem program
+/// at the given path (an AI tool's `mmhmem stdio`, another window).
+pub type InUse = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
+
 /// Everything the flow needs from outside.
 #[derive(Clone)]
 pub struct Deps {
@@ -106,6 +110,9 @@ pub struct Deps {
     pub memories: Option<Memories>,
     /// Starting the new program after an update (task 7.1 follow-up).
     pub restart: Restart,
+    /// Whether another program still runs the installed program (a
+    /// removal keeps it then, see `flow_remove.rs`).
+    pub in_use: InUse,
 }
 
 impl Deps {
@@ -123,6 +130,7 @@ impl Deps {
             now: Arc::new(UtcTimestamp::now),
             memories: None,
             restart: Restart::default(),
+            in_use: Arc::new(crate::setup::running::used_by_other_process),
         }
     }
 }

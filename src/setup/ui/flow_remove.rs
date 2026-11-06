@@ -24,6 +24,13 @@
 //!    every step above succeeded; otherwise the store is never touched
 //!    (7.4). Without the option the audit log is kept too.
 //!
+//! **A program still in use** (another process, such as an AI tool's
+//! `mmhmem stdio`, runs it; Windows only, see `setup::running`): the tools
+//! are cleaned up, but the program, its `PATH` entry and the record stay and
+//! the results say why and what to do (close the tools, remove again), with
+//! exit code 1. Deleting it anyway would rely on a delete deferred to the
+//! end of setup that fails silently while the program runs elsewhere.
+//!
 //! **A tool that cannot be cleaned up** (a file it uses no longer parses)
 //! is listed as skipped and left as it is. The other tools are cleaned up,
 //! but the program, its `PATH` entry, the record and the memories stay, so
@@ -262,7 +269,11 @@ impl Flow {
         let applied = apply_with(&agents, &self.deps.store, &mut record, paths);
         let mut lines = self.problem_lines(&planned.problems);
         lines.extend(self.report_lines(&applied));
-        let code = if planned.problems.is_empty() && all_applied(&applied) {
+        let code = if !planned.problems.is_empty() || !all_applied(&applied) {
+            self.keep_install(&mut record, &applied, &mut lines, say::KEPT_FOR_SKIPPED)
+        } else if self.program_in_use(&install) {
+            self.keep_install(&mut record, &applied, &mut lines, say::KEPT_IN_USE)
+        } else {
             let done = apply_with(&install, &self.deps.store, &mut record, paths);
             lines.extend(self.report_lines(&done));
             if all_applied(&done) {
@@ -270,13 +281,6 @@ impl Flow {
             } else {
                 1
             }
-        } else {
-            drop_cleaned_agents(&mut record, &applied);
-            if let Err(e) = self.deps.store.save(&record) {
-                lines.push(self.tidy(&e.to_string()));
-            }
-            lines.push(say::KEPT_FOR_SKIPPED.to_owned());
-            1
         };
         self.loaded.record = self.deps.store.load().ok().flatten();
         self.progress = Some(Progress {
@@ -285,6 +289,34 @@ impl Flow {
             code,
         });
         Confirmed::Done
+    }
+
+    /// After a partial removal: the cleaned-up agents leave the record, the
+    /// program, `PATH` and the record stay; `why` says so. Exit code 1.
+    fn keep_install(
+        &self,
+        record: &mut InstallRecord,
+        applied: &ApplyReport,
+        lines: &mut Vec<String>,
+        why: &str,
+    ) -> i32 {
+        drop_cleaned_agents(record, applied);
+        if let Err(e) = self.deps.store.save(record) {
+            lines.push(self.tidy(&e.to_string()));
+        }
+        lines.push(why.to_owned());
+        1
+    }
+
+    /// Whether the program this removal deletes is still run by another
+    /// process. Windows cannot delete it then, and the delete deferred to
+    /// the end of setup would fail without a word, so it is kept instead.
+    fn program_in_use(&self, install: &Plan) -> bool {
+        install.changes.iter().any(|c| {
+            matches!(c.target, Target::Binary { .. })
+                && c.after.is_none()
+                && (self.deps.in_use)(&c.file)
+        })
     }
 
     fn report_lines(&self, applied: &ApplyReport) -> Vec<String> {
