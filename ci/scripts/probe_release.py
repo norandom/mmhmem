@@ -346,8 +346,9 @@ def local_cases(binary, expected_version, validation_id):
                 raise ValueError(f"restart lost narrative/checkpoint: {details}\n{resumed}")
         cases["persistence"] = {"status": "passed", "observation_id": observation_id,
                                 "marker": marker, "restarted": True}
-        table = run([str(binary), "stats"], env=environment, cwd=workspace.root, timeout=20)
-        if not all(value in table for value in ("AVOIDED (EST.)", "CLIENT-REPORTED", "TOTAL", context["project"], "opencode")):
+        # --all: every column, whatever the data or the width (the default hides some).
+        table = run([str(binary), "stats", "--all"], env=environment, cwd=workspace.root, timeout=20)
+        if not all(value in table for value in ("avoided (est.)", "frontier in (client)", "total", context["project"], "opencode")):
             raise ValueError(f"statistics table did not recover recorded session: {table}")
         cases["stats_text"] = {"status": "passed", "output": table}
         statistics = json.loads(run([str(binary), "stats", "--json"], env=environment, cwd=workspace.root, timeout=20))
