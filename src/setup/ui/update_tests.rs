@@ -202,6 +202,14 @@ fn an_accepted_update_restarts_as_update_and_the_restarted_run_only_checks() {
     let (mut fx, seen) = updating(dir.path());
     let choices = fx.deps.store.load().unwrap().unwrap();
     accept_update(&fx, &seen);
+    // Forget the earlier results (timestamps are to the second, so a check
+    // in the same second would look unchanged): the restarted run must
+    // store a new one for every tool.
+    let mut before = fx.deps.store.load().unwrap().unwrap();
+    for agent in before.agents.values_mut() {
+        agent.last_check = None;
+    }
+    fx.deps.store.save(&before).unwrap();
 
     // The new program: same choices, no change, so no question; it checks.
     let mut flow = restarted(&mut fx);
@@ -218,13 +226,10 @@ fn an_accepted_update_restarts_as_update_and_the_restarted_run_only_checks() {
     assert_eq!(stored.release, Some(tag("v9.9.9")));
     let selection = crate::setup::agents::Selection::from_record;
     assert_eq!(selection(&stored), selection(&choices));
-    let checked = |r: &crate::setup::record::InstallRecord| {
-        r.agents
-            .values()
-            .map(|a| a.last_check.clone())
-            .collect::<Vec<_>>()
-    };
-    assert_ne!(checked(&stored), checked(&choices), "checked again");
+    assert!(
+        stored.agents.values().all(|a| a.last_check.is_some()),
+        "checked again: {stored:?}"
+    );
     assert_eq!(flow.restart_now(), None);
 }
 
