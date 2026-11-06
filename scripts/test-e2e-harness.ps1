@@ -296,7 +296,8 @@ try {
     # ---- read-routing hooks (on by default): only mmhmem's group may be added.
     $seedSettings=[IO.File]::ReadAllText((Join-Path $script:Root 'ci/e2e/seed/home/.claude/settings.json'))
     $seedHooks=[IO.File]::ReadAllText((Join-Path $script:Root 'ci/e2e/seed/home/.codex/hooks.json'))
-    $ours=@{matcher='Read';hooks=@(@{type='command';command='"/home/u/.local/bin/mmhmem" hook claude';timeout=10})}
+    # Claude Code's handler as setup writes it (claude_code.rs): exec form.
+    $ours=@{matcher='Read|Bash|PowerShell';hooks=@(@{type='command';command='/home/u/.local/bin/mmhmem';args=@('hook','claude');timeout=10})}
     $s=$seedSettings | ConvertFrom-Json
     $s.hooks.PreToolUse=@($s.hooks.PreToolUse)+@([pscustomobject]$ours)
     $withHook=$s | ConvertTo-Json -Depth 16

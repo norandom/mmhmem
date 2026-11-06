@@ -302,7 +302,9 @@ function Remove-MmhmemHookGroups($Json) {
         $groups=@($hooks.$event)
         $kept=@()
         foreach ($group in $groups) {
-            $commands=@($group.hooks | ForEach-Object {[string]$_.command})
+            # Claude Code's handler is in exec form (command = the binary,
+            # args = hook claude); Codex's is one command string.
+            $commands=@($group.hooks | ForEach-Object {(@([string]$_.command)+@($_.args | ForEach-Object {[string]$_})) -join ' '})
             if (@($commands | Where-Object {$_ -match $script:MmhmemHookCommand}).Count) {$found=$true} else {$kept+=,$group}
         }
         if ($kept.Count -eq $groups.Count) {continue}
