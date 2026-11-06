@@ -217,7 +217,7 @@ mod tests {
             worker_configured: true,
         };
         assert_eq!(
-            crate::hook::decide(&r, &s),
+            crate::hook::decide(&r, &s, Path::new("/work")),
             Decision::Pass(PassReason::Range)
         );
     }

@@ -1,7 +1,8 @@
 //! The `ShuntEngine` component (tasks 5.1/5.2; design.md "services layer" /
 //! "Components and Interfaces" ShuntEngine row; requirements.md Req 3.1-3.9,
 //! 10.1). Types live in `shunt_types.rs`, cache/payload helpers in
-//! `shunt_cache.rs` (splits per the Req 13.3 500-LOC cap).
+//! `shunt_cache.rs`, the security path rule in `security_path.rs` (splits
+//! per the Req 13.3 500-LOC cap).
 //!
 //! Deterministic four-stage smart_read evaluation (design.md "System Flows"):
 //!   1. targeted slice (offset+limit) -> exact `L<n>:` lines, never delegated
@@ -15,14 +16,13 @@
 //! `AGENT_MEM_ALLOWED_ROOTS`; violations are rejected AND audited.
 
 use std::path::PathBuf;
-use std::sync::LazyLock;
 use std::time::Instant;
 
-use regex::Regex;
 use serde_json::Value;
 
 use crate::config::Config;
 use crate::services::paths::{AllowedRoots, PathError};
+pub use crate::services::security_path::{is_security_critical_in, is_security_critical_path};
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt_cache as cache;
 pub use crate::services::shunt_types::{BypassReason, ReadOutcome, ShuntError};
@@ -31,21 +31,6 @@ use crate::services::stats;
 use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
-
-/// Security-critical path pattern, case-insensitive (Req 3.3; design.md
-/// ShuntEngine: auth|crypto|secret|token|rbac|jwt|tls|cert|mutex|lock|
-/// concurrency|permission|sudo|pam).
-static SECURITY_CRITICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)(auth|crypto|secret|token|rbac|jwt|tls|cert|mutex|lock|concurren|permission|sudo|pam)",
-    )
-    .expect("valid regex")
-});
-
-/// Security-critical path check shared with the hook command (Req 2.3, 5.4).
-pub fn is_security_critical_path(path: &std::path::Path) -> bool {
-    SECURITY_CRITICAL_RE.is_match(&path.to_string_lossy())
-}
 
 /// Bundled audit metadata for a shunt outcome (keeps audit_shunt under the
 /// clippy 7-arg limit, Req 13).
@@ -76,6 +61,9 @@ pub struct ShuntEngine {
     bus: Option<SessionBus>,
     worker: Option<WorkerClient>,
     roots: AllowedRoots,
+    /// Project folders for the security rule: the allowed roots and the
+    /// working folder (a harness starts the stdio server in its project).
+    projects: Vec<PathBuf>,
 }
 
 impl ShuntEngine {
@@ -87,10 +75,14 @@ impl ShuntEngine {
         bus: Option<SessionBus>,
         worker: Option<WorkerClient>,
     ) -> Self {
+        let roots = AllowedRoots::from_config(&config);
+        let mut projects = roots.roots().to_vec();
+        projects.extend(std::env::current_dir().and_then(std::fs::canonicalize));
         Self {
             db,
             audit,
-            roots: AllowedRoots::from_config(&config),
+            roots,
+            projects,
             config,
             bus,
             worker,
@@ -402,9 +394,10 @@ impl ShuntEngine {
         })
     }
 
-    /// Security-critical path check (Req 3.3, case-insensitive).
+    /// Security-critical path check (Req 3.3, case-insensitive) of the part
+    /// of a canonical `path` inside its project.
     pub fn is_security_critical(&self, path: &std::path::Path) -> bool {
-        is_security_critical_path(path)
+        is_security_critical_in(path, &self.projects)
     }
 
     /// One audit line for a shunt outcome (cache hit / delegated).
@@ -472,18 +465,5 @@ impl ShuntEngine {
                 tracing::warn!("breadcrumb failed: {e}");
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_security_critical_path;
-    use std::path::Path;
-
-    #[test]
-    fn free_fn_matches_security_paths_case_insensitively() {
-        assert!(is_security_critical_path(Path::new("src/Auth/login.rs")));
-        assert!(is_security_critical_path(Path::new("a/JWT_helper.rs")));
-        assert!(!is_security_critical_path(Path::new("src/readme.rs")));
     }
 }

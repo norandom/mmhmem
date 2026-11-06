@@ -132,7 +132,7 @@ fn decide_call(
     window: &RepeatWindow,
     now_ms: u64,
 ) -> Decision {
-    let decision = decide(req, settings);
+    let decision = decide(req, settings, Path::new(&call.cwd));
     if !matches!(decision, Decision::Redirect { .. }) {
         return decision;
     }

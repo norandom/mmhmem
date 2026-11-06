@@ -10,6 +10,7 @@ pub mod breadcrumbs;
 pub mod memory;
 pub mod paths;
 pub mod prune;
+pub mod security_path;
 pub mod session_bus;
 pub mod shunt;
 pub mod shunt_cache;

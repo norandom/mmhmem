@@ -11,7 +11,7 @@ mod opencode;
 pub mod shell;
 pub mod state;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One native read request, as mapped from a harness tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,15 +78,16 @@ const READ_CHUNK_BYTES: usize = 64 * 1024;
 /// security rule, no worker, not text, below threshold, redirect).
 ///
 /// A file that cannot be opened or read after its metadata check passes as
-/// [`PassReason::Missing`], so the hook fails open (Req 3.1).
-pub fn decide(req: &ReadRequest, settings: &HookSettings) -> Decision {
+/// [`PassReason::Missing`], so the hook fails open (Req 3.1). `project` is
+/// the harness `cwd`: the security rule only looks at the path inside it.
+pub fn decide(req: &ReadRequest, settings: &HookSettings, project: &Path) -> Decision {
     if req.range.is_some() {
         return Decision::Pass(PassReason::Range);
     }
     if !std::fs::metadata(&req.path).is_ok_and(|m| m.is_file()) {
         return Decision::Pass(PassReason::Missing);
     }
-    if crate::services::shunt::is_security_critical_path(&req.path) {
+    if crate::services::shunt::is_security_critical_in(&req.path, &[project.to_path_buf()]) {
         return Decision::Pass(PassReason::SecurityCritical);
     }
     if !settings.worker_configured {
@@ -228,7 +229,36 @@ mod tests {
             range,
             tool: "Read".to_string(),
         };
-        decide(&req, &settings(worker))
+        decide(&req, &settings(worker), Path::new(""))
+    }
+
+    #[test]
+    fn the_security_rule_ignores_folders_above_the_project() {
+        let dir = plain_dir();
+        // The project sits below a folder whose name matches the rule.
+        let project = dir.path().join("lockhart").join("app");
+        let big = write(&project, "src/big.rs", &text_lines(400));
+        let auth = write(&project, "src/auth.rs", &text_lines(400));
+        let req = |path: &Path| ReadRequest {
+            path: path.to_path_buf(),
+            range: None,
+            tool: "Read".to_string(),
+        };
+        let lines = u64::from(THRESHOLD);
+        assert_eq!(
+            decide(&req(&big), &settings(true), &project),
+            Decision::Redirect { lines }
+        );
+        assert_eq!(
+            decide(&req(&auth), &settings(true), &project),
+            Decision::Pass(PassReason::SecurityCritical)
+        );
+        // Outside the project the whole path counts, so the folder matches.
+        let elsewhere = dir.path().join("other");
+        assert_eq!(
+            decide(&req(&big), &settings(true), &elsewhere),
+            Decision::Pass(PassReason::SecurityCritical)
+        );
     }
 
     #[test]
