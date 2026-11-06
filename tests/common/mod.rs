@@ -22,7 +22,7 @@ pub fn test_state(
     tempfile::TempDir,
     Arc<AppState>,
 ) {
-    let roots = tempfile::tempdir().unwrap();
+    let roots = plain_tempdir();
     let data = tempfile::tempdir().unwrap();
     let logs = tempfile::tempdir().unwrap();
     let mut env: HashMap<String, String> = HashMap::new();
@@ -39,6 +39,18 @@ pub fn test_state(
     let config = Config::from_env(&|k| env.get(k).cloned()).unwrap();
     let state = Arc::new(AppState::build(config).unwrap());
     (roots, data, logs, state)
+}
+
+/// A temp dir whose own path never trips the security-critical rule
+/// (tempfile's random suffix could spell e.g. `pam` or `jwt`, which sends
+/// every file under it down the direct-read path and flakes shunt tests).
+pub fn plain_tempdir() -> tempfile::TempDir {
+    loop {
+        let dir = tempfile::tempdir().unwrap();
+        if !mmhmem::services::shunt::is_security_critical_path(dir.path()) {
+            return dir;
+        }
+    }
 }
 
 /// Spawns the axum+rmcp server on an ephemeral port; returns (port, join handle).
