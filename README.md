@@ -14,92 +14,81 @@ installers let you choose your agents and install the workflow playbook.
 
 ## Install
 
-Download and install the latest release with no checkout or Rust toolchain.
+Installs the latest signed release. No checkout or Rust toolchain needed.
 
-### Linux x86_64
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash
-```
-
-Linux release builds default to static musl for broad distribution compatibility.
-The current published `v0.2.2` predates that default and still requires glibc;
-see [Linux compatibility](docs/installation.md#linux-compatibility).
-
-The menu offers **Install/update** or **Remove**, then lets you choose agents
-by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
-To open removal directly:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
-```
-
-For unattended use, append `--agent codex,claude` or `--agent all`.
-Removal preserves your memory and worker settings.
-
-### Windows x64
-
-Run in PowerShell 5.1 or later:
+**Windows x64** (PowerShell 5.1 or 7):
 
 ```powershell
-irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 | iex
+irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex
 ```
 
-The menu offers **Install/update** or **Remove**, then lets you choose agents
-by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
-Agents can stay open during updates; restart them when ready to use the new version.
-
-To open removal directly, or select agents without menus:
-
-```powershell
-$installer = [scriptblock]::Create((irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1))
-& $installer -Remove                     # choose agents to remove
-# Or: & $installer -Agent 'codex,claude' # install/update only these agents
-# Or: & $installer -Remove -Agent all   # remove all detected integrations
-```
-
-Removal preserves your memory and worker settings. Claude Desktop detection
-supports both traditional and MSIX installations.
-
-Selected Claude Code installations add owned guidance to `.claude/rules/mmhmem.md`
-(global or project scope). OpenCode uses global `.config/opencode/AGENTS.md` or
-project `AGENTS.md`. Existing text is preserved; changed files retain one
-`.mmhmem.bak` backup. Removal strips only the owned section. Start a fresh agent
-session after updating. Unsupported configuration-root overrides or ambiguous
-instruction ownership stop onboarding before integrations are changed; use the
-default configuration or resolve the reported conflict first.
-
-### macOS — Apple Silicon or Intel
+**Linux x86_64 and macOS** (Apple Silicon or Intel):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash
+curl -fsSL https://github.com/norandom/mmhmem/releases/latest/download/install.sh | sh
 ```
 
-The installer selects the matching architecture automatically.
+The installer downloads the release archive for your computer, uses it only
+if its SHA-256 matches the one built into the installer, and starts
+`mmhmem setup`. Setup checks the release signature, then walks you through
+three screens:
 
-The menu offers **Install/update** or **Remove**, then lets you choose agents
-by number (for example `1,3`). Use `a` for all listed agents or `q` to cancel.
-To open removal directly:
+1. **Tools**: Claude Code, Codex, OpenCode, Claude Desktop and Antigravity.
+   The ones found on your computer are ticked.
+2. **Features** per tool: shared memory (required), the read-routing hook
+   (on by default), a memory guide, a recap command and agent instructions.
+3. **Review**: every file it will change, before anything is written. Each
+   file is backed up first; press Enter to apply.
+
+Setup then checks that each tool can start and use mmhmem, and lists what is
+left for you to do:
+
+- **Claude Code** and **OpenCode**: start a new session.
+- **Codex**: start a new session and approve the mmhmem hook in `/hooks`.
+  Codex skips hooks you have not approved.
+- **Claude Desktop**: quit it completely and open it again.
+- **Antigravity**: import the snippet setup saved, then start a new session.
+
+The read-routing hook sends whole-file reads of large files to `smart_read`.
+It needs a worker model; without one it stays inactive and setup says so.
+See [worker settings](docs/configuration.md#worker-settings).
+
+Optionally, check where an archive came from:
+`gh attestation verify <archive> --repo norandom/mmhmem`.
+
+## Update
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
+mmhmem update
 ```
 
-For unattended use, append `--agent codex,claude` or `--agent all`.
-Removal preserves your memory and worker settings.
+It shows the installed and the newest version, asks once, then downloads the
+new release, checks its signature and checksum, and keeps your tools and
+choices. If the new version needs to change files in your tools, it lists
+them and asks before changing anything; otherwise it only checks your tools.
+Start new agent sessions afterwards.
 
-For install locations, agent selection, dry runs, updates and removal, see
-[installation options](docs/installation.md).
+`mmhmem setup` and the install command above offer the same update when
+mmhmem is already set up. `mmhmem update` exists since v0.5.1: to update from
+v0.5.0, run `mmhmem setup` and choose **Update to v0.5.1**.
+
+## Change, check or remove
+
+Run `mmhmem setup` and choose **Change agents and features**, **Check that
+everything works** or **Remove mmhmem**. Removal takes out only what mmhmem
+added, restores your files, and keeps your saved memories unless you tick
+"Also delete my saved memories".
 
 ## Use it
 
-Restart your agent after installation. The playbook guides it to resume your
-session, use cached summaries, search project memory and checkpoint before
-you switch agents.
+Start a new agent session after installation. The playbook guides it to
+resume your session, use cached summaries, search project memory and
+checkpoint before you switch agents.
 
 ```sh
-mmhmem stats
-mmhmem stats --json
+mmhmem stats          # last 7 days, rows with savings, fits the terminal
+mmhmem stats --all    # every row and column
+mmhmem stats --json   # all data for scripts
 ```
 
 Memory and targeted file reads work without a worker model. For large-file
@@ -120,15 +109,7 @@ connection setup. See the [server guide](docs/server.md).
 - [Development, CI and releases](docs/development.md)
 - [Concept and background](docs/concept.md)
 
-Unix onboarding adds owned routing instructions for selected Claude Code/OpenCode agents.
-Global destinations are `~/.claude/rules/mmhmem.md` and
-`~/.config/opencode/AGENTS.md`; project destinations are `.claude/rules/mmhmem.md`
-and `AGENTS.md`. Existing user text is preserved with one `.mmhmem.bak` backup.
-Use `--remove` to remove owned guidance or `--dry-run` to validate without writing.
-Start a fresh harness session after updates. Custom configuration roots or
-instruction-disable controls require manual review; the installer reports their
-variable names without exposing configuration contents.
-# Verifying routing adoption
+## Verifying routing adoption
 
 Run `cargo test --test routing_adoption` for deterministic adapter tests. For
 explicit live checks, set `E2E_LLM=1`, `E2E_CLAUDE_MODEL`, and
