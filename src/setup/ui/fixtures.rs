@@ -39,7 +39,8 @@ pub(crate) struct Fx {
 
 /// A fresh Linux-rules home with no agent; the record folder, the
 /// installed program and the memory store live under the home; restarting
-/// after an update is off.
+/// after an update is off. No release key is trusted, whatever this build
+/// embeds, so an update is refused before anything is downloaded.
 pub(crate) fn fx() -> Fx {
     let home = TestHome::new(Os::Linux);
     let state = home.home().join(".local").join("state").join("mmhmem");
@@ -51,7 +52,10 @@ pub(crate) fn fx() -> Fx {
         binary,
         install_from: None,
         paths: Arc::new(NoUserPath),
-        releases: Releases::github(),
+        releases: Releases {
+            keys: Vec::new(),
+            ..Releases::github()
+        },
         version: tag("v0.4.1"),
         now: Arc::new(|| at("2026-11-04T10:00:00Z")),
         memories: Some(Memories {
