@@ -132,11 +132,15 @@ try {
         Assert-True (-not $job.Contains('secrets.')) "$os job reads secrets"
     }
     # Floating actions/* tags ran on the deprecated Node.js 20; every one is pinned to a commit.
-    foreach ($file in @('ci.yml', 'release.yml', 'installer-e2e.yml')) {
+    foreach ($file in @('ci.yml', 'release.yml', 'installer-e2e.yml', 'published-install.yml')) {
         $text = [IO.File]::ReadAllText((Join-Path $repo ".github/workflows/$file"))
         $floating = [regex]::Matches($text, '(?m)uses: (actions/[^@\s]+@(?![0-9a-f]{40}\b)\S+)') | ForEach-Object { $_.Groups[1].Value }
         Assert-True (-not $floating) "$file uses unpinned actions: $($floating -join ', ')"
     }
+    # The published-release install is evidence only: no secrets, nothing waits for it.
+    $published = [IO.File]::ReadAllText((Join-Path $repo '.github/workflows/published-install.yml'))
+    Assert-True (-not $published.Contains('secrets.')) 'published-install.yml reads secrets'
+    Assert-True (-not (Get-Content -Raw (Join-Path $repo 'scripts/publish-ci-release.ps1')).Contains('published-install')) 'the release gate waits for published-install.yml'
     Assert-True ((Get-WorkflowJob $workflow 'windows').Contains("path: target/release/mmhmem.exe`n")) 'Windows artifact path changed'
     Assert-True ((Get-WorkflowJob $workflow 'macos').Contains("path: |`n            target/release/mmhmem`n            target/x86_64-apple-darwin/release/mmhmem`n")) 'macOS artifact paths changed'
     Assert-True ((Get-WorkflowJob $workflow 'windows').Contains('./scripts/test-install.ps1')) 'Windows installer regression checks removed'

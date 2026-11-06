@@ -27,6 +27,8 @@ $script:Logs=Join-Path $work 'logs'
 New-Item -ItemType Directory -Path $script:Logs | Out-Null
 . (Join-Path $PSScriptRoot 'e2e-home-state.ps1')
 . (Join-Path $PSScriptRoot 'e2e-scenarios.ps1')
+. (Join-Path $PSScriptRoot 'e2e-published.ps1')
+. (Join-Path $PSScriptRoot 'sign-release-assets.ps1')
 
 $script:Checks=0
 function Assert-True([bool]$Condition,[string]$What) {
@@ -328,6 +330,46 @@ try {
         Assert-True ($one.Args[2] -ceq "irm 'http://127.0.0.1:1/v1.0.0/install.ps1' | iex; exit `$LASTEXITCODE") 'the Windows one-liner in the terminal'
     } else {
         Assert-True ($one.Program -ceq '/bin/sh' -and $one.Args[1] -ceq "curl -fsSL 'http://127.0.0.1:1/v1.0.0/install.sh' | sh") 'the Unix one-liner in the terminal'
+    }
+
+    # ---- published-install (e2e-published.ps1): the README one-liners, byte for byte.
+    $readme=@([IO.File]::ReadAllText((Join-Path $script:Root 'README.md')) -split "\r?\n")
+    foreach ($windows in @($true,$false)) {
+        $text=Get-PublishedOneLinerText $windows
+        Assert-True ($readme -ccontains $text) "README.md has the published one-liner line '$text'"
+    }
+    $pw=Get-PublishedOneLiner $true 'C:\shell\powershell.exe' $false
+    Assert-True ($pw.File -ceq 'C:\shell\powershell.exe' -and $pw.Arguments -ceq ('-NoProfile -NonInteractive -Command "'+(Get-PublishedOneLinerText $true)+'; exit $LASTEXITCODE"')) 'the published Windows one-liner runs unchanged in the step''s shell'
+    $sh=Get-PublishedOneLiner $false '' $true
+    Assert-True ($sh.File -ceq 'setsid' -and $sh.Arguments -ceq ('-w /bin/sh -c "'+(Get-PublishedOneLinerText $false)+'"')) 'the published Unix one-liner without a controlling terminal'
+    Assert-True ((Get-PublishedOneLiner $false '' $false).File -ceq '/bin/sh') 'without setsid the Unix one-liner runs under /bin/sh'
+    $h1='a'*64;$h2='0123456789abcdef'*4
+    $sumsText="$h1  mmhmem-v1.0.0-x86_64-pc-windows-msvc.zip`n$h2  mmhmem-v1.0.0-x86_64-unknown-linux-musl.tar.gz`n"
+    Assert-True ((Get-ChecksumEntry $sumsText 'mmhmem-v1.0.0-x86_64-unknown-linux-musl.tar.gz') -ceq $h2) 'SHA256SUMS line of one asset'
+    Assert-True ((Get-ChecksumEntry ($sumsText -replace "`n","`r`n") 'mmhmem-v1.0.0-x86_64-pc-windows-msvc.zip') -ceq $h1) 'SHA256SUMS with CRLF'
+    foreach ($bad in @("$sumsText$h2  mmhmem-v1.0.0-x86_64-unknown-linux-musl.tar.gz`n",'')) {
+        $threw=$false;try {$null=Get-ChecksumEntry $bad 'mmhmem-v1.0.0-x86_64-unknown-linux-musl.tar.gz'} catch {$threw=$true}
+        Assert-True $threw 'an asset listed twice or not at all is refused'
+    }
+    $keyBytes=ConvertFrom-HexText '00ff10'
+    Assert-True ($keyBytes.Length -eq 3 -and $keyBytes[0] -eq 0 -and $keyBytes[1] -eq 255 -and $keyBytes[2] -eq 16) 'hex to bytes'
+    $threw=$false;try {$null=ConvertFrom-HexText 'abc'} catch {$threw=$true}
+    Assert-True $threw 'odd-length hex is refused'
+    $embedded=@(Get-EmbeddedReleaseKeys)
+    Assert-True ($embedded.Count -ge 1 -and (ConvertFrom-HexText $embedded[0]).Length -eq 32) 'the embedded release key is 32 bytes'
+    # The program inside an archive, unpacked as the bootstraps do it.
+    $payload=Join-Path $work 'payload.bin'
+    [IO.File]::WriteAllBytes($payload,[byte[]](1..200 | ForEach-Object {$_ % 256}))
+    $payloadHash=(Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash
+    $zip=Join-Path $work 'pkg.zip'
+    New-ReleaseZip $payload 'mmhmem.exe' $zip
+    $unpacked=Expand-ReleaseEntry $zip 'mmhmem.exe' (Join-Path $work 'unzip')
+    Assert-True ((Get-FileHash -LiteralPath $unpacked -Algorithm SHA256).Hash -ceq $payloadHash) 'the program from the zip'
+    if (-not $script:OnWindows) {
+        $tgz=Join-Path $work 'pkg.tar.gz'
+        New-ReleaseTarGz $payload 'mmhmem' $tgz
+        $unpacked=Expand-ReleaseEntry $tgz 'mmhmem' (Join-Path $work 'untar')
+        Assert-True ((Get-FileHash -LiteralPath $unpacked -Algorithm SHA256).Hash -ceq $payloadHash) 'the program from the tar.gz'
     }
     Write-Host "PASS: e2e harness logic ($script:Checks checks)"
 } finally {

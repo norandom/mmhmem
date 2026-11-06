@@ -52,6 +52,10 @@ Scenarios (task 8.2, scripts/e2e-scenarios.ps1, which describes each):
   pty-selftest cancel-at-review download-404 bad-hash rerun remove
   menu-install install-old bad-signature update update-command invalid-config
 
+Published release (task 9.2, scripts/e2e-published.ps1, which describes each;
+.github/workflows/published-install.yml): published-release -Tag <latest>,
+published-install (the README one-liner against github.com), assert-published
+
 Isolation (see the workflow header): Linux/macOS get a fresh HOME and TMPDIR,
 with XDG_*, CLAUDE_CONFIG_DIR and CODEX_HOME removed so every tool derives its
 paths from HOME as on a real machine. Windows cannot get a fresh profile
@@ -68,7 +72,8 @@ param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('keygen','release','seed','serve','install','assert-installed','compare-seed','stop',
         'pty-selftest','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
-        'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics')]
+        'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics',
+        'published-release','published-install','assert-published')]
     [string]$Phase,
     [string]$WorkDir,
     [string]$Tag,
@@ -78,7 +83,7 @@ param(
     [string[]]$AllowChanged=@(),
     [ValidateSet('current','old','badsig')]
     [string]$Role='current',
-    [ValidateSet('install','menu-install')]
+    [ValidateSet('install','menu-install','published-install')]
     [string]$Run='install',
     [switch]$BreakHash,
     [int]$TimeoutSeconds=900
@@ -111,6 +116,7 @@ $script:WorkDirectory=$WorkDir
 New-Item -ItemType Directory -Path $script:Logs -Force | Out-Null
 . (Join-Path $PSScriptRoot 'e2e-home-state.ps1')
 . (Join-Path $PSScriptRoot 'e2e-scenarios.ps1')
+. (Join-Path $PSScriptRoot 'e2e-published.ps1')
 
 function Write-Utf8([string]$Path,[string]$Text) {[IO.File]::WriteAllText($Path,$Text,(New-Object Text.UTF8Encoding($false)))}
 function Read-Json([string]$Path) {
@@ -628,7 +634,7 @@ function Restore-UserPath {
 # home cannot isolate (on Windows the user PATH lives in HKCU). They run only
 # on a disposable CI runner, or when a maintainer explicitly opts in.
 $machinePhases = @('install','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
-    'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics')
+    'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics','published-install')
 if ($machinePhases -contains $Phase -and $env:GITHUB_ACTIONS -ne 'true' -and
     $env:MMHMEM_E2E_ALLOW_LOCAL -ne 'I understand this changes my user PATH') {
     throw ("Phase '$Phase' runs the real installer, which changes this machine's user PATH. " +
@@ -658,6 +664,9 @@ switch ($Phase) {
     'update-command' {Invoke-UpdateCommandPhase}
     'invalid-config' {Invoke-InvalidConfigPhase}
     'agent-diagnostics' {Invoke-AgentDiagnosticsPhase}
+    'published-release' {Invoke-PublishedReleasePhase}
+    'published-install' {Invoke-PublishedInstallPhase}
+    'assert-published' {Invoke-AssertPublishedPhase}
 }
 # A phase that returns has passed. Native helpers (py, uname, zipsign) leave
 # their own exit codes behind, and the Actions PowerShell wrappers exit with

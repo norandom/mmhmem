@@ -1,0 +1,226 @@
+# Published-release install (reliable-installers task 9.2): evidence, never a
+# gate. Nothing requires this workflow: branch protection and the release
+# gate (scripts/publish-ci-release.ps1) read only ci.yml and installer-e2e.yml.
+#
+# The installer e2e (installer-e2e.yml) proves bootstraps rendered for a local
+# HTTP server. This workflow runs what users run: the README one-liners
+#   irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex
+#   curl -fsSL https://github.com/norandom/mmhmem/releases/latest/download/install.sh | sh
+# against github.com, without a terminal, in the same seeded throwaway home
+# with the same real agent CLIs, and checks the result with the same
+# assert-installed (scripts/e2e-run.ps1; phases in scripts/e2e-published.ps1).
+#
+# Jobs
+#   latest   the latest release tag (gh api repos/norandom/mmhmem/releases/latest).
+#            After a "Publish release" run it continues only when that run
+#            published the latest release: the workflow also concludes
+#            success when it had nothing to publish (CI on a commit without
+#            a version tag).
+#   install  ubuntu-latest, macos-15 (arm64), macos-15-intel (x86_64),
+#            windows-latest x {Windows PowerShell 5.1, PowerShell 7}:
+#            seed -> published-release (SHA256SUMS.sig verified with the key
+#            in src/setup/release_keys.rs, the archive against SHA256SUMS and
+#            its own signature, the program inside hashed) -> published-install
+#            (the one-liner) -> assert-published -> stop
+#
+# Isolation: as installer-e2e.yml (see its header). On Windows setup writes
+# the runner's real HKCU\Environment\Path: `seed` snapshots it,
+# assert-installed allows it to change, `stop` restores it.
+#
+# Shared with installer-e2e.yml by copy (kept simple on purpose; change both
+# together): the env pins of Node.js and the agent CLIs, the matrix, and the
+# steps "Work folders" through "Agent CLI versions". The phases themselves
+# are shared code (scripts/e2e-run.ps1 and the files it dot-sources).
+#
+# No secrets: github.token reads the public release metadata; downloads are
+# anonymous. Pins: every action by full commit SHA; zipsign, Node.js and the
+# three agent CLIs by exact version.
+
+name: Published install
+
+on:
+  workflow_run:
+    workflows: ['Publish release']
+    types: [completed]
+  schedule:
+    - cron: '17 5 * * 1'   # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: published-install
+  cancel-in-progress: false
+
+env:
+  # scripts/sign-release-assets.ps1 refuses any other zipsign version.
+  ZIPSIGN_VERSION: '0.2.2'
+  # Same pins as installer-e2e.yml.
+  NODE_VERSION: '24.22.1'
+  CLAUDE_CODE_VERSION: '2.1.311'   # npm @anthropic-ai/claude-code (dist-tag "stable")
+  CODEX_VERSION: '0.166.0'         # npm @openai/codex
+  OPENCODE_VERSION: '2.2.5'        # npm @opencode/cli
+
+jobs:
+  latest:
+    name: Latest published release
+    if: github.repository == 'norandom/mmhmem' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.latest.outputs.tag }}
+      run: ${{ steps.latest.outputs.run }}
+    steps:
+      - id: latest
+        name: Look up the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PUBLISH_RUN_CREATED: ${{ github.event.workflow_run.created_at }}
+        run: |
+          set -euo pipefail
+          json=$(gh api repos/norandom/mmhmem/releases/latest)
+          tag=$(jq -r .tag_name <<< "$json")
+          published=$(jq -r .published_at <<< "$json")
+          echo "Latest release: $tag, published $published"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The latest release tag '$tag' is not vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          run=true
+          # ISO 8601 UTC timestamps compare as strings.
+          if [ "$EVENT" = workflow_run ] && [[ "$published" < "$PUBLISH_RUN_CREATED" ]]; then
+            echo "The Publish release run (created $PUBLISH_RUN_CREATED) published nothing; $tag was tried when it was published."
+            run=false
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  install:
+    name: published ${{ matrix.name }}
+    needs: latest
+    if: needs.latest.outputs.run == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            shell: pwsh
+          - name: macos-arm64
+            runner: macos-15
+            shell: pwsh
+          - name: macos-x86_64
+            runner: macos-15-intel
+            shell: pwsh
+          - name: windows-powershell-5.1
+            runner: windows-latest
+            shell: powershell
+          - name: windows-pwsh-7
+            runner: windows-latest
+            shell: pwsh
+    # The phases, and so the one-liner, run under the matrix shell:
+    # powershell.exe 5.1 or pwsh 7.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      # npm 11 runs install scripts only for packages listed here; older npm ignores it.
+      npm_config_allow_scripts: '@anthropic-ai/claude-code,@opencode/cli'
+      DISABLE_AUTOUPDATER: '1'
+      OPENCODE_DISABLE_AUTOUPDATE: 'true'
+      TAG: ${{ needs.latest.outputs.tag }}
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # runner.temp is not available in job-level env.
+      - name: Work folders
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MMHMEM_E2E_WORKDIR=$(Join-Path $env:RUNNER_TEMP 'mmhmem-e2e')"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "AGENT_CLI_PREFIX=$(Join-Path $env:RUNNER_TEMP 'agent-clis')"
+          $zipsign = Join-Path $HOME ('.cache/mmhmem-e2e/zipsign/bin/zipsign' + $(if ($IsWindows) { '.exe' } else { '' }))
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "ZIPSIGN=$zipsign"
+      - name: Harness logic tests (no installer)
+        run: ./scripts/test-e2e-harness.ps1
+      # actions/setup-node v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Pinned packages only, so caching the installed prefix is safe.
+      # actions/cache v6.1.0
+      - name: Restore the agent CLIs
+        id: cli-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ env.AGENT_CLI_PREFIX }}
+          key: agent-clis-${{ runner.os }}-${{ runner.arch }}-node${{ env.NODE_VERSION }}-claude${{ env.CLAUDE_CODE_VERSION }}-codex${{ env.CODEX_VERSION }}-opencode${{ env.OPENCODE_VERSION }}
+      - name: Install claude, codex and opencode from npm (cache miss only)
+        if: steps.cli-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          npm install -g --prefix $env:AGENT_CLI_PREFIX --no-fund --no-audit `
+            "@anthropic-ai/claude-code@$env:CLAUDE_CODE_VERSION" `
+            "@openai/codex@$env:CODEX_VERSION" `
+            "@opencode/cli@$env:OPENCODE_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+      - name: Put the agent CLIs on PATH
+        shell: pwsh
+        run: |
+          $bin = if ($IsWindows) { $env:AGENT_CLI_PREFIX } else { Join-Path $env:AGENT_CLI_PREFIX 'bin' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $bin
+      # Runs in the runner's own home, never the clean one.
+      - name: Agent CLI versions
+        shell: pwsh
+        run: |
+          claude --version; codex --version; opencode --version
+          if ($LASTEXITCODE -ne 0) { throw 'an agent CLI does not start' }
+      # The pinned zipsign verifies the release signatures, installed the
+      # way release.yml installs it. Outside the checkout, so the runner's
+      # own stable Rust builds it (rust-toolchain.toml does not apply).
+      # actions/cache v6.1.0
+      - name: Restore the pinned zipsign
+        id: zipsign-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/mmhmem-e2e/zipsign
+          key: zipsign-${{ env.ZIPSIGN_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Install the pinned zipsign (cache miss only)
+        if: steps.zipsign-cache.outputs.cache-hit != 'true'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: cargo install zipsign --version "=$ZIPSIGN_VERSION" --locked --root ~/.cache/mmhmem-e2e/zipsign
+      - name: Seed a clean home (manifest of the seeded bytes)
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Download ${{ env.TAG }} and verify it with the key built into mmhmem
+        run: ./scripts/e2e-run.ps1 -Phase published-release -Tag $env:TAG
+      - name: Install with the published one-liner, no terminal (default choices)
+        run: ./scripts/e2e-run.ps1 -Phase published-install
+      - name: Installed ${{ env.TAG }}, default features, every check passed, seeded files kept
+        run: ./scripts/e2e-run.ps1 -Phase assert-published
+      - name: Agent CLI diagnostics (only after a failure)
+        if: failure()
+        continue-on-error: true
+        run: ./scripts/e2e-run.ps1 -Phase agent-diagnostics
+      - name: Restore the runner's user PATH
+        if: always()
+        run: ./scripts/e2e-run.ps1 -Phase stop
+      # Logs and the manifest only: never the home (it may hold agent state).
+      # actions/upload-artifact v7.0.2
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: published-install-logs-${{ matrix.name }}
+          path: |
+            ${{ env.MMHMEM_E2E_WORKDIR }}/logs/
+            ${{ env.MMHMEM_E2E_WORKDIR }}/seed-manifest.sha256
+            ${{ env.MMHMEM_E2E_WORKDIR }}/site/release.json
+          retention-days: 14
+          if-no-files-found: ignore

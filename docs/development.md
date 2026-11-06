@@ -64,6 +64,30 @@ Users install releases with the one-liners in the [installation guide](installat
 - The installer end-to-end gate is `.github/workflows/installer-e2e.yml`; it
   runs in CI only.
 
+### Published-release install
+
+`.github/workflows/published-install.yml` runs the README one-liners
+exactly as written, against the published `releases/latest` assets on
+github.com, on the same five legs as the installer e2e (Linux, macOS arm64,
+macOS x86_64, Windows PowerShell 5.1, PowerShell 7). It starts after every
+successful "Publish release" run that published the latest release, weekly,
+and by hand (`workflow_dispatch`).
+
+Each leg seeds the same throwaway home, downloads the latest tag's
+`SHA256SUMS`, checks `SHA256SUMS.sig` with the key in
+`src/setup/release_keys.rs` and the platform archive against both, runs the
+one-liner without a terminal, and asserts with the installer e2e's own
+checks (`scripts/e2e-run.ps1 -Phase published-release`, `published-install`,
+`assert-published`; the phases are in `scripts/e2e-published.ps1`): exit code
+0, the install record names that tag, the installed program is the one in
+the verified archive, Claude Code, Codex and OpenCode are recorded with the
+default features (memory and the read-routing hook) and pass their own
+checks, the seeded files are unchanged, and nothing is left running.
+
+It is evidence, not a gate: no branch protection rule and no release step
+waits for it, and it needs no secret. A red run means the published release
+or the one-liners need a look; it never blocks a merge or a release.
+
 ## Default Linux release build
 
 The canonical Dagger pipeline defaults to a static
