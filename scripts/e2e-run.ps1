@@ -433,10 +433,12 @@ function Get-ExpectedLayout {
     if ($script:OnMac) {return @{Record=(Join-Path $h 'Library/Application Support/mmhmem/install.json');Binary=(Join-Path $h '.local/bin/mmhmem')}}
     return @{Record=(Join-Path $h '.local/state/mmhmem/install.json');Binary=(Join-Path $h '.local/bin/mmhmem')}
 }
-# Seeded files the default install may change: the three agents' MCP entries.
-# OpenCode: setup edits the file that already holds an mmhmem entry, else
-# opencode.jsonc (opencode.rs); the seed has both files, neither with mmhmem.
-$script:ManagedSeedFiles=@('.claude.json','.codex/config.toml','.config/opencode/opencode.jsonc')
+# Files the default install may change: the three agents' MCP entries and
+# OpenCode's read-routing plugin (a new file). OpenCode: setup edits the file
+# that already holds an mmhmem entry, else opencode.jsonc (opencode.rs); the
+# seed has both files, neither with mmhmem. The Claude Code and Codex hook
+# files are compared parsed instead (Compare-ClaudeSettings, Compare-HooksFile).
+$script:ManagedSeedFiles=@('.claude.json','.codex/config.toml','.config/opencode/opencode.jsonc','.config/opencode/plugins/mmhmem-read-routing.js')
 # Install record keys of the agents the job installs (claude, codex, opencode).
 $script:ExpectedAgents=@('claude_code','codex','opencode')
 # What each agent's own CLI must answer in the check (the agent_command
@@ -467,7 +469,9 @@ function Invoke-AssertInstalledPhase {
             $entry=$null
             if ($record.agents) {$entry=$record.agents.$agent}
             if (-not $entry) {$failures.Add("the install record has no $agent entry");continue}
-            if (-not $entry.last_check -or [string]$entry.last_check.result -cne 'pass') {$failures.Add("$agent did not pass its check")}
+            if (-not (Test-AgentCheckOk $agent $entry)) {$failures.Add("$agent did not pass its check")}
+            # The read-routing hook is on by default.
+            if (-not $entry.features -or $entry.features.read_hook -ne $true) {$failures.Add("$agent was installed without the read-routing hook")}
             $details=@($entry.last_check.details)
             $steps=@($details | ForEach-Object {"$($_.step)=$($_.outcome)"}) -join ' '
             Write-Host "$agent check: $($entry.last_check.result) ($steps)"
@@ -480,7 +484,7 @@ function Invoke-AssertInstalledPhase {
             if (-not $output.Contains($line)) {$failures.Add("the output has no line '$line'")}
         }
     }
-    $compare=Compare-Seed ($script:ManagedSeedFiles+$AllowChanged) $true
+    $compare=Compare-Seed ($script:ManagedSeedFiles+$AllowChanged) $true -HooksInstalled
     foreach ($f in $compare) {$failures.Add($f)}
     # Claude Code may rewrite ~/.claude.json itself: compared parsed.
     $seeded=Read-HomeState 'seeded'
@@ -497,7 +501,7 @@ function Invoke-AssertInstalledPhase {
 # ---------------------------------------------------------- compare-seed ---
 # Returns failure messages. Files outside the manifest (install record,
 # backups, program, agent caches) are listed but are not failures.
-function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry) {
+function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry,[switch]$HooksInstalled) {
     $expected=Read-SeedManifest $script:Manifest
     $seedDir=Join-Path $script:Root 'ci/e2e/seed/home'
     $failures=New-Object System.Collections.Generic.List[string]
@@ -520,9 +524,14 @@ function Compare-Seed([string[]]$Allowed,[bool]$AllowRegistry) {
                 $settings=Join-Path $script:SeedHome '.claude/settings.json'
                 Compare-ClaudeJson $seedClaude ([IO.File]::ReadAllText($path)) 'unchanged' $(if (Test-Path -LiteralPath $settings -PathType Leaf) {[IO.File]::ReadAllText($settings)} else {$null})
             } else {
-                Compare-ClaudeSettings ([IO.File]::ReadAllText((Join-Path $seedDir $rel))) ([IO.File]::ReadAllText($path)) $seedClaude
+                Compare-ClaudeSettings ([IO.File]::ReadAllText((Join-Path $seedDir $rel))) ([IO.File]::ReadAllText($path)) $seedClaude -HookInstalled:$HooksInstalled
             }
             if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}} else {Write-Host "claude-owned     $rel (rewritten by Claude Code; every unrelated setting equal, parsed)"}
+            continue
+        }
+        if ($HooksInstalled -and $rel -ceq '.codex/hooks.json') {
+            $hooks=Compare-HooksFile '~/.codex/hooks.json' ([IO.File]::ReadAllText((Join-Path $seedDir $rel))) ([IO.File]::ReadAllText($path))
+            if ($hooks.Count) {foreach ($f in $hooks) {$failures.Add($f)}} else {Write-Host "expected-hook    $rel (only the mmhmem hook added, parsed)"}
             continue
         }
         $failures.Add("seeded file changed: $rel")

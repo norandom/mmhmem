@@ -89,7 +89,7 @@ my current setup and change it without typing answers or flags.
 2. The menu's first screen shall show the current state from the install record (Requirement 5): installed version, newest release, and per agent whether mmhmem is installed, which features are on, and the last check result.
 3. The menu shall offer install or update, change features, check, and remove, and shall offer only the actions that apply to the current state.
 4. The menu shall list each detected agent as a checkbox, preselected for a new install, and shall list agents that are not detected as unavailable with the reason.
-5. The menu shall list optional features, including the read-routing hook, as checkboxes per agent, each with a one-line plain explanation, switched off by default.
+5. The menu shall list optional features, including the read-routing hook, as checkboxes per agent, each with a one-line plain explanation. The read-routing hook shall be switched on by default (owner decision, 2026-11-06); the other optional features shall be switched off by default. The worker model line shall show "(configured)" when a worker model is already set up.
 6. Before changing anything, the menu shall show a review screen listing every file and entry it will add, change or remove, and shall change nothing until the user confirms it.
 7. When the user cancels or quits at any screen, the installer shall exit without changing anything.
 8. If the terminal cannot show the full menu, then the installer shall show the same choices as a numbered list.

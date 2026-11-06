@@ -355,7 +355,7 @@ visible: `↑↓ move · space select · enter continue · esc back · q quit`.
 |---|---|---|
 | Home | state from the record + live detection + newest release | only applicable actions (4.3) |
 | Agents | checkbox per detected agent; undetected listed greyed with reason (4.4) | next |
-| Features | per agent: "Shared memory (required)", "Recap command", "Agent instructions", "Read-routing hook: sends large file reads through mmhmem to save tokens (off by default)", "Worker model (optional)" (4.5) | next |
+| Features | per agent: "Shared memory (required)", "Recap command", "Agent instructions", "Read-routing hook: sends large file reads through mmhmem to save tokens" (on by default since 2026-11-06), "Worker model (optional)", or "Worker model (configured)" when one is set up (4.5) | next |
 | Review | every `Change.summary` grouped by file; `d` shows the diff (4.6) | confirm / back |
 | Progress | one line per change, then the check results | done |
 

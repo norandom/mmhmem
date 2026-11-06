@@ -1,9 +1,10 @@
 //! The agents and features screens (task 6.2, design.md §7; Requirements
 //! 4.4 and 4.5): one checkbox per detected agent, undetected agents listed
 //! with their reason, a Claude Desktop profile choice when there are
-//! several, and per agent the features with one-line explanations. Only the
-//! required feature is on by default; the worker model is a toggle whose
-//! setup comes in a later step.
+//! several, and per agent the features with one-line explanations. The
+//! required feature and the read-routing hook are on by default (the owner's
+//! choice, 2026-11-06); the worker model line shows "(configured)" when one
+//! is set up, else it is a toggle whose setup comes in a later step.
 
 use std::path::PathBuf;
 
@@ -98,7 +99,7 @@ impl Flow {
     }
 
     /// Space on an agents-screen line: toggles an available agent (on with
-    /// the required feature only) or picks a profile.
+    /// the default features) or picks a profile.
     pub fn toggle_choice(&mut self, choice: &Choice) {
         match choice {
             Choice::Agent {
@@ -112,11 +113,24 @@ impl Flow {
                         self.selection.deselect(*agent, feature);
                     }
                 } else {
-                    self.selection.select(*agent, Feature::Mcp);
+                    self.select_defaults(*agent);
                 }
             }
             Choice::Profile { path, .. } => self.profile = Some(path.clone()),
             Choice::Agent { .. } => {}
+        }
+    }
+
+    /// Selects an agent's default features: the required one, and the
+    /// read-routing hook where the agent has one.
+    fn select_defaults(&mut self, agent: AgentId) {
+        self.selection.select(agent, Feature::Mcp);
+        let has_hook = self
+            .registry()
+            .get(agent)
+            .is_some_and(|a| a.features().contains(&Feature::ReadHook));
+        if has_hook {
+            self.selection.select(agent, Feature::ReadHook);
         }
     }
 
@@ -143,7 +157,10 @@ impl Flow {
                 locked: true,
             });
             for feature in agent.features() {
-                let (label, help) = text::feature_label(*feature);
+                let (label, mut help) = text::feature_label(*feature);
+                if *feature == Feature::ReadHook && !self.worker_ready {
+                    help = text::FEATURE_HOOK_HELP_NO_WORKER;
+                }
                 rows.push(FeatureRow {
                     agent: Some(id),
                     feature: Some(*feature),
@@ -158,7 +175,19 @@ impl Flow {
         rows
     }
 
+    /// The worker model line: ticked and locked when one is already set up,
+    /// else a choice noted for a later step.
     fn worker_row(&self) -> FeatureRow {
+        if self.worker_ready {
+            return FeatureRow {
+                agent: None,
+                feature: None,
+                label: text::FEATURE_WORKER_CONFIGURED.to_owned(),
+                help: text::FEATURE_WORKER_CONFIGURED_HELP.to_owned(),
+                on: true,
+                locked: true,
+            };
+        }
         let help = if self.worker {
             text::WORKER_LATER
         } else {

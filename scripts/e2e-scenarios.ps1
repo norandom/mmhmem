@@ -372,12 +372,12 @@ function Invoke-UpdatePhase {
     if ((ConvertTo-CanonicalJson $was) -cne (ConvertTo-CanonicalJson $now)) {$failures.Add("the choices changed: $(ConvertTo-CanonicalJson $was) -> $(ConvertTo-CanonicalJson $now)")}
     foreach ($agent in $script:ExpectedAgents) {
         $entry=$record.agents.$agent
-        if (-not $entry -or [string]$entry.last_check.result -cne 'pass') {$failures.Add("$agent did not pass its check after the update");continue}
+        if (-not (Test-AgentCheckOk $agent $entry)) {$failures.Add("$agent did not pass its check after the update");continue}
         if ([string]$entry.last_check.at -ceq [string]$oldRecord.agents.$agent.last_check.at) {$failures.Add("$agent was not checked again after the update")}
     }
     $seeded=Read-HomeState 'seeded'
     $expected=@($script:ManagedSeedFiles | Where-Object {$_ -cne '.claude.json'})+@((Get-MmhmemPatterns)+'HKCU:Path')
-    foreach ($f in (Compare-HomeState $seeded (Get-HomeState 'after-update') $expected -ClaudeMode installed)) {$failures.Add($f)}
+    foreach ($f in (Compare-HomeState $seeded (Get-HomeState 'after-update') $expected -ClaudeMode installed -HooksInstalled)) {$failures.Add($f)}
     foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
     Assert-NoFailures 'update' $failures
 }
@@ -404,13 +404,13 @@ function Invoke-InvalidConfigPhase {
     $paths=Get-InstalledPaths
     $record=if (Test-Path -LiteralPath $paths.Record) {Read-Json $paths.Record} else {$null}
     foreach ($agent in @('claude_code','codex')) {
-        if (-not $record -or [string]$record.agents.$agent.last_check.result -cne 'pass') {$failures.Add("$agent was not installed and checked")}
+        if (-not $record -or -not (Test-AgentCheckOk $agent $record.agents.$agent)) {$failures.Add("$agent was not installed and checked")}
     }
     if ($record -and $record.agents.opencode -and @((Get-AgentChoices $record).Keys) -ccontains 'opencode') {$failures.Add('OpenCode was set up although its config is invalid')}
     # OpenCode's files (both config files included) are byte-identical; only
     # Claude Code's and Codex's server lists and mmhmem's own files change.
     $expected=@('.codex/config.toml')+@(Get-MmhmemPatterns)+'HKCU:Path'
-    foreach ($f in (Compare-HomeState $before (Get-HomeState 'after-invalid-config') $expected -ClaudeMode installed)) {$failures.Add($f)}
+    foreach ($f in (Compare-HomeState $before (Get-HomeState 'after-invalid-config') $expected -ClaudeMode installed -HooksInstalled)) {$failures.Add($f)}
     foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
     Assert-NoFailures 'invalid-config' $failures
 }

@@ -36,27 +36,81 @@ fn a_fresh_home_offers_only_install() {
 }
 
 #[test]
-fn a_new_install_preselects_detected_agents_with_only_memory_on() {
+fn a_new_install_preselects_detected_agents_with_memory_and_the_hook_on() {
     let fx = with_clis();
     let mut flow = fx.flow(Newest::Checking);
     assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
     assert_eq!(flow.selection().agents(), FOUND);
     for id in FOUND {
-        assert_eq!(flow.selection().features(id), [Feature::Mcp].into());
+        assert_eq!(
+            flow.selection().features(id),
+            [Feature::Mcp, Feature::ReadHook].into()
+        );
     }
     let rows = flow.feature_rows();
     let hook = rows
         .iter()
         .find(|r| r.feature == Some(Feature::ReadHook))
         .expect("hook row");
-    assert!(!hook.on);
+    assert!(hook.on);
+    // No worker model in this home: the hook says it stays inactive.
+    assert_eq!(hook.help, text::FEATURE_HOOK_HELP_NO_WORKER);
     let worker = rows.last().expect("worker row");
     assert_eq!(worker.label, text::FEATURE_WORKER);
-    assert!(!worker.on);
+    assert!(!worker.on && !worker.locked);
     assert!(
         rows.iter()
             .filter(|r| r.locked && !r.is_heading())
             .all(|r| r.on)
+    );
+}
+
+#[test]
+fn a_set_up_worker_model_shows_as_configured() {
+    let mut fx = with_clis();
+    fx.deps.env = fx.deps.env.clone().with_worker_configured(true);
+    let mut flow = fx.flow(Newest::Checking);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    let rows = flow.feature_rows();
+    let worker = rows.last().expect("worker row");
+    assert_eq!(worker.label, text::FEATURE_WORKER_CONFIGURED);
+    assert_eq!(worker.help, text::FEATURE_WORKER_CONFIGURED_HELP);
+    assert!(worker.on && worker.locked);
+    let hook = rows
+        .iter()
+        .find(|r| r.feature == Some(Feature::ReadHook))
+        .expect("hook row");
+    assert_eq!(hook.help, text::FEATURE_HOOK_HELP);
+    // Space on the locked line changes nothing.
+    flow.toggle_feature(&worker.clone());
+    assert_eq!(flow.feature_rows().last(), Some(worker));
+}
+
+#[test]
+fn ticking_a_tool_on_turns_on_its_hook_too() {
+    let fx = with_clis();
+    let mut flow = fx.flow(Newest::Checking);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    let codex = |flow: &Flow| {
+        flow.agent_choices()
+            .into_iter()
+            .find(|c| {
+                matches!(
+                    c,
+                    Choice::Agent {
+                        agent: AgentId::Codex,
+                        ..
+                    }
+                )
+            })
+            .expect("codex line")
+    };
+    flow.toggle_choice(&codex(&flow));
+    assert!(flow.selection().features(AgentId::Codex).is_empty());
+    flow.toggle_choice(&codex(&flow));
+    assert_eq!(
+        flow.selection().features(AgentId::Codex),
+        [Feature::Mcp, Feature::ReadHook].into()
     );
 }
 
@@ -88,10 +142,18 @@ fn a_full_install_applies_checks_stores_the_record_and_shows_next_steps() {
     for id in FOUND {
         let rec = &stored.agents[&id];
         assert_eq!(rec.features.get(&Feature::Mcp), Some(&true));
-        assert_eq!(
-            rec.last_check.as_ref().map(|c| c.result),
-            Some(CheckResult::Pass)
-        );
+        assert_eq!(rec.features.get(&Feature::ReadHook), Some(&true));
+        // Only Codex asks for a step of the user: approving its hook.
+        let (result, pending) = if id == AgentId::Codex {
+            (
+                CheckResult::UserStepsPending,
+                vec![PendingUserStep::ApproveHookInCodex],
+            )
+        } else {
+            (CheckResult::Pass, Vec::new())
+        };
+        assert_eq!(rec.last_check.as_ref().map(|c| c.result), Some(result));
+        assert_eq!(rec.pending_user_steps, pending);
     }
     assert_eq!(flow.exit_code(), 0);
 }
@@ -215,16 +277,20 @@ fn a_tool_skipped_for_an_invalid_config_is_not_checked_or_recorded_as_set_up() {
     let fx = with_clis();
     install_with_invalid_opencode(&fx);
     let stored = fx.deps.store.load().expect("load").expect("record");
-    for id in [AgentId::ClaudeCode, AgentId::Codex] {
+    // Codex waits only for its hook approval.
+    for (id, result) in [
+        (AgentId::ClaudeCode, CheckResult::Pass),
+        (AgentId::Codex, CheckResult::UserStepsPending),
+    ] {
         assert_eq!(
             stored.agents[&id].last_check.as_ref().map(|c| c.result),
-            Some(CheckResult::Pass)
+            Some(result)
         );
     }
     let opencode = &stored.agents[&AgentId::OpenCode];
     assert!(!opencode.features.values().any(|on| *on), "{opencode:?}");
     assert!(opencode.managed.is_empty() && opencode.last_check.is_none());
-    assert_eq!(opencode.skipped, [Feature::Mcp].into());
+    assert_eq!(opencode.skipped, [Feature::Mcp, Feature::ReadHook].into());
 }
 
 #[test]

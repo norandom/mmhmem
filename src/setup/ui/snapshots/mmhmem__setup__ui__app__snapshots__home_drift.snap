@@ -1,15 +1,16 @@
 ---
 source: src/setup/ui/app_snapshots.rs
+assertion_line: 93
 expression: "snap(&fx, Newest::Unknown, &[])"
 ---
 "┌ mmhmem setup ────────────────────────────────────────────────────────────────┐"
 "│ Installed: v0.4.1          Newest release: unknown (offline?)                │"
 "│                                                                              │"
 "│ Tool            mmhmem      Features              Last check                 │"
-"│ Claude Code     installed   memory                –                          │"
+"│ Claude Code     installed   memory, read hook     –                          │"
 "│ Claude Desktop  not found   (no Claude Desktop folder was found)             │"
-"│ Codex           installed   memory                –                          │"
-"│ OpenCode        installed   memory                –                          │"
+"│ Codex           installed   memory, read hook     –                          │"
+"│ OpenCode        installed   memory, read hook     –                          │"
 "│ Antigravity     not found   (Antigravity is not installed)                   │"
 "│                                                                              │"
 "│ ~/.codex/config.toml was changed outside setup. The review shows the         │"

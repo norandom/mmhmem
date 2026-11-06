@@ -49,9 +49,13 @@ pub const FEATURE_INSTRUCTIONS: &str = "Agent instructions";
 pub const FEATURE_INSTRUCTIONS_HELP: &str =
     "Short notes that tell each tool how to use the shared memory.";
 pub const FEATURE_HOOK: &str = "Read-routing hook";
-pub const FEATURE_HOOK_HELP: &str = "Sends large file reads through mmhmem to save tokens \
-(off by default).";
+pub const FEATURE_HOOK_HELP: &str = "Sends large file reads through mmhmem to save tokens.";
+pub const FEATURE_HOOK_HELP_NO_WORKER: &str = "Sends large file reads through mmhmem to save \
+tokens. Worker model needed: it stays inactive until one is set up (last line).";
 pub const FEATURE_WORKER: &str = "Worker model (optional)";
+pub const FEATURE_WORKER_CONFIGURED: &str = "Worker model (configured)";
+pub const FEATURE_WORKER_CONFIGURED_HELP: &str = "Worker model: already set up. It \
+summarizes long files, so the read-routing hook is active.";
 pub const FEATURE_WORKER_HELP: &str = "Worker model: a small AI model that summarizes long \
 files for you. It needs extra setup, so it is left off unless you ask for it.";
 
@@ -357,8 +361,11 @@ pub const ALL: &[&str] = &[
     FEATURE_INSTRUCTIONS_HELP,
     FEATURE_HOOK,
     FEATURE_HOOK_HELP,
+    FEATURE_HOOK_HELP_NO_WORKER,
     FEATURE_WORKER,
     FEATURE_WORKER_HELP,
+    FEATURE_WORKER_CONFIGURED,
+    FEATURE_WORKER_CONFIGURED_HELP,
     REVIEW_NOTHING,
     HOME_UPDATE_AVAILABLE,
     REVIEW_BACKUP,

@@ -1,15 +1,16 @@
 ---
 source: src/setup/ui/app_snapshots.rs
+assertion_line: 76
 expression: "snap(&fx, Newest::Known(tag(\"v0.5.0\")), &[])"
 ---
 "┌ mmhmem setup ────────────────────────────────────────────────────────────────┐"
 "│ Installed: v0.4.1          Newest release: v0.5.0                            │"
 "│                                                                              │"
 "│ Tool            mmhmem      Features              Last check                 │"
-"│ Claude Code     installed   memory                –                          │"
+"│ Claude Code     installed   memory, read hook     –                          │"
 "│ Claude Desktop  not found   (no Claude Desktop folder was found)             │"
-"│ Codex           installed   memory                –                          │"
-"│ OpenCode        installed   memory                –                          │"
+"│ Codex           installed   memory, read hook     –                          │"
+"│ OpenCode        installed   memory, read hook     –                          │"
 "│ Antigravity     not found   (Antigravity is not installed)                   │"
 "│                                                                              │"
 "│ Your tools are set up as you chose. A newer version of mmhmem is available.  │"

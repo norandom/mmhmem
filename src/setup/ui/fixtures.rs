@@ -40,9 +40,12 @@ pub(crate) struct Fx {
 /// A fresh Linux-rules home with no agent; the record folder, the
 /// installed program and the memory store live under the home; restarting
 /// after an update is off. No release key is trusted, whatever this build
-/// embeds, so an update is refused before anything is downloaded.
+/// embeds, so an update is refused before anything is downloaded. No worker
+/// model is set up, so the read-routing hook (on by default) stays inactive
+/// and its sample read, which needs a real program, is not run.
 pub(crate) fn fx() -> Fx {
-    let home = TestHome::new(Os::Linux);
+    let mut home = TestHome::new(Os::Linux);
+    home.env = home.env.clone().with_worker_configured(false);
     let state = home.home().join(".local").join("state").join("mmhmem");
     let binary = home.home().join(".local").join("bin").join("mmhmem");
     let memories = home.home().join(".local").join("share").join("mmhmem");

@@ -225,7 +225,7 @@ impl Flow {
         selection
     }
 
-    /// Every detected agent with the required feature, plus what an earlier
+    /// Every detected agent with its default features, plus what an earlier
     /// install had switched on (so adopting keeps it).
     fn default_selection(&self) -> Selection {
         let registry = self.registry();
@@ -236,6 +236,9 @@ impl Flow {
                 continue;
             }
             selection.select(id, Feature::Mcp);
+            if agent.features().contains(&Feature::ReadHook) {
+                selection.select(id, Feature::ReadHook);
+            }
             let found = self.loaded.scan.as_ref().and_then(|s| s.agent(id));
             for feature in found.map(|s| s.features()).unwrap_or_default() {
                 if agent.features().contains(&feature) {

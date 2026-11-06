@@ -250,11 +250,16 @@ function Compare-ClaudeJson([string]$BeforeText,[string]$AfterText,[ValidateSet(
 # key and every env entry must be as before (parsed: Claude rewrites the
 # formatting); the only additions allowed are Claude's moves out of
 # ~/.claude.json (Get-ClaudeMoves), each with exactly the moved value.
-function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$ClaudeJson) {
+function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$ClaudeJson,[switch]$HookInstalled) {
     $failures=New-Object Collections.Generic.List[string]
     if ([string]::IsNullOrEmpty($AfterText)) {$failures.Add('~/.claude/settings.json is missing or empty');return ,$failures.ToArray()}
     try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add('the earlier ~/.claude/settings.json is not JSON');return ,$failures.ToArray()}
     try {$after=$AfterText | ConvertFrom-Json} catch {$failures.Add('~/.claude/settings.json is no longer valid JSON');return ,$failures.ToArray()}
+    if ($HookInstalled) {
+        $stripped=Remove-MmhmemHookGroups $after
+        if (-not $stripped.found) {$failures.Add('~/.claude/settings.json has no mmhmem read-routing hook')}
+        $after=$stripped.json
+    }
     $moves=Get-ClaudeMoves $(if ($ClaudeJson) {try {$ClaudeJson | ConvertFrom-Json} catch {$null}} else {$null})
     $bEnv=(Get-JsonMember $before 'env')[1];$aEnv=(Get-JsonMember $after 'env')[1]
     foreach ($n in (Get-JsonNames $bEnv)) {
@@ -280,11 +285,57 @@ function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$
     return ,$failures.ToArray()
 }
 
+# ------------------------------------------------- read-routing hooks ---
+# The read-routing hook is on by default (setup flow_select.rs), so an
+# install adds one group running `<mmhmem> hook <harness>` to the agent's
+# hooks file. These helpers take exactly those groups out, so every other
+# hook, event and key can still be compared with the seed.
+$script:MmhmemHookCommand='(?i)mmhmem(\.exe)?["'']?\s+hook\s+(claude|codex|opencode)\b'
+# @{json=<parsed copy without mmhmem's groups>; found=<whether one was there>}.
+# An event array that only held mmhmem's group is dropped.
+function Remove-MmhmemHookGroups($Json) {
+    $copy=($Json | ConvertTo-Json -Depth 32) | ConvertFrom-Json
+    $found=$false
+    $hooks=(Get-JsonMember $copy 'hooks')[1]
+    if ($null -eq $hooks) {return @{json=$copy;found=$false}}
+    foreach ($event in @(Get-JsonNames $hooks)) {
+        $groups=@($hooks.$event)
+        $kept=@()
+        foreach ($group in $groups) {
+            $commands=@($group.hooks | ForEach-Object {[string]$_.command})
+            if (@($commands | Where-Object {$_ -match $script:MmhmemHookCommand}).Count) {$found=$true} else {$kept+=,$group}
+        }
+        if ($kept.Count -eq $groups.Count) {continue}
+        if ($kept.Count) {$hooks.$event=$kept} else {$hooks.PSObject.Properties.Remove($event)}
+    }
+    return @{json=$copy;found=$found}
+}
+# Failure messages for a hooks file (Codex ~/.codex/hooks.json) after an
+# install: parsed, it must equal the earlier text plus mmhmem's group.
+function Compare-HooksFile([string]$Label,[string]$BeforeText,[string]$AfterText) {
+    $failures=New-Object Collections.Generic.List[string]
+    try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add("the earlier $Label is not JSON");return ,$failures.ToArray()}
+    try {$after=$AfterText | ConvertFrom-Json} catch {$failures.Add("$Label is no longer valid JSON");return ,$failures.ToArray()}
+    $stripped=Remove-MmhmemHookGroups $after
+    if (-not $stripped.found) {$failures.Add("$Label has no mmhmem read-routing hook")}
+    if ((ConvertTo-CanonicalJson $before) -cne (ConvertTo-CanonicalJson $stripped.json)) {$failures.Add("$Label changed beyond the mmhmem hook")}
+    return ,$failures.ToArray()
+}
+# Whether an agent's check result is acceptable after an install: a pass,
+# or for Codex with its hook on, only the approval in /hooks left to do.
+function Test-AgentCheckOk([string]$Agent,$Entry) {
+    if (-not $Entry -or -not $Entry.last_check) {return $false}
+    $result=[string]$Entry.last_check.result
+    if ($result -ceq 'pass') {return $true}
+    $pending=@($Entry.pending_user_steps | ForEach-Object {[string]$_})
+    return ($Agent -ceq 'codex' -and $result -ceq 'user_steps_pending' -and $pending.Count -eq 1 -and $pending[0] -ceq 'approve_hook_in_codex')
+}
+
 # ------------------------------------------------------------- compare ---
 # Failure messages between two home states (rules in the header).
 # -Expected: path patterns this scenario may change, add or remove
 # ('HKCU:Path' for the Windows user PATH). -ClaudeMode: see Compare-ClaudeJson.
-function Compare-HomeState($Before,$After,[string[]]$Expected=@(),[switch]$Strict,[string]$ClaudeMode='unchanged') {
+function Compare-HomeState($Before,$After,[string[]]$Expected=@(),[switch]$Strict,[string]$ClaudeMode='unchanged',[switch]$HooksInstalled) {
     $seeded=Read-SeedManifest $script:Manifest
     $failures=New-Object Collections.Generic.List[string]
     $all=New-Object 'Collections.Generic.SortedSet[string]' ([StringComparer]::Ordinal)
@@ -303,9 +354,19 @@ function Compare-HomeState($Before,$After,[string[]]$Expected=@(),[switch]$Stric
             continue
         }
         if (-not $Strict -and $rel -ceq '.claude/settings.json' -and $b -and $a) {
-            $claude=Compare-ClaudeSettings $Before.claude_settings $After.claude_settings $Before.claude_json
+            $claude=Compare-ClaudeSettings $Before.claude_settings $After.claude_settings $Before.claude_json -HookInstalled:$HooksInstalled
             if ($claude.Count) {foreach ($f in $claude) {$failures.Add($f)}}
             else {Write-Host '  claude-owned  .claude/settings.json rewritten by Claude Code; only its own moves (parsed)'}
+            continue
+        }
+        if ($HooksInstalled -and $rel -ceq '.codex/hooks.json' -and $b -and $a) {
+            # Compared with the seeded text: the states keep hashes only, and
+            # every scenario starts from the seeded hooks file.
+            $path=Join-Path $script:SeedHome $rel
+            $seedText=[IO.File]::ReadAllText((Join-Path $script:Root "ci/e2e/seed/home/$rel"))
+            $hookFailures=Compare-HooksFile '~/.codex/hooks.json' $seedText ([IO.File]::ReadAllText($path))
+            if ($hookFailures.Count) {foreach ($f in $hookFailures) {$failures.Add($f)}}
+            else {Write-Host '  expected-hook  .codex/hooks.json gained only the mmhmem hook (parsed)'}
             continue
         }
         if (-not $seeded.Contains($rel) -and $script:OnWindows -and (Test-AnyLike $rel $script:ShellRuntimePatterns)) {Write-Host "  shell-own-$kind  $rel";continue}

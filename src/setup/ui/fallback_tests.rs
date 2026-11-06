@@ -121,7 +121,8 @@ fn the_agents_screen_numbers_only_what_can_be_switched() {
 #[test]
 fn the_review_lists_changes_per_file_and_shows_details_on_request() {
     let fx = with_clis();
-    let (code, out) = session(&fx, "1\n\n\nd 2\nd 9\nq\n");
+    // Item 3 is Codex's config.toml (after Claude Code's two files).
+    let (code, out) = session(&fx, "1\n\n\nd 3\nd 99\nq\n");
     assert_eq!(code, EXIT_CANCELLED);
     assert!(out.contains(text::TITLE_REVIEW), "{out}");
     assert!(out.contains("~/.codex/config.toml"), "{out}");
@@ -224,9 +225,11 @@ fn the_default_install_needs_no_questions() {
     assert!(out.contains(text::NEXT_OPENCODE), "{out}");
     let record = fx.deps.store.load().expect("load").expect("record");
     for id in FOUND {
+        // The defaults: the shared memory and the read-routing hook.
         let features = &record.agents[&id].features;
-        assert_eq!(features.values().filter(|on| **on).count(), 1);
+        assert_eq!(features.values().filter(|on| **on).count(), 2);
         assert_eq!(features.get(&Feature::Mcp), Some(&true));
+        assert_eq!(features.get(&Feature::ReadHook), Some(&true));
     }
     let runs = fx.home.runner.args_of("claude");
     assert!(
@@ -254,18 +257,18 @@ fn the_default_install_skips_a_tool_with_an_invalid_config_and_checks_only_the_o
     assert_skipped_opencode_unchanged(&fx, &config);
 }
 
-/// Claude Code and Codex are set up and passed; OpenCode is not set up,
-/// its folder holds only the untouched `config`, and its CLI was not used
-/// for a check.
+/// Claude Code and Codex are set up and passed (Codex waits only for its
+/// hook approval); OpenCode is not set up, its folder holds only the
+/// untouched `config`, and its CLI was not used for a check.
 fn assert_skipped_opencode_unchanged(fx: &Fx, config: &std::path::Path) {
     let record = fx.deps.store.load().expect("load").expect("record");
-    for id in [AgentId::ClaudeCode, AgentId::Codex] {
+    for (id, result) in [
+        (AgentId::ClaudeCode, CheckResult::Pass),
+        (AgentId::Codex, CheckResult::UserStepsPending),
+    ] {
         let rec = &record.agents[&id];
         assert_eq!(rec.features.get(&Feature::Mcp), Some(&true));
-        assert_eq!(
-            rec.last_check.as_ref().map(|c| c.result),
-            Some(CheckResult::Pass)
-        );
+        assert_eq!(rec.last_check.as_ref().map(|c| c.result), Some(result));
     }
     let opencode = &record.agents[&AgentId::OpenCode];
     assert!(!opencode.features.values().any(|on| *on), "{opencode:?}");

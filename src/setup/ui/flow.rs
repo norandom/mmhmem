@@ -173,6 +173,8 @@ pub struct Flow {
     selection: Selection,
     profile: Option<PathBuf>,
     worker: bool,
+    /// A worker model is already set up (decided as `mmhmem hook` does).
+    worker_ready: bool,
     planned: Option<review::Planned>,
     progress: Option<Progress>,
     /// A line above the next review (after an update).
@@ -221,6 +223,7 @@ impl Flow {
             profiles,
             current: false,
         };
+        let worker_ready = deps.env.worker_configured();
         let mut flow = Self {
             deps,
             loaded,
@@ -228,6 +231,7 @@ impl Flow {
             selection: Selection::new(),
             profile: None,
             worker: false,
+            worker_ready,
             planned: None,
             progress: None,
             intro: None,

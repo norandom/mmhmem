@@ -293,6 +293,32 @@ try {
     & $python -I -c "import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);c.execute('insert into t values (2)');c.commit();c.close()" $db
     Assert-True ((Get-StoreFiles $storeDir)['memory.db'] -cne $kept['memory.db']) 'one more row is a different store'
 
+    # ---- read-routing hooks (on by default): only mmhmem's group may be added.
+    $seedSettings=[IO.File]::ReadAllText((Join-Path $script:Root 'ci/e2e/seed/home/.claude/settings.json'))
+    $seedHooks=[IO.File]::ReadAllText((Join-Path $script:Root 'ci/e2e/seed/home/.codex/hooks.json'))
+    $ours=@{matcher='Read';hooks=@(@{type='command';command='"/home/u/.local/bin/mmhmem" hook claude';timeout=10})}
+    $s=$seedSettings | ConvertFrom-Json
+    $s.hooks.PreToolUse=@($s.hooks.PreToolUse)+@([pscustomobject]$ours)
+    $withHook=$s | ConvertTo-Json -Depth 16
+    Assert-True ((Compare-ClaudeSettings $seedSettings $withHook $null -HookInstalled).Count -eq 0) 'settings with only the mmhmem hook added pass'
+    Assert-True ((Compare-ClaudeSettings $seedSettings $withHook $null).Count -gt 0) 'without -HookInstalled the added hook is a change'
+    Assert-True (@(Compare-ClaudeSettings $seedSettings $seedSettings $null -HookInstalled) -match 'no mmhmem read-routing hook').Count -eq 1 'a missing hook is reported'
+    $s.hooks.PreToolUse=@($s.hooks.PreToolUse | Where-Object {$_.matcher -cne 'Bash'})
+    Assert-True (@(Compare-ClaudeSettings $seedSettings ($s | ConvertTo-Json -Depth 16) $null -HookInstalled) -match 'key hooks changed').Count -eq 1 'a lost user hook is reported'
+    $h=$seedHooks | ConvertFrom-Json
+    $h.hooks | Add-Member -NotePropertyName PreToolUse -NotePropertyValue @([pscustomobject]@{matcher='^(Bash|shell)$';hooks=@(@{type='command';command='C:\mmhmem\mmhmem.exe hook codex';timeout=10})})
+    $codexWithHook=$h | ConvertTo-Json -Depth 16
+    Assert-True ((Compare-HooksFile 'hooks.json' $seedHooks $codexWithHook).Count -eq 0) 'Codex hooks with only the mmhmem group added pass'
+    Assert-True ((Compare-HooksFile 'hooks.json' $seedHooks $seedHooks).Count -eq 1) 'Codex hooks without the mmhmem group fail'
+    $h.hooks.SessionStart[0].hooks[0].command='echo changed'
+    Assert-True (@(Compare-HooksFile 'hooks.json' $seedHooks ($h | ConvertTo-Json -Depth 16)) -match 'changed beyond').Count -eq 1 'a changed user hook in Codex fails'
+    $check={param($result,$steps) [pscustomobject]@{last_check=[pscustomobject]@{result=$result};pending_user_steps=$steps}}
+    Assert-True (Test-AgentCheckOk 'claude_code' (& $check 'pass' @())) 'a pass is OK'
+    Assert-True (Test-AgentCheckOk 'codex' (& $check 'user_steps_pending' @('approve_hook_in_codex'))) 'Codex waiting for the hook approval is OK'
+    Assert-True (-not (Test-AgentCheckOk 'claude_code' (& $check 'user_steps_pending' @('approve_hook_in_codex')))) 'only Codex may wait'
+    Assert-True (-not (Test-AgentCheckOk 'codex' (& $check 'fail' @()))) 'a failed check is not OK'
+    Assert-True (-not (Test-AgentCheckOk 'codex' $null)) 'no record entry is not OK'
+
     # ---- small helpers.
     Assert-True ((ConvertTo-TagPattern 'v0.4.1') -ceq 'v0\.4\.1') 'tag pattern escapes dots only'
     Assert-True (@('windows','linux','macos-aarch64','macos-x86_64') -ccontains (Get-PlatformKey)) 'platform key'

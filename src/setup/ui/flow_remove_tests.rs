@@ -237,7 +237,18 @@ fn a_removal_leaves_the_users_files_and_path_as_they_were_and_keeps_the_memories
     assert_removed(&home, &flow);
     let backups = home.fx.deps.store.dir().join("backups");
     // Also the Markdown file mmhmem created only for its section is gone.
-    assert_eq!(files(home.fx.home.home(), &backups), home.files_before);
+    // The one file left is the Codex `hooks.json` mmhmem created for the
+    // read-routing hook (on by default), emptied to `{}` (codex.rs).
+    let hooks = home.fx.home.home().join(".codex").join("hooks.json");
+    let mut expected = home.files_before.clone();
+    expected.push(hooks.clone());
+    expected.sort();
+    let mut after = files(home.fx.home.home(), &backups);
+    after.sort();
+    assert_eq!(after, expected);
+    let left: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&hooks).unwrap()).unwrap();
+    assert_eq!(left, serde_json::json!({}));
     assert!(home.memories().join("mmhmem.db").exists());
     let lines = &flow.progress().unwrap().lines;
     let dir = tidy(home.fx.home.home(), &home.memories().display().to_string());
