@@ -392,6 +392,26 @@ visible: `↑↓ move · space select · enter continue · esc back · q quit`.
 
   An up-to-date install yields an empty plan, and the menu says "Everything
   is current" and offers Check (7.1).
+- **Update mode (7.5, owner decision 2026-11-06):** an installed system is
+  never offered the update as a new setup. `mmhmem update`
+  (`ui/update.rs`) asks plain questions that work in every terminal: it
+  refuses without a terminal, says to run `mmhmem setup` without a record,
+  looks up the newest release (15 s at most; unknown → nothing changed,
+  exit 1; not newer → "up to date", exit 0), asks `Update now? [Y/n]` once
+  (no → exit 2, as cancelling the menu) and takes the menu's verified path
+  (`Flow::update_to`), then restarts as `update --restarted <tag>`. The
+  home title of an installed system is "mmhmem vX is set up", with
+  "Update to vN (keeps your choices)" first and selected. The install
+  command run again in a terminal with a newer release asks the same
+  question and installs the program it already verified (the plan's
+  program change) with the recorded choices; an equal or older release
+  opens the menu; without a terminal it keeps the standard run (4.9).
+  **Ask only if needed:** the restarted run (`Flow::resume`) plans the
+  recorded choices with its own files; an empty plan only runs the check
+  (`Flow::apply_update`) and shows the results, skipping the Review; a
+  non-empty one shows the Review (menu) or lists the change summaries and
+  asks `Apply these changes? [Y/n]` once (`mmhmem update`; no keeps the
+  files, says to run `mmhmem setup` to review them, exit 2).
 - **Remove:** applies `plan_remove` of each agent, which reverses only
   recorded entries. Shared files are edited with the same parsers, never
   restored wholesale, so later user edits survive (7.3). The binary, the

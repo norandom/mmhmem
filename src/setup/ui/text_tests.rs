@@ -33,6 +33,7 @@ fn violations(strings: &[&str]) -> Vec<String> {
 fn text_uses_no_unexplained_project_terms() {
     assert_eq!(violations(ALL), Vec::<String>::new());
     assert_eq!(violations(text::remove::ALL), Vec::<String>::new());
+    assert_eq!(violations(text::update::ALL), Vec::<String>::new());
 }
 
 #[test]
@@ -56,7 +57,10 @@ fn next_steps_and_update_label_are_listed() {
     ] {
         assert!(ALL.contains(&text::next_step(agent)));
     }
-    assert_eq!(text::update_to("v1.2.3"), "Update to v1.2.3");
+    assert_eq!(
+        text::update_to("v1.2.3"),
+        "Update to v1.2.3 (keeps your choices)"
+    );
     assert!(text::LEGEND.contains("esc back"));
 }
 

@@ -1,8 +1,9 @@
 ---
 source: src/setup/ui/app_snapshots.rs
+assertion_line: 48
 expression: "snap(&fx, Newest::Known(tag(\"v0.4.1\")), &[])"
 ---
-"┌ mmhmem setup ────────────────────────────────────────────────────────────────┐"
+"┌ mmhmem v0.4.1 is set up ─────────────────────────────────────────────────────┐"
 "│ Installed: v0.4.1          Newest release: v0.4.1                            │"
 "│                                                                              │"
 "│ Tool            mmhmem      Features              Last check                 │"

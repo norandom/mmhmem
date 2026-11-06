@@ -12,13 +12,15 @@
 //! delete my saved memories". Esc on Home or q before the Review is
 //! confirmed exits with [`EXIT_CANCELLED`] and nothing changed. After an
 //! update the menu closes so the new program can start; the restarted
-//! program opens on the Review. The state machine has
+//! program opens on the Review when the recorded choices change files, and
+//! otherwise goes straight to Progress and only checks the tools
+//! (Requirement 7.5). The state machine has
 //! no terminal in it, so tests drive it key by key and draw it on a
 //! `TestBackend`.
 
 use std::cell::Cell;
 
-use super::flow::{Confirmed, EXIT_CANCELLED, Flow, Newest, Next};
+use super::flow::{Confirmed, EXIT_CANCELLED, Flow, Newest, Next, Resumed};
 use super::text;
 
 #[path = "app_draw.rs"]
@@ -83,32 +85,48 @@ pub struct App {
     max_scroll: Cell<usize>,
     diff: Option<usize>,
     note: Option<&'static str>,
-    working: bool,
+    working: Option<Work>,
+    /// The line above the results (after an update that changed no file).
+    heading: Option<String>,
+}
+
+/// The slow step [`App::work`] does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Work {
+    /// Apply the confirmed plan and check.
+    Confirm,
+    /// Only check (after an update that changes no file).
+    Check,
 }
 
 impl App {
-    /// The menu on its home screen, or on the review when this run was
-    /// started right after an update ([`Flow::resume`]).
+    /// The menu on its home screen. In the run started right after an
+    /// update ([`Flow::resume`]): on the review when the recorded choices
+    /// change files, else straight to the results, where only the check
+    /// runs (ask only if needed, Requirement 7.5).
     pub fn new(mut flow: Flow) -> Self {
         let resumed = flow.resume();
+        let (screen, back, working, heading) = match resumed {
+            Some(Resumed::Review(_)) => (Screen::Review, vec![Screen::Home], None, None),
+            Some(Resumed::Check(tag)) => (
+                Screen::Progress,
+                Vec::new(),
+                Some(Work::Check),
+                Some(text::update::updated_no_changes(tag.as_str())),
+            ),
+            None => (Screen::Home, Vec::new(), None, None),
+        };
         Self {
             flow,
-            screen: if resumed {
-                Screen::Review
-            } else {
-                Screen::Home
-            },
-            back: if resumed {
-                vec![Screen::Home]
-            } else {
-                Vec::new()
-            },
+            screen,
+            back,
             cursor: 0,
             scroll: 0,
             max_scroll: Cell::new(0),
             diff: None,
             note: None,
-            working: false,
+            working,
+            heading,
         }
     }
 
@@ -134,23 +152,30 @@ impl App {
 
     /// A confirmed plan waits for [`App::work`] (drawn as "please wait").
     pub fn is_working(&self) -> bool {
-        self.working
+        self.working.is_some()
     }
 
-    /// Applies the confirmed plan and checks the agents.
+    /// Applies the confirmed plan and checks the agents, or only checks
+    /// them after an update that changes no file.
     pub fn work(&mut self) {
-        if !std::mem::take(&mut self.working) {
-            return;
+        match self.working.take() {
+            Some(Work::Check) => self.flow.apply_update(),
+            Some(Work::Confirm) if self.flow.confirm() == Confirmed::Review => {
+                self.screen = Screen::Review;
+                self.cursor = 0;
+            }
+            Some(Work::Confirm) | None => {}
         }
-        if self.flow.confirm() == Confirmed::Review {
-            self.screen = Screen::Review;
-            self.cursor = 0;
-        }
+    }
+
+    /// The line above the results, if any.
+    pub fn heading(&self) -> Option<&str> {
+        self.heading.as_deref()
     }
 
     /// Handles one key.
     pub fn key(&mut self, key: Key) -> Control {
-        if self.working {
+        if self.working.is_some() {
             return Control::Continue;
         }
         if key != Key::Other {
@@ -276,7 +301,7 @@ impl App {
                 self.scroll = 0;
             }
             Key::Enter => {
-                self.working = true;
+                self.working = Some(Work::Confirm);
                 self.go(Screen::Progress);
                 self.back.clear();
             }

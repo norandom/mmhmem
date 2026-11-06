@@ -1,0 +1,29 @@
+---
+source: src/setup/ui/app_snapshots.rs
+assertion_line: 153
+expression: render(&app)
+---
+"┌ Setting things up ───────────────────────────────────────────────────────────┐"
+"│ mmhmem was updated to v0.5.0. Your tools needed no changes, so setup only    │"
+"│ checked that they still work.                                                │"
+"│                                                                              │"
+"│ Checking that each tool can start and use mmhmem...                          │"
+"│ ✔ Claude Code — mmhmem connected, 10 tools                                   │"
+"│ ● Claude Code — the read-routing hook is installed but stays inactive until  │"
+"│ a worker model is set up (choose "Worker model" in the menu)                 │"
+"│ ✔ Codex — mmhmem connected, 10 tools                                         │"
+"│ ● Codex — approve the mmhmem hook if you have not yet: open Codex, type      │"
+"│ /hooks, approve "mmhmem read routing"                                        │"
+"│ ● Codex — the read-routing hook is installed but stays inactive until a      │"
+"│ worker model is set up (choose "Worker model" in the menu)                   │"
+"│ ✔ OpenCode — mmhmem connected, 10 tools                                      │"
+"│ ● OpenCode — the read-routing hook is installed but stays inactive until a   │"
+"│ worker model is set up (choose "Worker model" in the menu)                   │"
+"│                                                                              │"
+"│ Done. Next steps:                                                            │"
+"│ Claude Code: start a new session.                                            │"
+"│ Codex: start a new session, and approve the read-routing hook when Codex     │"
+"│ asks, if you turned it on.                                                   │"
+"│ OpenCode: start a new session.                                               │"
+"└──────────────────────────────────────────────────────────────────────────────┘"
+"↑↓ scroll · enter or q close                                                    "

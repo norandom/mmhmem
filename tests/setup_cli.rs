@@ -47,6 +47,34 @@ fn setup_without_a_terminal_changes_nothing_and_says_to_use_a_terminal() {
     }
 }
 
+/// Requirement 7.5: `mmhmem update` is listed without its internal
+/// arguments, refuses unknown ones, and without a terminal changes nothing
+/// and reads nothing (so it runs on every OS).
+#[test]
+fn update_is_listed_and_refuses_without_a_terminal() {
+    let help = String::from_utf8(run_cli(&["--help"]).stdout).expect("utf8");
+    assert!(help.contains("update "), "{help}");
+    for args in [
+        &["update", "--bogus"][..],
+        &["update", "--bootstrap", "v1.0.0"],
+    ] {
+        let out = run_cli(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let err = String::from_utf8(out.stderr).expect("utf8");
+        assert!(err.contains("Just run: mmhmem update"), "{err}");
+    }
+    for args in [&["update"][..], &["update", "--restarted", "v1.0.0"]] {
+        let out = run_cli(args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let text = String::from_utf8(out.stdout).expect("utf8");
+        assert!(
+            text.contains("open a terminal window and run: mmhmem update"),
+            "{text}"
+        );
+        assert!(text.contains("nothing was changed"), "{text}");
+    }
+}
+
 /// The restart after an update starts the real program with the same
 /// terminal and returns its exit code.
 #[test]

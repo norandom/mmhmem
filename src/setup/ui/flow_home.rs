@@ -61,6 +61,8 @@ pub struct AgentRow {
 /// Everything the home screen shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HomeView {
+    /// "mmhmem v0.4.1 is set up" once installed, else "mmhmem setup".
+    pub title: String,
     /// "Installed: v0.4.1".
     pub installed: String,
     /// "Newest release: v0.5.0".
@@ -89,10 +91,13 @@ impl Flow {
         if !self.is_installed() && !self.any_detected() {
             notes.push(text::NO_AGENT.to_owned());
         }
+        let release = record.and_then(|r| r.release.as_ref()).map(|t| t.as_str());
         HomeView {
-            installed: text::installed_version(
-                record.and_then(|r| r.release.as_ref()).map(|t| t.as_str()),
-            ),
+            title: match release.filter(|_| self.is_installed()) {
+                Some(version) => text::update::set_up_title(version),
+                None => text::TITLE_HOME.to_owned(),
+            },
+            installed: text::installed_version(release),
             newest: match &self.newest {
                 Newest::Checking => text::NEWEST_CHECKING.to_owned(),
                 Newest::Known(tag) => text::newest(tag.as_str()),
@@ -169,17 +174,20 @@ impl Flow {
     }
 
     /// The newest release when it is newer than the installed one.
-    fn newer_release(&self) -> Option<ReleaseTag> {
+    pub fn newer_release(&self) -> Option<ReleaseTag> {
         let Newest::Known(newest) = &self.newest else {
             return None;
         };
-        let installed = self
-            .loaded
+        is_newer(newest, &self.installed_release()).then(|| newest.clone())
+    }
+
+    /// The recorded release, else this program's.
+    pub fn installed_release(&self) -> ReleaseTag {
+        self.loaded
             .record
             .as_ref()
             .and_then(|r| r.release.clone())
-            .unwrap_or_else(|| self.deps.version.clone());
-        (version(newest) > version(&installed)).then(|| newest.clone())
+            .unwrap_or_else(|| self.deps.version.clone())
     }
 
     fn row(&self, id: AgentId) -> AgentRow {
@@ -269,6 +277,11 @@ fn last_check(rec: &AgentRecord) -> String {
             |s| format!("● {}", text::pending_short(*s)),
         ),
     }
+}
+
+/// Whether release `a` is newer than release `b`.
+pub(crate) fn is_newer(a: &ReleaseTag, b: &ReleaseTag) -> bool {
+    version(a) > version(b)
 }
 
 /// `(major, minor, patch)` of a `vX.Y.Z` tag (anything else sorts first).

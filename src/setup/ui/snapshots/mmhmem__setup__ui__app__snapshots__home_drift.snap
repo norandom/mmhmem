@@ -3,7 +3,7 @@ source: src/setup/ui/app_snapshots.rs
 assertion_line: 93
 expression: "snap(&fx, Newest::Unknown, &[])"
 ---
-"┌ mmhmem setup ────────────────────────────────────────────────────────────────┐"
+"┌ mmhmem v0.4.1 is set up ─────────────────────────────────────────────────────┐"
 "│ Installed: v0.4.1          Newest release: unknown (offline?)                │"
 "│                                                                              │"
 "│ Tool            mmhmem      Features              Last check                 │"

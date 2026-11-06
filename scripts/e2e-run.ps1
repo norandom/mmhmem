@@ -50,7 +50,7 @@ Phases (harness, task 8.1):
 
 Scenarios (task 8.2, scripts/e2e-scenarios.ps1, which describes each):
   pty-selftest cancel-at-review download-404 bad-hash rerun remove
-  menu-install install-old bad-signature update invalid-config
+  menu-install install-old bad-signature update update-command invalid-config
 
 Isolation (see the workflow header): Linux/macOS get a fresh HOME and TMPDIR,
 with XDG_*, CLAUDE_CONFIG_DIR and CODEX_HOME removed so every tool derives its
@@ -67,8 +67,8 @@ Windows PowerShell 5.1 and PowerShell 7 (Windows, Linux, macOS) compatible.
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('keygen','release','seed','serve','install','assert-installed','compare-seed','stop',
-        'pty-selftest','menu-install','rerun','install-old','update','remove','cancel-at-review','download-404',
-        'bad-hash','bad-signature','invalid-config','agent-diagnostics')]
+        'pty-selftest','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
+        'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics')]
     [string]$Phase,
     [string]$WorkDir,
     [string]$Tag,
@@ -627,7 +627,7 @@ function Restore-UserPath {
 # Phases that run the real installer change machine-wide state that a temp
 # home cannot isolate (on Windows the user PATH lives in HKCU). They run only
 # on a disposable CI runner, or when a maintainer explicitly opts in.
-$machinePhases = @('install','menu-install','rerun','install-old','update','remove','cancel-at-review',
+$machinePhases = @('install','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
     'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics')
 if ($machinePhases -contains $Phase -and $env:GITHUB_ACTIONS -ne 'true' -and
     $env:MMHMEM_E2E_ALLOW_LOCAL -ne 'I understand this changes my user PATH') {
@@ -655,6 +655,7 @@ switch ($Phase) {
     'install-old' {Invoke-InstallOldPhase}
     'bad-signature' {Invoke-BadSignaturePhase}
     'update' {Invoke-UpdatePhase}
+    'update-command' {Invoke-UpdateCommandPhase}
     'invalid-config' {Invoke-InvalidConfigPhase}
     'agent-diagnostics' {Invoke-AgentDiagnosticsPhase}
 }

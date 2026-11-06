@@ -519,6 +519,12 @@ jobs:
         run: ./scripts/e2e-run.ps1 -Phase bad-signature
       - name: Update through the menu - new program recorded, choices kept, checks pass
         run: ./scripts/e2e-run.ps1 -Phase update
+      - name: Fresh home for the update command
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Install the previous version again with its one-liner
+        run: ./scripts/e2e-run.ps1 -Phase install-old
+      - name: Update with mmhmem update - new program recorded, choices kept, checks pass
+        run: ./scripts/e2e-run.ps1 -Phase update-command
       - name: Fresh home with an invalid opencode.json
         run: ./scripts/e2e-run.ps1 -Phase seed
       - name: Invalid opencode.json - only OpenCode skipped, the others installed

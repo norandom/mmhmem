@@ -8,10 +8,11 @@ use std::sync::Arc;
 use super::*;
 use crate::setup::agents::Selection;
 use crate::setup::record::{EntryState, PathEntryInfo, Sha256Hex};
-use crate::setup::release::fixtures::{FakeRelease, TRUSTED};
-use crate::setup::release::{LocalRelease, SUMS_NAME, SUMS_SIG_NAME};
+use crate::setup::release::fixtures::TRUSTED;
 use crate::setup::release_keys::test_keys::public_key;
-use crate::setup::ui::fixtures::{Fx, tag, with_clis};
+use crate::setup::ui::fixtures::{
+    Fx, install, installed_old, new_release, recording_exec, release_dir, tag, with_clis,
+};
 use crate::setup::user_path::{FakeUserPath, PathValue, ValueKind};
 
 const NEW_PROGRAM: &[u8] = b"the program the bootstrap downloaded";
@@ -31,15 +32,6 @@ fn bootstrapped(fx: &mut Fx, temp: &Path, path: &Arc<FakeUserPath>) {
     std::fs::write(&program, NEW_PROGRAM).expect("temp program");
     fx.deps.install_from = Some(program);
     fx.deps.paths = path.clone();
-}
-
-fn install(fx: &Fx) -> Flow {
-    let mut flow = fx.flow(Newest::Unknown);
-    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
-    flow.make_plan();
-    assert_eq!(flow.confirm(), Confirmed::Done);
-    assert_eq!(flow.exit_code(), 0, "{:?}", flow.progress());
-    flow
 }
 
 /// Every file under `dir` whose text mentions `needle`.
@@ -205,35 +197,6 @@ fn without_a_path_store_nothing_is_edited_and_the_results_say_how_to_add_it() {
     assert!(!flow.progress().expect("results").next_steps.contains(&hint));
 }
 
-/// A release folder with `fake` as `--release-dir` would hold it.
-fn release_dir(fake: &FakeRelease) -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("release dir");
-    std::fs::write(dir.path().join(fake.archive_name()), &fake.archive).unwrap();
-    std::fs::write(dir.path().join(SUMS_NAME), &fake.sums).unwrap();
-    std::fs::write(dir.path().join(SUMS_SIG_NAME), &fake.sig).unwrap();
-    dir
-}
-
-/// An installed home whose program holds `OLD`, updating from `dir` with
-/// `keys`.
-fn installed_old(dir: &Path, keys: Vec<[u8; 32]>) -> Fx {
-    let mut fx = with_clis();
-    std::fs::create_dir_all(fx.deps.binary.parent().unwrap()).unwrap();
-    std::fs::write(&fx.deps.binary, b"OLD").unwrap();
-    install(&fx);
-    let server = LocalRelease::serve(dir).expect("serve");
-    fx.deps.releases = Releases {
-        keys,
-        ..Releases::local(server)
-    };
-    fx
-}
-
-fn new_release() -> FakeRelease {
-    let target = crate::setup::release::Target::current().expect("platform");
-    FakeRelease::good(target, b"NEW PROGRAM")
-}
-
 #[test]
 fn an_update_replaces_the_program_keeps_the_choices_and_then_is_current() {
     let fake = new_release();
@@ -311,19 +274,8 @@ fn an_update_signed_by_an_unknown_key_shows_why_and_changes_nothing() {
     assert_eq!(std::fs::read(&fx.deps.binary).unwrap(), b"OLD");
 }
 
-/// Records every program start instead of starting it; answers `code`.
-fn recording_exec(code: i32) -> (Exec, Arc<std::sync::Mutex<Vec<Relaunch>>>) {
-    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let log = seen.clone();
-    let exec: Exec = Arc::new(move |r: &Relaunch| {
-        log.lock().unwrap().push(r.clone());
-        Ok(code)
-    });
-    (exec, seen)
-}
-
 #[test]
-fn after_an_update_the_new_program_is_started_and_reviews_with_its_own_files() {
+fn after_an_update_the_new_program_is_started_and_only_checks_when_nothing_changes() {
     let fake = new_release();
     let dir = release_dir(&fake);
     let mut fx = installed_old(dir.path(), vec![public_key(TRUSTED)]);
@@ -331,7 +283,7 @@ fn after_an_update_the_new_program_is_started_and_reviews_with_its_own_files() {
     fx.deps.restart = Restart {
         exec: Some(exec),
         args: vec!["--release-dir".into(), "R".into()],
-        resumed: None,
+        ..Restart::default()
     };
     let mut flow = fx.flow(Newest::Known(fake.tag.clone()));
     assert_eq!(
@@ -350,16 +302,29 @@ fn after_an_update_the_new_program_is_started_and_reviews_with_its_own_files() {
     assert_eq!(*seen.lock().unwrap(), [want]);
     assert_eq!(flow.exit_code(), EXIT_CANCELLED, "nothing confirmed here");
 
-    // The restarted program: straight to the review, never restarting again.
+    // The restarted program: the same choices plan no change, so it skips
+    // the review, only checks, and never restarts again.
     fx.deps.restart = Restart {
-        exec: None,
-        args: Vec::new(),
         resumed: Some(tag("v9.9.9")),
+        ..Restart::default()
     };
-    let app = crate::setup::ui::app::App::new(fx.flow(Newest::Known(tag("v9.9.9"))));
-    assert_eq!(app.screen(), crate::setup::ui::app::Screen::Review);
-    assert_eq!(app.flow().review().intro, [text::updated("v9.9.9")]);
+    let before = fx.digest();
+    let mut app = crate::setup::ui::app::App::new(fx.flow(Newest::Known(tag("v9.9.9"))));
+    assert_eq!(app.screen(), crate::setup::ui::app::Screen::Progress);
+    assert!(app.is_working());
+    let heading = text::update::updated_no_changes("v9.9.9");
+    assert_eq!(app.heading(), Some(heading.as_str()));
+    assert_eq!(
+        fx.digest(),
+        before,
+        "nothing runs before the screen is drawn"
+    );
+    app.work();
+    let progress = app.flow().progress().expect("results");
+    assert_eq!(progress.code, 0, "{:?}", progress.lines);
+    assert!(progress.lines.iter().any(|l| l.starts_with("✔ Codex")));
     assert_eq!(app.flow().restart_now(), None);
+    assert_eq!(std::fs::read(&fx.deps.binary).unwrap(), b"NEW PROGRAM");
 }
 
 #[test]
@@ -380,7 +345,7 @@ fn an_update_to_this_programs_own_release_does_not_restart() {
 }
 
 #[test]
-fn the_numbered_fallback_ends_for_the_restart_and_the_restarted_run_opens_the_review() {
+fn the_numbered_fallback_ends_for_the_restart_and_the_restarted_run_only_checks() {
     let fake = new_release();
     let dir = release_dir(&fake);
     let mut fx = installed_old(dir.path(), vec![public_key(TRUSTED)]);
@@ -397,8 +362,11 @@ fn the_numbered_fallback_ends_for_the_restart_and_the_restarted_run_opens_the_re
     };
     let mut flow = fx.flow(Newest::Unknown);
     let mut out = Vec::new();
-    let code = crate::setup::ui::fallback::run(&mut flow, &mut "q\n".as_bytes(), &mut out);
-    assert_eq!(code, EXIT_CANCELLED);
+    let code = crate::setup::ui::fallback::run(&mut flow, &mut "".as_bytes(), &mut out);
+    assert_eq!(code, 0);
     let out = String::from_utf8(out).unwrap();
-    assert!(out.contains(&text::updated("v9.9.9")), "{out}");
+    let heading = text::update::updated_no_changes("v9.9.9");
+    assert!(out.contains(&heading), "{out}");
+    assert!(!out.contains(text::TITLE_REVIEW), "{out}");
+    assert!(out.contains("✔ Codex"), "{out}");
 }

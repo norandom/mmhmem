@@ -11,6 +11,8 @@ use crate::setup::record::{AgentId, Feature, PendingUserStep};
 pub mod changes;
 #[path = "text_remove.rs"]
 pub mod remove;
+#[path = "text_update.rs"]
+pub mod update;
 
 pub const LEGEND: &str = "↑↓ move · space select · enter continue · esc back · q quit";
 pub const LEGEND_HOME: &str = "↑↓ move · enter continue · q quit";
@@ -34,7 +36,7 @@ pub const ACTION_CHANGE: &str = "Change agents and features";
 pub const ACTION_CHECK: &str = "Check that everything works";
 pub const ACTION_REMOVE: &str = "Remove mmhmem";
 /// Contains `{version}`; see [`update_to`].
-pub const ACTION_UPDATE_TO: &str = "Update to {version}";
+pub const ACTION_UPDATE_TO: &str = "Update to {version} (keeps your choices)";
 
 pub const FEATURE_MEMORY: &str = "Shared memory (required)";
 pub const FEATURE_MEMORY_HELP: &str =
@@ -323,7 +325,7 @@ pub fn menu_stopped(reason: &str) -> String {
     fill(MENU_STOPPED, &[("reason", reason)])
 }
 
-/// "Update to v1.2.3".
+/// "Update to v1.2.3 (keeps your choices)".
 pub fn update_to(version: &str) -> String {
     fill(ACTION_UPDATE_TO, &[("version", version)])
 }

@@ -29,7 +29,10 @@ menu is driven, and its exit code is the program's.
   bad-signature    `mmhmem setup` offered a newer release signed by another
                    key: the update is refused, home unchanged, exit non-zero
   update           `mmhmem setup` updates to this commit's release: new
-                   program hash recorded, choices kept, checks pass again
+                   program hash recorded, choices kept, no Review (nothing
+                   to change), checks pass again
+  update-command   `mmhmem update` (plain questions) on a fresh install of
+                   the previous release: same checks as update
   invalid-config   an invalid opencode.json: OpenCode skipped with a plain
                    message and left byte-identical, the others installed
 #>
@@ -350,17 +353,39 @@ function Invoke-BadSignaturePhase {
 }
 function Invoke-UpdatePhase {
     $current=Get-ReleaseInfo
+    # Ask only if needed (Requirement 7.5): the previous release is the same
+    # commit with an older version number, so the recorded choices plan no
+    # change with the new program's files, and the restarted program skips
+    # the Review and goes straight to the check results. A Review here means
+    # the update changed tool files it should not have; the expect below then
+    # times out and the screens are printed. Each expect names only the
+    # screen it waits for (run 42007203740, macOS arm64): the results
+    # heading of the restarted program, then the results legend.
+    Invoke-UpdateMenu 'update' $current.tag $current.tag @(
+        'timeout 600',"expect mmhmem was updated to $(ConvertTo-TagPattern $current.tag)\. Your tools needed no changes",
+        'timeout 900','expect enter or q close','send enter','timeout 60','exit 0')
+    Assert-Updated 'update'
+}
+# `mmhmem update --release-dir <folder>` in the terminal, against the
+# previous release installed by install-old: plain questions, no menu.
+function Invoke-UpdateCommandPhase {
+    $current=Get-ReleaseInfo
+    $old=Get-ReleaseInfo 'old'
+    $paths=Get-InstalledPaths
+    $null=Invoke-Pty 'update-command' $paths.Program @('update','--release-dir',(Join-Path $script:Site $current.tag)) @(
+        'timeout 240',"expect mmhmem $(ConvertTo-TagPattern $old.tag) is installed\. $(ConvertTo-TagPattern $current.tag) is available\.",
+        'expect Update now\? \[Y/n\]','send y enter',
+        'timeout 600',"expect Downloading $(ConvertTo-TagPattern $current.tag) \.\.\. signature and checksum OK\.",
+        "expect Updated to $(ConvertTo-TagPattern $current.tag)\. Checking your tools",
+        'timeout 900','exit 0')
+    Assert-Updated 'update-command'
+}
+# After `update` or `update-command`: the new program and its hash recorded,
+# the choices kept, every agent checked again, the home as installed.
+function Assert-Updated([string]$Name) {
+    $current=Get-ReleaseInfo
     $paths=Get-InstalledPaths
     $oldRecord=Read-Json (Join-Path $WorkDir 'old-record.json')
-    # Each expect names only the screen it waits for: the home screen can say
-    # "Everything is current" too, so an Enter sent on that text came before
-    # the Review existed (run 42007203740, macOS arm64). The restarted program
-    # drops keys typed before its Review is drawn, so wait for the Review's
-    # own lines: the update line and the Review legend.
-    Invoke-UpdateMenu 'update' $current.tag $current.tag @(
-        'timeout 600',"expect The mmhmem program was updated to $(ConvertTo-TagPattern $current.tag)",
-        'expect Review: this is what will change','expect enter make these changes','send enter',
-        'timeout 900','expect enter or q close','send enter','timeout 60','exit 0')
     $failures=New-Object Collections.Generic.List[string]
     $record=Read-Json $paths.Record
     $hash=(Get-FileHash -LiteralPath $paths.Program -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -377,9 +402,9 @@ function Invoke-UpdatePhase {
     }
     $seeded=Read-HomeState 'seeded'
     $expected=@($script:ManagedSeedFiles | Where-Object {$_ -cne '.claude.json'})+@((Get-MmhmemPatterns)+'HKCU:Path')
-    foreach ($f in (Compare-HomeState $seeded (Get-HomeState 'after-update') $expected -ClaudeMode installed -HooksInstalled)) {$failures.Add($f)}
+    foreach ($f in (Compare-HomeState $seeded (Get-HomeState "after-$Name") $expected -ClaudeMode installed -HooksInstalled)) {$failures.Add($f)}
     foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
-    Assert-NoFailures 'update' $failures
+    Assert-NoFailures $Name $failures
 }
 # Everything mmhmem may add to a home when it installs: the program's
 # folder (Windows may briefly keep the replaced program there after an

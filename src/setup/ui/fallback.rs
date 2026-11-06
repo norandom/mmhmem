@@ -10,7 +10,9 @@
 //! Progress. `q`, `n` or the end of the input before the review is
 //! confirmed ends the run with [`EXIT_CANCELLED`] and nothing changed.
 //! After an update the session ends so the new program can start; the
-//! restarted program opens on the review. Input and output are injected so
+//! restarted program opens on the review when the recorded choices change
+//! files, and otherwise only checks the tools and shows the results
+//! (Requirement 7.5). Input and output are injected so
 //! tests drive whole sessions.
 //!
 //! The run without any terminal is in `fallback_default.rs`.
@@ -19,7 +21,7 @@ use std::io::{BufRead, Write};
 
 use super::flow::{
     AgentState, Choice, Confirmed, EXIT_CANCELLED, FeatureRow, Flow, HomeAction, HomeView, Next,
-    ReviewView,
+    Resumed, ReviewView,
 };
 use super::text;
 
@@ -123,10 +125,15 @@ pub fn run(flow: &mut Flow, input: &mut dyn BufRead, out: &mut dyn Write) -> i32
 }
 
 fn session(flow: &mut Flow, c: &mut Console) -> i32 {
-    let (mut screen, mut back) = if flow.resume() {
-        (Screen::Review, vec![Screen::Home])
-    } else {
-        (Screen::Home, Vec::new())
+    let (mut screen, mut back) = match flow.resume() {
+        Some(Resumed::Review(_)) => (Screen::Review, vec![Screen::Home]),
+        Some(Resumed::Check(tag)) => {
+            // The results below start with their own "Checking …" line.
+            c.say(&text::update::updated_no_changes(tag.as_str()));
+            flow.apply_update();
+            (Screen::Progress, Vec::new())
+        }
+        None => (Screen::Home, Vec::new()),
     };
     loop {
         let go = match screen {
@@ -172,7 +179,7 @@ fn agent_line(row: &super::flow::AgentRow) -> String {
 
 /// The state part of the home screen, also printed without a terminal.
 pub(super) fn print_state(c: &mut Console, view: &HomeView) {
-    c.say(text::TITLE_HOME);
+    c.say(&view.title);
     c.say(text::INTRO);
     c.say("");
     c.say(&format!("{}    {}", view.installed, view.newest));

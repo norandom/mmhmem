@@ -39,6 +39,8 @@ fn main() -> ExitCode {
         // Read-routing pre-tool hook; always exits 0 (read-routing-hooks Req 3).
         Some("hook") => mmhmem::cli::run_hook(std::env::args().nth(2).as_deref()),
         Some("setup") => run_setup(),
+        // Update mode of the installer (reliable-installers Req 7.5).
+        Some("update") => run_update(),
         Some(other) => unknown_arg(other),
         None => run_daemon(),
     }
@@ -52,6 +54,19 @@ fn run_setup() -> ExitCode {
         Ok(args) => ExitCode::from(mmhmem::setup::ui::run(args) as u8),
         Err(_) => {
             eprintln!("{}", mmhmem::setup::ui::text::BAD_ARGUMENT);
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// `update`: update mmhmem, keeping the user's choices. No user-facing
+/// flags; `--release-dir <dir>` and `--restarted <tag>` are internal.
+fn run_update() -> ExitCode {
+    let rest: Vec<String> = std::env::args().skip(2).collect();
+    match mmhmem::setup::ui::update::UpdateArgs::parse(&rest) {
+        Ok(args) => ExitCode::from(mmhmem::setup::ui::update::run(args) as u8),
+        Err(_) => {
+            eprintln!("{}", mmhmem::setup::ui::text::update::BAD_ARGUMENT);
             ExitCode::from(2)
         }
     }

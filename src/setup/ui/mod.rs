@@ -13,6 +13,10 @@
 //!
 //! **After an update** the new program is started in the same terminal and
 //! its exit code is returned (`flow_update.rs`).
+//!
+//! **Update mode (Requirement 7.5).** `mmhmem update` and the install
+//! command run again in a terminal on an installed system that it brings a
+//! newer release to ask plain questions instead (`update.rs`).
 
 pub mod app;
 pub mod fallback;
@@ -22,6 +26,7 @@ pub mod flow;
 pub mod text;
 #[cfg(test)]
 mod text_tests;
+pub mod update;
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -47,8 +52,9 @@ pub struct SetupArgs {
     /// release checks on a loopback port ([`LocalRelease`]).
     pub release_dir: Option<PathBuf>,
     /// This run was started by the previous program right after it updated
-    /// itself to this release (`--restarted <tag>`): go straight to the
-    /// review, and never restart again.
+    /// itself to this release (`--restarted <tag>`): plan the recorded
+    /// choices, review only if they change anything, and never restart
+    /// again.
     pub restarted: Option<String>,
 }
 
@@ -120,18 +126,34 @@ pub fn run(args: SetupArgs) -> i32 {
     if let Some(code) = refuse_without_terminal(mode, &args, &mut std::io::stdout().lock()) {
         return code;
     }
-    if let Some(dir) = args.release_dir.as_ref().filter(|d| !d.is_dir()) {
-        eprintln!("The release folder {} does not exist.", dir.display());
-        return 1;
+    if let Some(code) = missing_release_dir(&args) {
+        return code;
     }
     let Some(deps) = process_deps(&args) else {
         eprintln!("{}", text::NO_HOME);
         return 1;
     };
-    match mode {
-        Mode::Menu => run_menu(deps),
-        mode => run_fallback(Flow::load(deps), mode),
+    let mut flow = Flow::load(deps);
+    // The install command on an installed system, in a terminal: update
+    // mode when it brought a newer release (without a terminal it keeps
+    // its standard run).
+    if mode != Mode::NoTerminal && args.bootstrap.is_some() {
+        let (mut input, mut out) = (std::io::stdin().lock(), std::io::stdout().lock());
+        if let Some(code) = update::bootstrap(&mut flow, &mut input, &mut out) {
+            return code;
+        }
     }
+    match mode {
+        Mode::Menu => run_menu(flow),
+        mode => run_fallback(flow, mode),
+    }
+}
+
+/// A `--release-dir` that is not a folder: says so, exit code 1.
+fn missing_release_dir(args: &SetupArgs) -> Option<i32> {
+    let dir = args.release_dir.as_ref().filter(|d| !d.is_dir())?;
+    eprintln!("The release folder {} does not exist.", dir.display());
+    Some(1)
 }
 
 /// After an update: the new program's exit code (`None`: no restart due).
@@ -147,9 +169,8 @@ fn restarted(flow: &Flow) -> Option<i32> {
 
 /// The full-screen menu; falls back to the numbered prompts when the
 /// terminal cannot enter raw mode or the alternate screen.
-fn run_menu(deps: Deps) -> i32 {
-    let source = deps.releases.source.clone();
-    let flow = Flow::load(deps);
+fn run_menu(flow: Flow) -> i32 {
+    let source = flow.release_source();
     match app::run_terminal(flow, Box::new(move || newest_release(&source))) {
         Ok((code, flow)) => {
             if let Some(code) = restarted(&flow) {
@@ -254,6 +275,7 @@ fn restart_of(args: &SetupArgs) -> Restart {
             .then(|| Arc::new(flow::spawn) as flow::Exec),
         args: again,
         resumed,
+        ..Restart::default()
     }
 }
 

@@ -11,13 +11,17 @@ use ratatui::backend::TestBackend;
 use serde_json::{Value, json};
 
 use super::app::{App, Key};
-use super::flow::{Deps, Flow, Memories, Newest, Releases, Restart};
+use super::flow::{
+    Confirmed, Deps, Exec, Flow, HomeAction, Memories, Newest, Next, Relaunch, Releases, Restart,
+};
 use crate::setup::agents::doubles::{Reply, TestHome};
 use crate::setup::agents::doubles_cli::{self, CLAUDE_MCP_GET, CODEX_MCP_LIST_JSON};
 use crate::setup::agents::{AgentId, AgentRecord, Feature, PendingUserStep};
 use crate::setup::record::{
     CheckResult, InstallRecord, LastCheck, Os, RecordStore, ReleaseTag, Sha256Hex, UtcTimestamp,
 };
+use crate::setup::release::fixtures::FakeRelease;
+use crate::setup::release::{LocalRelease, SUMS_NAME, SUMS_SIG_NAME};
 use crate::setup::user_path::NoUserPath;
 
 /// The program path in the captured CLI fixtures.
@@ -187,4 +191,58 @@ pub(crate) fn render(app: &App) -> String {
 /// Feeds `keys` to `app`.
 pub(crate) fn press(app: &mut App, keys: &[Key]) {
     let _ = app.keys(keys);
+}
+
+/// Installs the default choices on `fx` (asserting it worked).
+pub(crate) fn install(fx: &Fx) -> Flow {
+    let mut flow = fx.flow(Newest::Unknown);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    flow.make_plan();
+    assert_eq!(flow.confirm(), Confirmed::Done);
+    assert_eq!(flow.exit_code(), 0, "{:?}", flow.progress());
+    flow
+}
+
+/// A release folder with `fake` as `--release-dir` would hold it.
+pub(crate) fn release_dir(fake: &FakeRelease) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("release dir");
+    std::fs::write(dir.path().join(fake.archive_name()), &fake.archive).unwrap();
+    std::fs::write(dir.path().join(SUMS_NAME), &fake.sums).unwrap();
+    std::fs::write(dir.path().join(SUMS_SIG_NAME), &fake.sig).unwrap();
+    dir
+}
+
+/// An installed home whose program holds `OLD`, updating from `dir` with
+/// `keys`.
+pub(crate) fn installed_old(dir: &Path, keys: Vec<[u8; 32]>) -> Fx {
+    let mut fx = with_clis();
+    std::fs::create_dir_all(fx.deps.binary.parent().unwrap()).unwrap();
+    std::fs::write(&fx.deps.binary, b"OLD").unwrap();
+    install(&fx);
+    let server = LocalRelease::serve(dir).expect("serve");
+    fx.deps.releases = Releases {
+        keys,
+        ..Releases::local(server)
+    };
+    fx
+}
+
+/// Release v9.9.9 of this platform, whose program holds `NEW PROGRAM`.
+pub(crate) fn new_release() -> FakeRelease {
+    let target = crate::setup::release::Target::current().expect("platform");
+    FakeRelease::good(target, b"NEW PROGRAM")
+}
+
+/// The program starts an [`Exec`] saw.
+pub(crate) type Starts = Arc<std::sync::Mutex<Vec<Relaunch>>>;
+
+/// Records every program start instead of starting it; answers `code`.
+pub(crate) fn recording_exec(code: i32) -> (Exec, Starts) {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let exec: Exec = Arc::new(move |r: &Relaunch| {
+        log.lock().unwrap().push(r.clone());
+        Ok(code)
+    });
+    (exec, seen)
 }

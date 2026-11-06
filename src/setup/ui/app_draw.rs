@@ -99,14 +99,15 @@ impl App {
         frame.render_widget(Paragraph::new(self.legend()).style(dim()), legend);
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> String {
         match self.screen {
-            Screen::Home => text::TITLE_HOME,
+            Screen::Home => return self.flow.home().title,
             Screen::Agents => text::TITLE_AGENTS,
             Screen::Features => text::TITLE_FEATURES,
             Screen::Review => text::TITLE_REVIEW,
             Screen::Progress => text::TITLE_PROGRESS,
         }
+        .to_owned()
     }
 
     fn legend(&self) -> &'static str {
@@ -116,7 +117,7 @@ impl App {
             Screen::Review if self.diff.is_some() => text::LEGEND_DIFF,
             Screen::Review if self.flow.review().memories.is_some() => text::remove::LEGEND,
             Screen::Review => text::LEGEND_REVIEW,
-            Screen::Progress if self.working => text::LEGEND_WORKING,
+            Screen::Progress if self.working.is_some() => text::LEGEND_WORKING,
             Screen::Progress => text::LEGEND_DONE,
         }
     }
@@ -264,7 +265,14 @@ impl App {
 
     fn progress_lines(&self, width: usize) -> (Vec<Line<'static>>, Focus) {
         let mut lines = Vec::new();
-        if self.working {
+        if let Some(heading) = &self.heading {
+            push_wrapped(&mut lines, heading, width, bold());
+            // The check results start with an empty line of their own.
+            if self.working.is_some() {
+                lines.push(Line::raw(""));
+            }
+        }
+        if self.working.is_some() {
             lines.push(Line::raw(text::CHECKING));
         } else if let Some(progress) = self.flow.progress() {
             for line in progress.all_lines() {

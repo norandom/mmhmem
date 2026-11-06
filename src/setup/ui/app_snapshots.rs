@@ -140,6 +140,19 @@ fn review_agent_problem() {
     insta::assert_snapshot!(snap(&fx, Newest::Unknown, &[Enter, Enter, Enter]));
 }
 
+/// The program started after an update, when the recorded choices change
+/// no file: straight to the results of the check (Requirement 7.5).
+#[test]
+fn progress_after_an_update_without_changes() {
+    let mut fx = with_clis();
+    press(&mut fx.app(Newest::Unknown), &[Enter, Enter, Enter, Enter]);
+    fx.deps.restart.resumed = Some(tag("v0.5.0"));
+    let mut app = fx.app(Newest::Unknown);
+    assert_eq!(app.screen(), Screen::Progress);
+    app.work();
+    insta::assert_snapshot!(render(&app));
+}
+
 #[test]
 fn progress_done() {
     let fx = with_clis();

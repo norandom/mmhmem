@@ -175,7 +175,7 @@ released.
   - _Depends: 6.1_
   - _Requirements: 4.8, 4.9_
 
-- [x] 7. Update and removal
+- [ ] 7. Update and removal
 - [x] 7.1 Update flow
   - Let `self_update` replace the running binary (Windows file-in-use case included), record its hash and the `PATH` entry (`winreg` + `WM_SETTINGCHANGE` on Windows), re-plan all agents with the recorded selection, review, apply and check. An up-to-date install yields "Everything is current".
   - Done when tests update a temp-home install from a previous-release fixture to the current one, keep the user's choices, and show a second run reports no changes with byte-identical files.
@@ -187,6 +187,13 @@ released.
   - Done when tests show unrelated settings, including later user edits to shared files, are byte-identical after removal and the store survives by default.
   - _Depends: 6.2_
   - _Requirements: 7.3, 7.4_
+
+- [ ] 7.3 Update mode (owner decision 2026-11-06)
+  - Add `mmhmem update` (plain questions, internal `--release-dir` and `--restarted` only), the "mmhmem vX is set up" home title with "Update to vN (keeps your choices)" first and selected, update mode for the install command run again in a terminal with a newer release, and ask only if needed after the update: an empty replan only runs the check and shows the results; otherwise the changes are listed and confirmed once.
+  - Done when tests cover the argument parsing, no record, no terminal, an unknown newest release, up to date, a declined update, an accepted update with and without changes, the install command with a newer and with the same release, and the menu's restarted run skipping the Review; and the installer e2e `update` and `update-command` scenarios pass on GitHub.
+  - Status 2026-11-06: implemented with unit, flow, menu and CLI tests (`src/setup/ui/update.rs`, `update_tests.rs`); the `update` e2e scenario now expects the results instead of the Review, and the new `update-command` scenario runs `mmhmem update --release-dir` in the pseudo-terminal. Open until the installer e2e workflow runs green on GitHub (the scenarios never run locally).
+  - _Depends: 7.1_
+  - _Requirements: 7.5_
 
 - [ ] 8. Gate releases on real installs
 - [x] 8.1 End-to-end harness

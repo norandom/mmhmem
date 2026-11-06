@@ -72,7 +72,7 @@ pub use home::{AgentRow, AgentState, HomeAction, HomeView};
 pub use remove::Memories;
 pub use review::{FileGroup, MemoriesChoice, ReviewItem, ReviewView};
 pub use select::{Choice, FeatureRow};
-pub use update::{Exec, Relaunch, Releases, Restart, spawn};
+pub use update::{Command, Exec, Relaunch, Releases, Restart, Resumed, spawn};
 
 /// The exit code when the user cancels or quits before confirming.
 pub const EXIT_CANCELLED: i32 = 2;
@@ -148,8 +148,8 @@ pub enum Next {
     /// Results are ready.
     Progress,
     /// The program was updated: leave the screens and start the new
-    /// program ([`Flow::relaunch`]), which reviews the agents with its own
-    /// files.
+    /// program ([`Flow::relaunch`]), which plans the agents again with its
+    /// own files and asks only if that changes anything ([`Flow::resume`]).
     Restart,
     /// Stay on the home screen and show this line.
     Note(&'static str),

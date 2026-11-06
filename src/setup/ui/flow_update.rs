@@ -21,8 +21,12 @@
 //! new program at its permanent place as `setup <same internal arguments>
 //! --restarted <tag>`, with the same terminal (stdin, stdout and stderr are
 //! inherited), and exits with its exit code ([`Flow::restart_now`]). The
-//! new program goes straight to the review of the recorded choices with
-//! its own files ([`Flow::resume`]).
+//! new program plans the recorded choices with its own files
+//! ([`Flow::resume`]) and asks only if needed (owner decision 2026-11-06,
+//! Requirement 7.5): when that plan changes nothing it only checks the
+//! tools ([`Resumed::Check`], [`Flow::apply_update`]); otherwise it shows
+//! the review ([`Resumed::Review`]). `mmhmem update` restarts as
+//! `update …` instead of `setup …` ([`Command`]).
 //!
 //! Loop guard: a run started with `--restarted` never restarts again (its
 //! [`Restart::exec`] is `None`), and no restart happens when the release
@@ -38,7 +42,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{Flow, Next, text};
+use super::home::is_newer;
+use super::{Confirmed, Flow, Next, ReviewView, text};
 use crate::setup::record::{BinaryInfo, InstallRecord, ReleaseTag, Target};
 use crate::setup::release::{self, LocalRelease, ReleaseSource};
 use crate::setup::release_keys::trusted_release_keys;
@@ -81,11 +86,44 @@ impl Releases {
 /// its exit code.
 pub type Exec = Arc<dyn Fn(&Relaunch) -> std::io::Result<i32> + Send + Sync>;
 
+/// The command the new program is started with after an update.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Command {
+    /// `mmhmem setup` (the menu).
+    #[default]
+    Setup,
+    /// `mmhmem update` (plain questions, `ui/update.rs`).
+    Update,
+}
+
+impl Command {
+    /// The command's name on the command line.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Setup => "setup",
+            Self::Update => "update",
+        }
+    }
+}
+
+/// What the run started after an update does first ([`Flow::resume`]);
+/// both hold the release updated to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resumed {
+    /// The recorded choices change files: show the review.
+    Review(ReleaseTag),
+    /// Nothing needs to change: only check the tools
+    /// ([`Flow::apply_update`]).
+    Check(ReleaseTag),
+}
+
 /// How the new program is started after an update.
 #[derive(Clone, Default)]
 pub struct Restart {
     /// Starts it (`None`: never restart; the run was restarted already).
     pub exec: Option<Exec>,
+    /// `setup` or `update`.
+    pub command: Command,
     /// The internal arguments to pass again (`--release-dir <dir>`).
     pub args: Vec<String>,
     /// In the restarted run: the release the previous run updated to.
@@ -97,7 +135,8 @@ pub struct Restart {
 pub struct Relaunch {
     /// The program at its permanent place.
     pub program: PathBuf,
-    /// `setup …` with the internal arguments and `--restarted <tag>`.
+    /// `setup …` or `update …` with the internal arguments and
+    /// `--restarted <tag>`.
     pub args: Vec<String>,
 }
 
@@ -115,7 +154,7 @@ impl Flow {
     /// The new program to start, when an update asked for it.
     pub fn relaunch(&self) -> Option<Relaunch> {
         let tag = self.relaunch.as_ref()?;
-        let mut args = vec!["setup".to_owned()];
+        let mut args = vec![self.deps.restart.command.name().to_owned()];
         args.extend(self.deps.restart.args.iter().cloned());
         args.extend(["--restarted".to_owned(), tag.as_str().to_owned()]);
         Some(Relaunch {
@@ -134,24 +173,94 @@ impl Flow {
     }
 
     /// In the run started after an update: plans the recorded choices with
-    /// this program's files for the review. `false` (and nothing done) in
-    /// any other run.
-    pub fn resume(&mut self) -> bool {
-        let Some(tag) = self.deps.restart.resumed.take() else {
-            return false;
-        };
+    /// this program's files. [`Resumed::Review`] when that changes
+    /// anything (the review intro says the program was updated),
+    /// [`Resumed::Check`] when not; `None` (and nothing done) in any other
+    /// run.
+    pub fn resume(&mut self) -> Option<Resumed> {
+        let tag = self.deps.restart.resumed.take()?;
+        self.plan_recorded();
+        if self.planned.as_ref().is_some_and(|p| p.is_empty()) {
+            return Some(Resumed::Check(tag));
+        }
         self.intro = Some(text::updated(tag.as_str()));
+        Some(Resumed::Review(tag))
+    }
+
+    /// Plans the recorded choices (after an update, or with the program the
+    /// install script brought). Reads only.
+    pub fn plan_recorded(&mut self) {
         self.selection = self.recorded_selection();
         self.make_plan();
-        true
+    }
+
+    /// The review of an update without the program copy the user already
+    /// agreed to: empty (no change, no skipped tool) when nothing needs to
+    /// be asked.
+    pub fn update_review(&self) -> ReviewView {
+        let mut view = self.review();
+        let program: Vec<usize> = self.planned.as_ref().map_or_else(Vec::new, |p| {
+            p.plan
+                .changes
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| matches!(c.target, Target::Binary { .. }))
+                .map(|(i, _)| i)
+                .collect()
+        });
+        for group in &mut view.groups {
+            group.items.retain(|i| !program.contains(&i.index));
+        }
+        view.groups.retain(|g| !g.items.is_empty());
+        view
+    }
+
+    /// Finishes an update: with nothing planned only the check runs (and
+    /// is stored); otherwise the plan is applied and checked
+    /// ([`Flow::confirm`]). The results are in [`Flow::progress`].
+    pub fn apply_update(&mut self) {
+        if self.planned.as_ref().is_none_or(|p| p.is_empty()) {
+            self.planned = None;
+            self.run_check();
+            return;
+        }
+        while self.confirm() == Confirmed::Review {}
+    }
+
+    /// The install script brought a newer release than the recorded one:
+    /// `(recorded, brought)`. `None` in every other run.
+    pub fn bootstrap_offer(&self) -> Option<(ReleaseTag, ReleaseTag)> {
+        self.deps.install_from.as_ref()?;
+        if !self.is_installed() {
+            return None;
+        }
+        let recorded = self.loaded.record.as_ref()?.release.clone()?;
+        is_newer(&self.deps.version, &recorded).then(|| (recorded, self.deps.version.clone()))
+    }
+
+    /// Why no update can be downloaded at all (no trusted release key, no
+    /// release for this platform); `None` when it may be tried.
+    pub fn update_refusal(&self) -> Option<&'static str> {
+        if self.deps.releases.keys.is_empty() {
+            Some(text::UPDATE_NO_KEY)
+        } else if self.deps.releases.target.is_none() {
+            Some(text::UPDATE_NO_PLATFORM)
+        } else {
+            None
+        }
+    }
+
+    /// The last note (why an update failed).
+    pub fn last_note(&self) -> Option<&str> {
+        self.loaded.notes.last().map(String::as_str)
     }
 
     /// Updates the program to `tag`, then plans the recorded choices again.
     pub(super) fn update_to(&mut self, tag: &ReleaseTag) -> Next {
-        let releases = self.deps.releases.clone();
-        if releases.keys.is_empty() {
-            return Next::Note(text::UPDATE_NO_KEY);
+        if let Some(note) = self.update_refusal() {
+            return Next::Note(note);
         }
+        let releases = self.deps.releases.clone();
         let Some(target) = releases.target else {
             return Next::Note(text::UPDATE_NO_PLATFORM);
         };
