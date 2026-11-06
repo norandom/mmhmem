@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tomllib
 
 import yaml
 
@@ -35,6 +36,25 @@ def snapshot():
 
 
 config = json.loads((ROOT / ".marketplace/skills.json").read_text())
+
+# The plugin version follows the crate version, so agents see a new plugin
+# with every release (the catalogs track main). The version bump commit also
+# regenerates the plugin manifests (docs/development.md "Releases").
+CARGO_VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+REGENERATE = (
+    f'Set "version" in .marketplace/skills.json to {CARGO_VERSION} (the Cargo.toml version), '
+    "then regenerate with .\\build-marketplace.ps1 -ManifestsOnly (Windows) or "
+    "bash build-marketplace.sh --manifests-only, and commit the result with the version bump."
+)
+
+
+def check_version(where, version):
+    if version != CARGO_VERSION:
+        sys.exit(f"FAIL: {where} has plugin version {version!r}, Cargo.toml has "
+                 f"{CARGO_VERSION!r}. {REGENERATE}")
+
+
+check_version(".marketplace/skills.json", config["version"])
 for plugin in config["plugins"]:
     name = plugin["name"]
     skill = ROOT / "deploy/skills" / name / "SKILL.md"
@@ -53,6 +73,7 @@ for plugin in config["plugins"]:
     assert (package / "skills" / name / "SKILL.md").read_bytes() == skill.read_bytes()
     for manifest in ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".gemini-plugin/plugin.json"]:
         data = json.loads((package / manifest).read_text())
+        check_version(f"plugins/{name}/{manifest}", data["version"])
         assert data["name"] == name and data["version"] == config["version"]
         assert data["repository"] == "https://github.com/norandom/mmhmem"
 

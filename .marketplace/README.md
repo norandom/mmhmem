@@ -19,6 +19,9 @@ bash build-marketplace.sh --ref main
 
 Bash builds require jq; PowerShell builds require PowerShell 5.1+. Commit the
 generated packages and catalogs with source changes. Do not hand-edit them.
+The plugin version equals the `Cargo.toml` package version and is bumped in
+the release's version commit (`scripts/check-marketplace.py` fails otherwise;
+see docs/development.md "Releases").
 Plugin versions live outside SKILL.md so its frontmatter stays compatible
 with the [Agent Skills specification](https://agentskills.io/specification).
 The playbook retains its 200-token estimated budget (words times 1.3).

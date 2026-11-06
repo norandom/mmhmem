@@ -88,6 +88,21 @@ It is evidence, not a gate: no branch protection rule and no release step
 waits for it, and it needs no secret. A red run means the published release
 or the one-liners need a look; it never blocks a merge or a release.
 
+## Releases
+
+The version bump commit (`chore(release): version X.Y.Z`) changes
+`Cargo.toml` and `Cargo.lock` and also regenerates the plugin manifests, so
+the `unified-memory` plugin carries the same version as the program and
+agents notice a new plugin with every release (the catalogs track `main`).
+Set `"version"` in `.marketplace/skills.json` to the new version, then run
+`.\build-marketplace.ps1 -ManifestsOnly` (Windows) or
+`bash build-marketplace.sh --manifests-only`, and commit the four
+`plugins/unified-memory/**/plugin.json` files with the bump.
+`scripts/check-marketplace.py` enforces it: it fails when
+`.marketplace/skills.json` or any plugin manifest names a version other than
+the `[package] version` in `Cargo.toml`, and says how to regenerate. It runs
+in the pre-commit hook and in CI (the Dagger `distribution` function).
+
 ## Default Linux release build
 
 The canonical Dagger pipeline defaults to a static

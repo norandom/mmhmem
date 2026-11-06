@@ -1,6 +1,6 @@
 {
   "name": "unified-memory",
-  "version": "0.1.0",
+  "version": "0.5.1",
   "description": "Read files, optimize tokens, and resume/checkpoint work with mmhmem.",
   "author": {
     "name": "norandom",
