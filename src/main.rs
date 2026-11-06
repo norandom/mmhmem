@@ -31,9 +31,7 @@ fn main() -> ExitCode {
         // Local mode: the harness-spawned stdio child (Req 1.2, 2.1).
         Some("stdio") => mmhmem::mcp::stdio::run_stdio(),
         // Local token-savings report (Req 1.3, 8.1-8.6).
-        Some("stats") => {
-            mmhmem::cli::run_stats(std::env::args().nth(2).as_deref() == Some("--json"))
-        }
+        Some("stats") => run_stats(),
         // Stale-cache pruning over the local store (corpus-warmup-prune Req 3).
         Some("prune") => {
             mmhmem::cli::run_prune(std::env::args().nth(2).as_deref() == Some("--dry-run"))
@@ -54,6 +52,20 @@ fn run_setup() -> ExitCode {
         Ok(args) => ExitCode::from(mmhmem::setup::ui::run(args) as u8),
         Err(_) => {
             eprintln!("{}", mmhmem::setup::ui::text::BAD_ARGUMENT);
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// `stats [--all] [--json]`, flags in any order; an unknown argument prints
+/// the usage line on stderr and exits 2.
+fn run_stats() -> ExitCode {
+    let rest: Vec<String> = std::env::args().skip(2).collect();
+    match mmhmem::cli::StatsArgs::parse(&rest) {
+        Ok(args) => mmhmem::cli::run_stats(args),
+        Err(arg) => {
+            eprintln!("unknown argument: {arg}");
+            eprintln!("{}", mmhmem::cli::STATS_USAGE);
             ExitCode::from(2)
         }
     }

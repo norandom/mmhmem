@@ -1,6 +1,6 @@
 //! Unit tests for `stats_activity.rs` (read-routing-hooks Req 1.1-1.5).
 use super::*;
-use crate::cli::stats::{aggregate_with_activity, render_json, render_table};
+use crate::cli::stats::{TableOptions, aggregate_with_activity, render_json, render_table};
 use crate::storage::db::Db;
 use std::fs;
 use std::path::PathBuf;
@@ -251,24 +251,32 @@ fn json_exposes_stable_activity_fields_and_keeps_savings_fields() {
 
 #[test]
 fn table_keeps_savings_columns_and_adds_activity_columns() {
-    let table = render_table(&sample_rows());
-    let header = table.lines().next().unwrap();
+    let opts = TableOptions {
+        width: None,
+        today: time::Date::from_calendar_date(2025, time::Month::January, 2).unwrap(),
+        all: false,
+    };
+    let table = render_table(&sample_rows(), &opts);
+    let header = table.lines().nth(2).unwrap();
     for label in [
-        "AVOIDED (EST.)",
-        "FRONTIER PROMPT (CLIENT-REPORTED)",
-        "FRONTIER COMPLETION (CLIENT-REPORTED)",
-        "WORKER PROMPT",
-        "WORKER COMPLETION",
-        "SUMMARY READS",
-        "CACHE HITS",
-        "SLICE READS",
-        "DIRECT READS",
-        "HOOK REDIRECTS",
+        "avoided (est.)",
+        "frontier in (client)",
+        "frontier out (client)",
+        "worker in",
+        "worker out",
+        "summaries",
+        "cache hits",
+        "slices",
+        "direct",
+        "redirects",
     ] {
         assert!(header.contains(label), "missing {label}: {header}");
     }
-    let total = table.lines().last().unwrap();
-    assert!(total.starts_with("TOTAL"), "{total}");
-    let cells: Vec<&str> = total.split_whitespace().collect();
+    let total = table.lines().find(|l| l.starts_with("│ total")).unwrap();
+    let cells: Vec<&str> = total
+        .split(['│', '┆'])
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .collect();
     assert_eq!(&cells[cells.len() - 5..], ["11", "22", "33", "44", "55"]);
 }

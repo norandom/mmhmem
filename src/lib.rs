@@ -34,7 +34,7 @@ pub fn help_text() -> String {
          \x20   {NAME} [FLAG]\n\
          \x20   {NAME} serve\n\
          \x20   {NAME} stdio\n\
-         \x20   {NAME} stats [--json]\n\
+         \x20   {NAME} stats [--all] [--json]\n\
          \x20   {NAME} prune [--dry-run]\n\
          \x20   {NAME} setup\n\
          \x20   {NAME} hook <harness>\n\
@@ -49,9 +49,11 @@ pub fn help_text() -> String {
          \x20   stdio            Local mode: serve MCP over stdin/stdout for\n\
          \x20                    the spawning harness, using per-user paths and\n\
          \x20                    no bearer token (AGENT_MEM_* optional)\n\
-         \x20   stats [--json]    Print token-savings statistics from the local\n\
-         \x20                    per-user store: a human table by day, project,\n\
-         \x20                    and harness (or JSON with --json)\n\
+         \x20   stats [--all] [--json]  Print token-savings statistics from the\n\
+         \x20                    local per-user store: a human table by day,\n\
+         \x20                    project, and harness of the last 7 days that\n\
+         \x20                    fits the terminal (--all: every row and column;\n\
+         \x20                    --json: all data as JSON)\n\
          \x20   prune [--dry-run]  Remove stale cache rows (missing file or changed\n\
          \x20                    content) from the local per-user store; --dry-run\n\
          \x20                    previews the grouped counts\n\

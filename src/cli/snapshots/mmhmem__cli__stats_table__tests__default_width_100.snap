@@ -1,0 +1,16 @@
+---
+source: src/cli/stats_table_tests.rs
+expression: table
+---
+shape: (3, 12)
+┌────────────┬──────────────────────────┬─────────────┬────────────────┬───┬───────────┐
+│ day        ┆ project                  ┆ harness     ┆ avoided (est.) ┆ … ┆ worker in │
+╞════════════╪══════════════════════════╪═════════════╪════════════════╪═══╪═══════════╡
+│ 2026-11-06 ┆ QOpenBB                  ┆ codex       ┆          8,574 ┆ … ┆     1,200 │
+│ 2026-11-05 ┆ mmhmem                   ┆ claude-code ┆         30,101 ┆ … ┆     2,000 │
+│ 2026-10-31 ┆ a-really-long-client-pr… ┆ opencode    ┆         12,000 ┆ … ┆       900 │
+╞════════════╪══════════════════════════╪═════════════╪════════════════╪═══╪═══════════╡
+│ total      ┆                          ┆             ┆         50,675 ┆ … ┆     4,100 │
+└────────────┴──────────────────────────┴─────────────┴────────────────┴───┴───────────┘
+2 older rows hidden (showing since 2026-10-31); 8 columns hidden (slices, frontier in (client), …).
+The total covers the shown rows only. Run "mmhmem stats --all" for everything.

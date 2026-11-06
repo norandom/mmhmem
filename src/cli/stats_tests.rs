@@ -213,27 +213,32 @@ fn totals_sum_every_column() {
     assert_eq!(t.worker_completion, 10 + 30);
 }
 
+/// `--all` at 2025-01-02, no width limit: every row and column.
+fn all_opts() -> TableOptions {
+    TableOptions {
+        width: None,
+        today: time::Date::from_calendar_date(2025, time::Month::January, 2).unwrap(),
+        all: true,
+    }
+}
+
 #[test]
 fn table_labels_spent_and_estimated_tokens_with_totals() {
-    let table = render_table(&expected_aggregates());
-    let header = table.lines().next().unwrap();
-    for label in TABLE_HEADERS {
-        assert!(header.contains(label), "missing {label}: {header}");
-    }
-    assert!(header.contains("FRONTIER PROMPT (CLIENT-REPORTED)"));
-    assert!(header.contains("FRONTIER COMPLETION (CLIENT-REPORTED)"));
-    assert!(!header.contains("AVOIDED (CLIENT-REPORTED)"), "{header}");
-    assert!(header.contains("AVOIDED (EST.)"), "estimates stay labeled");
-    let total = table.lines().last().unwrap();
-    assert!(total.starts_with("TOTAL"), "{total}");
+    let table = render_table(&expected_aggregates(), &all_opts());
+    let header = table.lines().nth(2).unwrap();
+    assert!(header.contains("frontier in (client)"), "{header}");
+    assert!(header.contains("frontier out (client)"), "{header}");
+    assert!(!header.contains("avoided (client)"), "{header}");
+    assert!(header.contains("avoided (est.)"), "estimates stay labeled");
+    let total = table.lines().find(|l| l.starts_with("│ total")).unwrap();
     assert!(total.contains("1,400") && total.contains("700") && total.contains("70"));
 }
 
 #[test]
 fn table_renders_zero_totals_for_empty_input() {
-    let table = render_table(&[]);
-    assert!(table.contains("TOTAL"));
-    assert!(table.contains('0'));
+    let table = render_table(&[], &all_opts());
+    assert!(table.contains("│ total"));
+    assert!(table.contains(" 0 "));
 }
 
 #[test]

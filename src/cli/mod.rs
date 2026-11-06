@@ -11,7 +11,9 @@ pub mod hook;
 pub mod prune;
 pub mod stats;
 pub mod stats_activity;
+pub mod stats_args;
 pub mod stats_client;
+pub mod stats_table;
 
 use std::process::ExitCode;
 
@@ -28,10 +30,12 @@ pub const NO_STATS_MESSAGE: &str = "No token-savings statistics recorded yet. Us
 pub use hook::run_hook;
 pub use prune::run_prune;
 
-/// `mmhmem stats [--json]` entrypoint (Req 1.3, 8.1-8.6): read-only report
-/// from the local profile's per-user store; exits 0 even with no data.
-pub fn run_stats(json: bool) -> ExitCode {
-    match build_report(json) {
+pub use stats_args::{STATS_USAGE, StatsArgs};
+
+/// `mmhmem stats [--all] [--json]` entrypoint (Req 1.3, 8.1-8.6): read-only
+/// report from the local profile's per-user store; exits 0 even with no data.
+pub fn run_stats(args: StatsArgs) -> ExitCode {
+    match build_report(args) {
         Ok(report) => {
             println!("{report}");
             ExitCode::SUCCESS
@@ -46,7 +50,7 @@ pub fn run_stats(json: bool) -> ExitCode {
 /// Resolves the report (or the no-statistics message) without mutating
 /// anything: the store is opened read-only and is never created (Req
 /// 8.5/8.6).
-fn build_report(json: bool) -> anyhow::Result<String> {
+fn build_report(args: StatsArgs) -> anyhow::Result<String> {
     let config = Config::load_local()?;
     let store_path = config.data_dir.join(DB_FILE_NAME);
     let db = Db::open_read_only(&store_path)?;
@@ -62,9 +66,15 @@ fn build_report(json: bool) -> anyhow::Result<String> {
     if rows.is_empty() {
         return Ok(NO_STATS_MESSAGE.to_string());
     }
-    Ok(if json {
-        stats::render_json(&rows)
-    } else {
-        stats::render_table(&rows)
-    })
+    if args.json {
+        return Ok(stats::render_json(&rows));
+    }
+    // Width and today are detected here so the renderer stays pure.
+    let opts = stats::TableOptions {
+        width: stats_args::table_width(),
+        today: time::OffsetDateTime::now_utc().date(),
+        all: args.all,
+    };
+    let table = stats::render_table(&rows, &opts);
+    Ok(table.trim_end_matches('\n').to_string())
 }

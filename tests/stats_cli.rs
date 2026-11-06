@@ -19,10 +19,19 @@ use rusqlite::params;
 const DAY1: i64 = 1_735_689_600_000;
 const DAY2: i64 = 1_735_776_000_000;
 
+/// `stats --json`, or `stats --all` for the table: the fixtures are dated
+/// 2025, outside the default 7-day window.
 fn run_stats(data_dir: &Path, json: bool) -> std::process::Output {
+    stats_with(data_dir, &[if json { "--json" } else { "--all" }])
+}
+
+fn stats_with(data_dir: &Path, args: &[&str]) -> std::process::Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mmhmem"));
     cmd.arg("stats")
+        .args(args)
         .env("AGENT_MEM_DATA_DIR", data_dir)
+        // Piped stdout and no COLUMNS: no width limit.
+        .env_remove("COLUMNS")
         .env_remove("AGENT_MEM_TOKEN")
         .env_remove("AGENT_MEM_ALLOWED_ROOTS")
         // Blank — not removed: removed worker vars fall back to the
@@ -31,9 +40,6 @@ fn run_stats(data_dir: &Path, json: bool) -> std::process::Output {
         .env("WORKER_API_URL", "")
         .env("WORKER_MODEL", "")
         .env("WORKER_API_KEY", "");
-    if json {
-        cmd.arg("--json");
-    }
     cmd.output().expect("failed to spawn the mmhmem binary")
 }
 
@@ -168,15 +174,15 @@ async fn stats_table_shows_estimates_and_client_reported_spend() {
     );
     assert!(stdout.contains("opencode") && stdout.contains("claude-code"));
     assert!(
-        stdout.contains("AVOIDED (EST.)")
-            && stdout.contains("FRONTIER PROMPT (CLIENT-REPORTED)")
-            && stdout.contains("FRONTIER COMPLETION (CLIENT-REPORTED)")
-            && !stdout.contains("AVOIDED (CLIENT-REPORTED)"),
+        stdout.contains("avoided (est.)")
+            && stdout.contains("frontier in (client)")
+            && stdout.contains("frontier out (client)")
+            && !stdout.contains("avoided (client)"),
         "labels: {stdout}"
     );
     let total = stdout
         .lines()
-        .find(|l| l.starts_with("TOTAL"))
+        .find(|l| l.starts_with("│ total"))
         .unwrap_or_else(|| panic!("totals row: {stdout}"));
     assert!(total.contains("1,400"), "estimates total: {total}");
     assert!(
@@ -388,14 +394,8 @@ async fn stats_shows_a_day_with_activity_but_no_savings_rows() {
     assert_eq!(act["direct_reads"], 1, "rotated file");
     assert_eq!(act["avoided_input_tokens_est"], 0);
     let table = String::from_utf8(run_stats(dir.path(), false).stdout).unwrap();
-    let header = table.lines().next().unwrap();
-    for label in [
-        "SUMMARY READS",
-        "CACHE HITS",
-        "SLICE READS",
-        "DIRECT READS",
-        "HOOK REDIRECTS",
-    ] {
+    let header = table.lines().nth(2).unwrap();
+    for label in ["summaries", "cache hits", "slices", "direct", "redirects"] {
         assert!(header.contains(label), "{label}: {header}");
     }
     assert!(
@@ -433,5 +433,47 @@ fn stats_never_modifies_the_audit_files() {
         std::fs::read_dir(dir.path()).unwrap().count(),
         2,
         "no new files"
+    );
+}
+
+#[tokio::test]
+async fn default_table_falls_back_to_the_most_recent_day() {
+    let (dir, logs) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    seed(dir.path(), &logs.path().join("audit.jsonl")).await;
+    let out = stats_with(dir.path(), &[]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.starts_with("shape: (2, "), "{stdout}");
+    assert!(
+        stdout.contains("2025-01-02") && !stdout.contains("2025-01-01"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("1 older row hidden (showing the most recent day, 2025-01-02)"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("mmhmem stats --all"), "{stdout}");
+}
+
+#[tokio::test]
+async fn json_ignores_all_and_flags_come_in_any_order() {
+    let (dir, logs) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    seed(dir.path(), &logs.path().join("audit.jsonl")).await;
+    let json = stats_with(dir.path(), &["--json"]).stdout;
+    assert_eq!(stats_with(dir.path(), &["--all", "--json"]).stdout, json);
+    assert_eq!(stats_with(dir.path(), &["--json", "--all"]).stdout, json);
+}
+
+#[test]
+fn an_unknown_stats_argument_prints_usage_and_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = stats_with(dir.path(), &["--all", "--wide"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("--wide"), "{stderr}");
+    assert!(
+        stderr.contains("usage: mmhmem stats [--all] [--json]"),
+        "{stderr}"
     );
 }
