@@ -159,6 +159,83 @@ fn an_empty_window_falls_back_to_the_most_recent_day() {
 }
 
 #[test]
+fn rows_without_savings_are_hidden_by_default() {
+    let mut rows = fixture();
+    rows.insert(
+        1,
+        agg((
+            "2026-11-06",
+            "reads-only",
+            "codex",
+            0,
+            (0, 0),
+            (0, 0),
+            [0, 0, 9, 0, 0],
+        )),
+    );
+    rows.insert(
+        2,
+        agg((
+            "2026-11-05",
+            "nothing",
+            "opencode",
+            0,
+            (5, 1),
+            (0, 0),
+            [0; 5],
+        )),
+    );
+    let table = render_table(&rows, &opts(None, false));
+    assert!(table.starts_with("shape: (3, "), "{table}");
+    assert!(
+        !table.contains("reads-only") && !table.contains("nothing"),
+        "{table}"
+    );
+    assert!(
+        table.contains(
+            "2 rows without savings hidden; 2 older rows hidden (showing since 2026-10-31); "
+        ),
+        "{table}"
+    );
+    assert!(table.contains("The total covers the shown rows only."));
+    // Their columns are not shown either: only hidden rows had slices.
+    assert!(!header(&table).contains("slices"), "{table}");
+    let all = render_table(&rows, &opts(None, true));
+    assert!(all.starts_with("shape: (7, "), "{all}");
+    assert!(
+        all.contains("reads-only") && all.contains("nothing"),
+        "{all}"
+    );
+}
+
+#[test]
+fn without_any_savings_every_row_is_shown() {
+    let rows = vec![
+        agg((
+            "2026-11-06",
+            "a",
+            "codex",
+            0,
+            (0, 0),
+            (0, 0),
+            [0, 0, 3, 0, 0],
+        )),
+        agg((
+            "2026-11-05",
+            "b",
+            "codex",
+            0,
+            (0, 0),
+            (0, 0),
+            [0, 0, 0, 1, 0],
+        )),
+    ];
+    let table = render_table(&rows, &opts(None, false));
+    assert!(table.starts_with("shape: (2, "), "{table}");
+    assert!(!table.contains("without savings"), "{table}");
+}
+
+#[test]
 fn the_total_sums_the_shown_rows_only() {
     let table = render_table(&fixture(), &opts(None, false));
     let total = total_line(&table);

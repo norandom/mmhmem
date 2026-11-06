@@ -3,9 +3,10 @@
 //! borders, a `╞═╪═╡` header rule and the total row last, set off by a
 //! second rule.
 //!
-//! By default the table shows what matters: rows of the last 7 UTC days
-//! (or, when that is empty, the most recent day with data), no all-zero
-//! numeric columns, and a width that fits the terminal. To fit, the project
+//! By default the table shows what matters: rows with savings (an avoided
+//! estimate above zero; every row when none has any), of those the last 7
+//! UTC days (or, when that is empty, the most recent day with data), no
+//! all-zero numeric columns, and a width that fits the terminal. To fit, the project
 //! column is first cut to [`PROJECT_MAX`] characters, then numeric columns
 //! are dropped by [`Column::priority`] (read counts first, then frontier
 //! client-reported tokens, then worker tokens, the avoided estimate last)
@@ -101,7 +102,8 @@ impl Shown {
 
 /// Renders the table plus, when anything was hidden, a footer.
 pub fn render_table(rows: &[DayAggregate], opts: &TableOptions) -> String {
-    let (shown, window) = select_rows(rows, opts);
+    let saving = saving_rows(rows, opts);
+    let (shown, window) = select_rows(&saving, opts);
     let mut body = shown.clone();
     body.push(total_row(&shown));
     let numeric = numeric_columns(&body, opts.all);
@@ -120,7 +122,8 @@ pub fn render_table(rows: &[DayAggregate], opts: &TableOptions) -> String {
     let mut out = format!("shape: ({}, {})\n", shape.0, shape.1);
     out.push_str(&draw(&columns, shown.len()));
     let hidden = Hidden {
-        rows: rows.len() - shown.len(),
+        unsaved: rows.len() - saving.len(),
+        rows: saving.len() - shown.len(),
         window,
         columns: hidden_columns,
     };
@@ -133,6 +136,17 @@ enum Window {
     All,
     LastDays(String),
     MostRecent(String),
+}
+
+/// Rows with savings (avoided estimate above zero); every row with `all`
+/// or when no row has any, so the table is never empty for that reason.
+fn saving_rows(rows: &[DayAggregate], opts: &TableOptions) -> Vec<DayAggregate> {
+    let saving: Vec<DayAggregate> = rows.iter().filter(|r| r.avoided_est > 0).cloned().collect();
+    if opts.all || saving.is_empty() {
+        rows.to_vec()
+    } else {
+        saving
+    }
 }
 
 /// The rows to show: everything with `all`, else the last [`WINDOW_DAYS`]
@@ -339,6 +353,9 @@ fn pad(cell: &str, width: usize, right: bool) -> String {
 
 /// What the default view left out.
 struct Hidden {
+    /// Rows without savings.
+    unsaved: usize,
+    /// Rows with savings outside the period shown.
     rows: usize,
     window: Window,
     /// All-zero columns first, then those dropped to fit.
@@ -351,6 +368,10 @@ const FOOTER_NAMES: usize = 2;
 /// Up to two short lines under the table; empty when nothing was hidden.
 fn footer(h: &Hidden) -> String {
     let mut parts = Vec::new();
+    if h.unsaved > 0 {
+        let rows = plural(h.unsaved, "row");
+        parts.push(format!("{} {rows} without savings hidden", h.unsaved));
+    }
     if h.rows > 0 {
         let period = match &h.window {
             Window::LastDays(start) => format!("showing since {start}"),
@@ -371,7 +392,7 @@ fn footer(h: &Hidden) -> String {
     if parts.is_empty() {
         return String::new();
     }
-    let total = if h.rows > 0 {
+    let total = if h.rows + h.unsaved > 0 {
         "The total covers the shown rows only. "
     } else {
         ""
