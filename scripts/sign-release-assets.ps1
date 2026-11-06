@@ -41,7 +41,8 @@ function Assert-ZipsignVersion {
 # arrays inside RELEASE_PUBLIC_KEYS). Returns lowercase hex strings.
 function Get-EmbeddedReleaseKeys([string]$Source=$script:ReleaseKeysSource) {
     $text=[IO.File]::ReadAllText($Source)
-    $block=[regex]::Match($text,'(?s)pub const RELEASE_PUBLIC_KEYS:\s*&\[\[u8;\s*32\]\]\s*=\s*&\[(.*?)\];')
+    # Anchored at a line start: the module docs show the same line behind //!.
+    $block=[regex]::Match($text,'(?ms)^pub const RELEASE_PUBLIC_KEYS:\s*&\[\[u8;\s*32\]\]\s*=\s*&\[(.*?)\];')
     if (-not $block.Success) {throw 'RELEASE_PUBLIC_KEYS not found in release_keys.rs'}
     $body=[regex]::Replace($block.Groups[1].Value,'(?m)//.*$','')
     $keys=@()

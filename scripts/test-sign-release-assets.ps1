@@ -32,8 +32,14 @@ try {
     $rsA=Join-Path $root 'keys-a.rs';[IO.File]::WriteAllText($rsA,(Get-RustKeyList @($hexA)))
     $rsEmpty=Join-Path $root 'keys-empty.rs';[IO.File]::WriteAllText($rsEmpty,"pub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[`n    // none yet`n];`n")
     $rsB=Join-Path $root 'keys-b.rs';[IO.File]::WriteAllText($rsB,(Get-RustKeyList @($hexB)))
-    # The committed list must parse (empty until the owner adds the key).
-    $null=Get-EmbeddedReleaseKeys
+    # The committed list holds the owner key, in rustfmt's one-key layout too,
+    # and the example in the module docs is never read as a key.
+    Assert-True (@(Get-EmbeddedReleaseKeys).Count -ge 1) 'committed list holds a key'
+    $rsDocs=Join-Path $root 'keys-docs.rs'
+    $hexBytes=(0..31|ForEach-Object {'0x'+$hexA.Substring($_*2,2)}) -join ', '
+    [IO.File]::WriteAllText($rsDocs,"//! pub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[`n//!     [0x00, /* ... */ 0x1f],`n//! ];`n`npub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[[`n    $hexBytes,`n]];`n")
+    $docsKeys=@(Get-EmbeddedReleaseKeys $rsDocs)
+    Assert-True ($docsKeys.Count -eq 1 -and $docsKeys[0] -ceq $hexA) 'key after a doc example, rustfmt layout'
 
     # Archives as the publisher builds them.
     $src=Join-Path $root 'src';New-Item -ItemType Directory -Path $src | Out-Null

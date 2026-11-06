@@ -23,6 +23,20 @@ publish with a key that is not in that list.
 The pinned signing tool is `zipsign` 0.2.2. Never paste a real key into an
 issue, a commit, a chat or a log.
 
+## Quick way: one script for steps 1 to 3
+
+From the repository root on your own machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File docs\setup-release-signing.ps1
+```
+
+It installs zipsign, creates the key (never replacing an existing one),
+creates the `release` environment with you as reviewer, stores the secret
+without printing it, and adds the public key to `src/setup/release_keys.rs`.
+Running it again is safe. Then commit that file and push it to main. The
+sections below are the same steps by hand.
+
 ## 1. Generate the key pair (once, on your own machine)
 
 ```powershell

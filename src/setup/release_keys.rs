@@ -20,9 +20,10 @@
 //! silently skips signature verification when given no keys (research 11).
 
 /// Trusted release verifying keys, raw 32-byte Ed25519 public keys.
-pub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[
-    // Intentionally empty until the owner generates the release key.
-];
+pub const RELEASE_PUBLIC_KEYS: &[[u8; 32]] = &[[
+    0x8f, 0xdf, 0xc1, 0x60, 0xd3, 0x40, 0xd3, 0x4c, 0xe1, 0xa5, 0x5f, 0x43, 0x6c, 0x81, 0x55, 0x26,
+    0x89, 0x97, 0x20, 0x49, 0x54, 0x34, 0xda, 0x1d, 0xed, 0xdc, 0xf0, 0xc8, 0xf0, 0xea, 0xad, 0x50,
+]];
 
 /// The ephemeral key of one installer end-to-end run (feature
 /// `e2e-release-key`, task 8.2), as 64 hex characters given at build time.
