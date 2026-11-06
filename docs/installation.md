@@ -1,159 +1,192 @@
 # Installation
 
-The [README](../README.md#install) has the commands for each platform. The
-bootstraps download the binary from the latest GitHub release and installer
-companions from the repository's default branch. Re-running updates the
-binary while preserving memory and worker settings unless you explicitly
-provide new settings.
+## Install
 
-Windows updates can run while agents remain open. The installer renames the
-old executable and puts the new version at the registered path. Existing
-processes keep their current version until restarted; new processes use the
-updated version. One previous binary is retained. Older Windows executables
-still locked by running agents remain temporarily and are cleaned up on a
-later update after those processes exit. Unix installers replace a single
-`.old` backup on each update.
-
-| Platform | Release asset | Binary location | Memory location |
-|---|---|---|---|
-| Linux x86_64 | `mmhmem-linux-x86_64` | `~/.local/bin/mmhmem` | `~/.local/share/mmhmem` |
-| macOS Apple Silicon | `mmhmem-macos-aarch64` | `~/.local/bin/mmhmem` | `~/Library/Application Support/mmhmem` |
-| macOS Intel | `mmhmem-macos-x86_64` | `~/.local/bin/mmhmem` | `~/Library/Application Support/mmhmem` |
-| Windows x64 | `mmhmem.exe` | `%LOCALAPPDATA%\Programs\mmhmem\mmhmem.exe` | `%APPDATA%\mmhmem` |
-
-The Unix bootstrap needs Bash, curl or wget and standard Unix utilities.
-Python 3 enables automatic JSON configuration merges; jq is not required.
-Global installs add the binary directory to your user PATH. Windows one-line
-installs also update the calling PowerShell session. On Unix, open a new
-terminal to pick up the shell-profile change. Agent registrations continue
-to use the absolute path. Linux ARM64 has no release asset.
-On Windows use the native installer; WSL is only a CI build environment.
-
-## Linux compatibility
-
-The default Linux release build is static musl. Its declared support floor
-is Linux 5.10 on baseline x86-64/SSE2, without mandatory AVX. CI inspects ELF
-linkage and tests one executable on Debian 12 and Alpine 3.22. Container tests
-share a host kernel; they do not certify every CPU or the oldest supported
-kernel. Each verified bundle records its actual kernel, CPU and image digests.
-
-The currently published [v0.2.2 asset](https://github.com/norandom/mmhmem/releases/tag/v0.2.2)
-still uses glibc. The latest-release download gains static portability only
-after the verified candidate is published and its checksum confirmed. See the
-[release procedure](../deploy/README.md#4-verified-linux-release-transition).
-
-## Installer options
-
-On Linux or macOS, append arguments to the bootstrap:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --agent claude
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --dry-run
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --remove
-```
-
-On Windows, save the script to pass options:
+**Windows x64** (PowerShell 5.1 or 7):
 
 ```powershell
-irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 -OutFile install.ps1
-.\install.ps1 -Agent codex
-.\install.ps1 -DryRun
-.\install.ps1 -Remove
+irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex
 ```
 
-Bootstraps default to menus for install/update or removal, then agent selection,
-with user-wide registration. Enter comma-separated numbers, `a` for all listed
-agents, or `q` to cancel. The color banner is derived from the README image;
-set `NO_COLOR=1` for plain output. Unattended runs must specify `--agent LIST`
-or `-Agent LIST`; `all` selects all detected agents.
-
-After agent selection, interactive installation offers optional worker setup:
-model ID, an OpenAI-compatible base URL (such as `https://api.openai.com/v1`),
-and an API key entered without echo. The base URL is converted to the
-`/chat/completions` endpoint used by mmhmem. A complete chat-completions URL
-also works. Empty URL/key answers preserve existing values; without existing
-settings the endpoint defaults to local Ollama and the key is optional.
-The installer does not download or start a model.
-
-Existing base URL and model ID are shown before agent selection, including
-unattended runs; API keys are displayed only as `***`. Worker prompts show
-saved values in brackets. Press Enter to keep the model, URL, or hidden key.
-Non-dry-run installations test configured workers
-with a short chat-completions request before changing the binary, settings,
-or PATH. Authentication failures, invalid endpoints/models, quota failures,
-unreachable servers, and malformed responses stop the installation with a
-readable error. No project content is sent by this test; provider charges
-may apply. Unix worker validation requires Python 3. Dry runs make no worker
-API requests. Credentials expiring later are a runtime worker error; setup
-validation cannot predict future expiration.
-
-At the end, you can request a prompt to explore the project and prepare its
-summary cache using `shunt_warmup`, up to 25 files per batch. Run this in your
-agent after restarting its mmhmem connection. The installer itself does not
-scan the project or call the worker. Hosted providers may charge for summaries.
-
-### Read-routing hook (opt-in)
-
-An optional Claude Code `PreToolUse` hook declines whole-file `Read` calls on
-large files and points the agent to `smart_read`. A default install never adds
-it. Opt in with `--hooks claude` (Linux/macOS, needs Python 3) or `-Hooks claude`
-(Windows), or answer `y` to the interactive prompt (default `N`; unattended runs
-never prompt). Hooks are global and user scope only: `--global` is required, and
-nothing is written to a project's `.claude/settings.json`.
+**Linux x86_64 and macOS** (Apple Silicon or Intel):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.sh | bash -s -- --agent claude --hooks claude
-.\install.ps1 -Agent claude -Hooks claude
+curl -fsSL https://github.com/norandom/mmhmem/releases/latest/download/install.sh | sh
 ```
 
-Before adding it, the installer prints the exact entry, the settings file
-(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), what the
-hook sees and decides, and the command that removes it. It refuses, before
-changing anything, when user or managed settings disable hooks, and names the
-setting. The entry is spliced into the file in place and a `.mmhmem.bak`
-backup is made; every other key and hook stays as it was, and a repeated opt-in
-keeps one entry.
+These commands install the latest signed release. You need no checkout, no
+Rust toolchain and no Python. The installer takes no options: you make every
+choice in `mmhmem setup`.
 
-Claude Code decides whether the hook runs, not mmhmem, and the installer never
-writes any trust or approval record. After installing, start a new Claude Code
-session, accept the workspace trust dialog for the folder, and review the hook
-with `/hooks`. Codex shell reads can also use the hook: select the `codex` agent
-and opt in with `--hooks codex` / `-Hooks codex` (or `all` for all supported
-harnesses). Its entry goes in `$CODEX_HOME/hooks.json`, defaulting to
-`~/.codex/hooks.json`. Start Codex and review the new entry in `/hooks`;
-untrusted hooks are skipped, including silently in `codex exec`. The installer
-never enables or trusts the hook for you. It respects `[features] hooks = false`
-and managed `requirements.toml` policy. Updates at the same binary path keep
-the declaration unchanged; a changed path needs re-approval. OpenCode 2 supports
-`--hooks opencode` / `-Hooks opencode`: the installer shows and installs
-`~/.config/opencode/plugins/mmhmem-read-routing.js`. Start a new OpenCode
-session afterwards. There is no separate harness approval step; explicit
-installer opt-in is required. Readable user and system `plugin.use` policies
-are checked before installation; unsupported policy files are refused
-conservatively. Hook-only and full removal also remove this plugin.
+## What the installer does
 
-Remove only the hook with `--remove-hooks` / `-RemoveHooks` (the settings file
-returns to its previous bytes), or with the removal command the installer printed
-(the helper is kept next to the mmhmem binary: `%LOCALAPPDATA%\Programs\mmhmem\manage_hooks.ps1`
-on Windows, `~/.local/bin/mmhmem-manage-hooks.py` elsewhere). A global `--remove`
-removes it too (`--remove` with `--remove-hooks` is refused as redundant). The
-display before consent names that persistent removal command. Removal has two
-exceptions to byte-identical restore: a pre-existing empty `hooks` or
-`hooks.PreToolUse` container is dropped, and a settings file that the install
-created is left in place (not deleted). If user or managed policy disables
-hooks, the installer says so and Claude Code gets advisory guidance only (the
-routing rule). `--dry-run` shows everything and writes nothing.
+Each release ships its own `install.ps1` and `install.sh`. The installer:
 
-Removal keeps the memory store and worker settings. Removing selected agents
-also keeps the shared binary for other integrations; selecting `all` removes it
-when possible. Dry runs leave installed binaries and configuration
-unchanged; temporary companion downloads are cleaned up. A source checkout
-can instead run `deploy/install_local.sh` or `deploy/install_local.ps1` with
-an explicit binary; see [development](development.md).
+1. picks the archive for your computer (Windows x64, Linux x86_64, macOS
+   Apple Silicon or Intel) and downloads it from that release;
+2. uses the archive only if its SHA-256 matches the one built into the
+   installer, and stops with "Nothing was installed or changed" otherwise;
+3. unpacks it into a temporary folder and starts `mmhmem setup` from there.
+   The temporary folder is always removed.
 
-On Windows, Claude Desktop MSIX profiles are detected under
-`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` and take precedence
-over the traditional `%APPDATA%\Claude` path.
+The installer itself changes nothing outside that temporary folder. Setup
+then checks the release signature before it installs the program. It needs
+a terminal for its menus; on Linux and macOS it reads your answers from the
+terminal even when the script is piped into `sh`.
+
+On Windows the installer never calls `exit`, so your PowerShell window stays
+open. Afterwards `$LASTEXITCODE` holds the result of `mmhmem setup` (0 means
+success).
+
+On Linux and macOS the installer needs `sh`, `curl` or `wget`, `sha256sum`
+or `shasum`, `tar`, `mktemp` and `awk`. These are present on ordinary Linux
+and macOS systems.
+
+## Setup screens
+
+`mmhmem setup` takes no options. In a normal terminal it shows a menu; in a
+terminal that cannot draw one it asks numbered questions instead. Without
+any terminal it uses the standard choices and says so.
+
+1. **Tools**: Claude Code, Codex, OpenCode, Claude Desktop and Antigravity.
+   The ones found on your computer are ticked. If Claude Desktop has more
+   than one profile, setup asks which one to use.
+2. **Features** per tool:
+   - shared memory (required): registers mmhmem with the tool;
+   - read-routing hook (on by default), see [below](#read-routing-hook);
+   - memory guide: a short skill that tells the tool how to use the memory;
+   - recap command: shows what you were working on last time;
+   - agent instructions: short routing notes for the tool.
+3. **Review**: every file setup will change, before anything is written.
+   Press `d` to see the details of one change. Each file is backed up first;
+   press Enter to apply. Files that hold secrets, such as `~/.claude.json`,
+   are listed without their contents.
+
+If setup finds what the old installer (before v0.5.0) set up, it takes that
+over first and shows it as its own step. Nothing changes until you confirm.
+
+### Checks
+
+After applying, setup starts mmhmem exactly as each tool's configuration
+starts it, lists its tools and calls the read-only `status` tool. It then
+asks each tool's own command (`claude mcp get mmhmem`, `codex mcp list`,
+`opencode mcp list`) whether it sees mmhmem, and, with the read-routing hook
+on, runs a sample read through it. Each tool gets a pass or a plain reason and what you can
+do about it.
+
+### Next steps per tool
+
+- **Claude Code**: start a new session.
+- **Codex**: start a new session and approve the mmhmem hook in `/hooks`.
+  Codex skips hooks you have not approved, also silently in `codex exec`.
+- **OpenCode**: start a new session. The read-routing plugin is the file
+  `~/.config/opencode/plugins/mmhmem-read-routing.js`; OpenCode loads it
+  without an approval step.
+- **Claude Desktop**: quit it completely and open it again.
+- **Antigravity**: import the snippet setup shows (in its MCP server
+  settings), then start a new session. Antigravity has no command line, so
+  setup does not edit its files.
+
+## Read-routing hook
+
+The read-routing hook sends whole-file reads of large files to `smart_read`,
+so the agent gets a cached summary instead of the full file. It is on by
+default for Claude Code, Codex and OpenCode. Untick it on the features
+screen if you do not want it.
+
+It needs a worker model to make summaries. Without one it stays inactive and
+setup says so; memory and targeted reads still work. See
+[worker settings](configuration.md#worker-settings). Tick **Worker model**
+on the features screen and setup shows how to connect one after the
+install. Setup never downloads or starts a model.
+
+Where the hook goes:
+
+| Tool | Entry | Approval |
+|---|---|---|
+| Claude Code | `hooks.PreToolUse` in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) | none |
+| Codex | `PreToolUse` in `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) | approve in `/hooks` |
+| OpenCode | `~/.config/opencode/plugins/mmhmem-read-routing.js` | none |
+
+Setup never writes a trust or approval record for you. Every other key and
+hook in those files stays as it was.
+
+## Update
+
+```sh
+mmhmem update
+```
+
+It shows the installed and the newest version, asks once, then downloads the
+new release, checks its signature and checksum, and keeps your tools and
+choices. If the new version needs to change files in your tools, it lists
+them and asks first; otherwise it only checks your tools. Start new agent
+sessions afterwards.
+
+`mmhmem update` exists since v0.5.1. On v0.5.0, run `mmhmem setup` and
+choose **Update to ...**. Running the install command again offers the same
+update.
+
+## Change, check or remove
+
+Run `mmhmem setup` and choose:
+
+- **Change agents and features**: add or remove tools and features. The
+  review screen shows the changes first.
+- **Check that everything works**: runs the checks above again and changes
+  nothing.
+- **Remove mmhmem**: takes out only what mmhmem added and restores your
+  files, then deletes the program and, on Windows, its `PATH` entry. Your
+  saved memories are kept unless you tick "Also delete my saved memories".
+  Copies of your settings from before the removal stay in the backups
+  folder.
+
+If you edited a file that setup manages, setup notices it and shows the
+difference before it changes anything.
+
+## Where things are installed
+
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Program | `%LOCALAPPDATA%\Programs\mmhmem\mmhmem.exe` | `~/.local/bin/mmhmem` | `~/.local/bin/mmhmem` |
+| Install record (`install.json`) | `%LOCALAPPDATA%\mmhmem` | `~/.local/state/mmhmem` (or `$XDG_STATE_HOME/mmhmem`) | `~/Library/Application Support/mmhmem` |
+| Backups | `backups\<time>\` next to the record | `backups/<time>/` next to the record | `backups/<time>/` next to the record |
+| Memory store | `%APPDATA%\mmhmem` | `~/.local/share/mmhmem` | `~/Library/Application Support/mmhmem` |
+
+The install record lists what setup changed, so a later change, update or
+removal touches only that. Backups are readable only by you; `<time>` is the
+UTC time of the run.
+
+On Windows, setup adds the program's folder to your user `PATH` as a
+reviewed change, and removal takes it out again. Open a new terminal to use
+it. On Linux and macOS setup never edits shell start-up files: if
+`~/.local/bin` is not on your `PATH`, the results show the line to add.
+Agent configurations always use the full path to the program.
+
+## Check where a release came from
+
+Setup already checks the release signature. To check the build provenance
+of an archive yourself, download it from the release page and run:
+
+```sh
+gh attestation verify <archive> --repo norandom/mmhmem
+```
+
+## Platforms
+
+| Platform | Archive target |
+|---|---|
+| Windows x64 | `x86_64-pc-windows-msvc` |
+| Linux x86_64 | `x86_64-unknown-linux-musl` |
+| macOS Apple Silicon | `aarch64-apple-darwin` |
+| macOS Intel | `x86_64-apple-darwin` |
+
+The Linux x86_64 release is statically linked with musl and needs no
+dynamic loader or shared libraries. The same executable is verified on
+Debian 12 and Alpine 3.22. Its support floor is Linux 5.10 and baseline
+x86-64/SSE2; the release's `verification.json` records the kernel and CPU it
+was actually tested on. Linux ARM64 has no release. On Windows, use the
+Windows installer; WSL is not an install target.
 
 ## Agent connections and plugins
 
@@ -162,7 +195,8 @@ For manual local registrations, use [Claude Code's stdio command](../deploy/exam
 or the local section of [Claude Desktop](../deploy/examples/claude-desktop.md).
 The [playbook guide](../deploy/skills/unified-memory/README.md) lists per-agent paths.
 
-The bootstraps install a standalone playbook. To manage it as a plugin instead:
+Setup installs the memory guide as a standalone skill. To manage it as a
+plugin instead:
 
 ```sh
 claude plugin marketplace add https://github.com/norandom/mmhmem.git
@@ -171,12 +205,11 @@ codex plugin marketplace add norandom/mmhmem
 codex plugin add unified-memory@mmhmem
 ```
 
-The plugin contains the skill, not a binary. Remove only the standalone
-`unified-memory` directory from `~/.claude/skills` or `~/.agents/skills` to
-avoid duplicate discovery, then restart the agent. See the
-[marketplace guide](../.marketplace/README.md) for other supported manifests.
+The plugin contains the skill, not the program. Untick **Memory guide** in
+`mmhmem setup` (Change agents and features) to avoid two copies, then
+restart the agent. See the [marketplace guide](../.marketplace/README.md)
+for other supported manifests.
 
-Codex installs `$mmhmem-recap` at `~/.agents/skills/mmhmem-recap/SKILL.md`.
-Use it to recover the latest checkpoint and recorded activity. Start a fresh
-Codex session after installation if the skill picker has not refreshed. The
-legacy `~/.codex/prompts/mmhmem-recap.md` remains available for compatibility.
+Codex gets `$mmhmem-recap` at `~/.agents/skills/mmhmem-recap/SKILL.md`. Use
+it to recover the latest checkpoint and recorded activity. Start a new Codex
+session if the skill picker has not refreshed.

@@ -221,4 +221,15 @@ $atDraft=$workflow.IndexOf('id: draft');$atAttest=$workflow.IndexOf('uses: actio
 if ($atDraft -lt 0 -or $atAttest -le $atDraft -or $atPublish -le $atAttest) {throw 'release.yml must build the draft, attest, then publish'}
 if ($workflow.IndexOf('MMHMEM_RELEASE_SIGNING_KEY',$atAttest) -ge 0) {throw 'Only the draft step may see the signing key'}
 if ($workflow.Substring($atAttest).Contains('continue-on-error')) {throw 'Attestation and publication must not continue on error'}
-Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets, SHA256SUMS, no e2e-key builds, installer e2e gate (push runs only, newest decides, aggregate job), draft until attestation'
+# Release notes (task 9.1): the draft is created with the template first, then GitHub's
+# generated notes; the template opens with the two release one-liners.
+$create=Get-CiReleaseCreateArguments 'v0.3.0'
+$notesAt=[Array]::IndexOf($create,'--notes-file')
+if (($create[0..2] -join ' ') -cne 'release create v0.3.0' -or $notesAt -lt 0 -or $create -cnotcontains '--generate-notes' -or $create -cnotcontains '--draft') {throw "Unexpected release create arguments: $($create -join ' ')"}
+if ((Resolve-Path -LiteralPath $create[$notesAt+1]).Path -cne (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\.github\release-notes.md')).Path) {throw 'Release notes are not taken from .github/release-notes.md'}
+if (-not $buildBody.Contains('Invoke-ReleaseGh (Get-CiReleaseCreateArguments $ReleaseTag)')) {throw 'Invoke-CiRelease does not create the draft with the release notes template'}
+$notes=@([IO.File]::ReadAllLines($create[$notesAt+1]) | Where-Object {$_ -cmatch '^(irm|curl) '})
+if ($notes.Count -ne 2 -or $notes[0] -cne 'irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex' -or
+    $notes[1] -cne 'curl -fsSL https://github.com/norandom/mmhmem/releases/latest/download/install.sh | sh') {throw "Release notes do not start with the two one-liners: $($notes -join ' / ')"}
+if (-not [IO.File]::ReadAllText($create[$notesAt+1]).Contains('gh attestation verify <archive> --repo norandom/mmhmem')) {throw 'Release notes lack the gh attestation verify line'}
+Write-Host 'PASS: tag/run trust, exact native layout, identical retry, conflicts, published-release protection, staged assets, SHA256SUMS, no e2e-key builds, installer e2e gate (push runs only, newest decides, aggregate job), draft until attestation, release notes template'

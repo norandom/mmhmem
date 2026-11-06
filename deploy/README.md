@@ -90,11 +90,11 @@ digests. The WSL kernel entry describes CI infrastructure, not an installation
 target. User installation targets remain ordinary Linux, macOS and native
 Windows.
 
-The Unix bootstrap needs Bash, curl or wget and standard Unix utilities.
-Python 3 enables automatic JSON config merges; without it the installer
-prints manual merge instructions. jq is used by CI checks, not required by
-the bootstrap. Rust, a compiler and a checkout are unnecessary for installing
-a release asset. DNS configuration and filesystem permissions still apply.
+The Unix installer (the release asset `install.sh`) needs `sh`, curl or
+wget, `sha256sum` or `shasum`, `tar`, `mktemp` and `awk`; `mmhmem setup`
+does the rest without Python or jq. jq is used by CI checks only. Rust, a
+compiler and a checkout are unnecessary for installing a release; see the
+[installation guide](../docs/installation.md). DNS configuration and filesystem permissions still apply.
 Existing HTTPS worker trust uses the distribution trust store and rejects
 untrusted connections; trust administration is unchanged. No TLS-specific
 tests or proxy/load-balancer setup are part of this release gate.
@@ -195,8 +195,7 @@ Keep the detailed support statement in `docs/installation.md`:
 > dynamic loader or shared libraries. The same executable is verified on
 > Debian 12 and Alpine 3.22. Its support floor is Linux 5.10 and baseline
 > x86-64/SSE2; the verification report records the actual tested kernel and
-> CPU. Bash, curl or wget and standard Unix utilities are still needed for
-> the installer; Python 3 enables automatic JSON config merges.
+> CPU.
 
 Publication-dependent acceptance remains open until the latest-download
 checksum and this documentation update are complete.
@@ -211,11 +210,8 @@ restore the matching compatibility guidance. Preserve affected memory stores,
 worker settings and harness registrations. Never rebuild or overwrite the
 tested assets in place to make an existing release appear repaired.
 
-Unix onboarding adds owned routing instructions for selected Claude Code/OpenCode agents.
-Global destinations are `~/.claude/rules/mmhmem.md` and
-`~/.config/opencode/AGENTS.md`; project destinations are `.claude/rules/mmhmem.md`
-and `AGENTS.md`. Existing user text is preserved with one `.mmhmem.bak` backup.
-Use `--remove` to remove owned guidance or `--dry-run` to validate without writing.
-Start a fresh harness session after updates. Custom configuration roots or
-instruction-disable controls require manual review; the installer reports their
-variable names without exposing configuration contents.
+The **Agent instructions** feature of `mmhmem setup` adds owned routing
+instructions for Claude Code (`~/.claude/rules/mmhmem.md`) and OpenCode
+(`~/.config/opencode/AGENTS.md`). Existing user text is kept; setup backs the
+file up and shows the change before writing it, and **Remove mmhmem** takes
+out only the owned section. Start a fresh harness session afterwards.

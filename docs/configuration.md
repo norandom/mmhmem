@@ -22,13 +22,12 @@ Create `~/.mmhmem.json` for all projects, or `./.mmhmem.json` for one project:
 Use the model name and URL supplied by your provider; hosted providers may
 require an API key. Per-setting precedence is **environment > project file >
 global file > default**. Only `worker_model`, `worker_api_url` and
-`worker_api_key` are read. Unknown keys are ignored and preserved by installer
+`worker_api_key` are read. Unknown keys are ignored and preserved by
 updates. Invalid JSON fails startup and names the file.
 
-Installer options `--worker-model`, `--worker-url` and `--worker-api-key`
-(PowerShell: `-WorkerModel`, `-WorkerUrl`, `-WorkerApiKey`) write this file
-instead of storing worker secrets in agent registrations. Keep keys out of
-version control; project `.mmhmem.json` is gitignored.
+`mmhmem setup` never stores worker secrets in agent registrations; keep them
+in this file. Tick **Worker model** in setup to be shown how to connect one.
+Keep keys out of version control; project `.mmhmem.json` is gitignored.
 
 ## Local environment reference
 

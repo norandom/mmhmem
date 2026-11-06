@@ -151,6 +151,13 @@ function Write-CiDraftOutputs([string]$ReleaseTag,[string]$Revision,[string]$Run
     $text="tag=$ReleaseTag`nrevision=$Revision`nci_run=$RunId`nassets=$($Names -join ',')`n"
     [IO.File]::AppendAllText($env:GITHUB_OUTPUT,$text,(New-Object Text.UTF8Encoding($false)))
 }
+# The release page starts with the install one-liners (.github/release-notes.md,
+# task 9.1); GitHub's generated notes follow them.
+$script:ReleaseNotesFile=Join-Path (Split-Path -Parent $PSScriptRoot) '.github/release-notes.md'
+function Get-CiReleaseCreateArguments([string]$ReleaseTag) {
+    if (-not (Test-Path -LiteralPath $script:ReleaseNotesFile -PathType Leaf)) {throw "Missing release notes template: $($script:ReleaseNotesFile)"}
+    return [string[]]@('release','create',$ReleaseTag,'--repo',$script:ReleaseRepository,'--verify-tag','--draft','--title',"mmhmem $ReleaseTag",'--notes-file',$script:ReleaseNotesFile,'--generate-notes')
+}
 function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     if (-not $ReleaseTag) {
         if ($RequestedRun -cnotmatch '^[1-9][0-9]*$') {throw 'Automatic completion requires a run ID'}
@@ -187,7 +194,7 @@ function Invoke-CiRelease([string]$ReleaseTag,[string]$RequestedRun) {
     $existing=@($releases | Where-Object {$_.tag_name -ceq $ReleaseTag})
     if ($existing.Count -gt 1) {throw 'Duplicate release records'}
     if ($existing.Count -and -not $existing[0].draft) {Write-Host "$ReleaseTag is already published; no assets changed.";return}
-    if (-not $existing.Count) {$null=Invoke-ReleaseGh @('release','create',$ReleaseTag,'--repo',$script:ReleaseRepository,'--verify-tag','--draft','--title',"mmhmem $ReleaseTag",'--generate-notes')}
+    if (-not $existing.Count) {$null=Invoke-ReleaseGh (Get-CiReleaseCreateArguments $ReleaseTag)}
     $context=Invoke-LinuxReleaseValidation -Tag $ReleaseTag -RunId $id -SupersededAssets @('SHA256SUMS')
     if ($context.Manifest.package_version -cne $ReleaseTag.Substring(1)) {throw 'Tag does not match verified binary package version'}
     Assert-NoE2EBuildMarker (Get-ReleaseBundleFile $context.BundleDirectory $script:LinuxAssetName)

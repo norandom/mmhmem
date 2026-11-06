@@ -37,7 +37,7 @@ then pin catalogs with `bash build-marketplace.sh --release TAG` or
 Do not point the catalog at an older binary release that lacks the package.
 
 The plugin is skill-only: MCP registration and platform-specific binaries
-remain the responsibility of the root installers. Catalog installation uses
+remain the responsibility of `mmhmem setup`. Catalog installation uses
 the [Codex packaging format](https://developers.openai.com/plugins/build/plugins)
 and [Claude marketplace format](https://code.claude.com/docs/en/plugin-marketplaces).
 Gemini/Antigravity manifests mirror the sibling repository's format; a native

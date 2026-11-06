@@ -33,7 +33,8 @@ def main():
         run("cargo", "fmt", "--check", cwd=snapshot)
         build_env = dict(os.environ, CARGO_TARGET_DIR=str(root / "target/pre-commit"),
                          CARGO_INCREMENTAL="0", CARGO_BUILD_JOBS="2")
-        run("cargo", "test", "--locked", "--test", "loc_caps", cwd=snapshot, env=build_env)
+        run("cargo", "test", "--locked", "--test", "loc_caps", "--test", "install_docs",
+            cwd=snapshot, env=build_env)
         for features in ([], ["--features", "otel"]):
             run("cargo", "clippy", "--locked", "--all-targets", *features,
                 "--", "-D", "warnings", cwd=snapshot, env=build_env)

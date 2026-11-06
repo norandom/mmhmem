@@ -36,9 +36,33 @@ cargo test
 ```
 
 This is a native development build, not the portable Linux distribution gate.
-To register it locally, use `bash deploy/install_local.sh` on Linux/macOS or
-`powershell -File deploy\install_local.ps1` on Windows. The installer can find
-`target/release/mmhmem` or accept an explicit binary path.
+Users install releases with the one-liners in the [installation guide](installation.md).
+
+## Installer layout
+
+- `src/setup/` is the installer: `mmhmem setup` and `mmhmem update`.
+- `deploy/bootstrap/install.{sh,ps1}.tmpl` are rendered per release by
+  `scripts/render-bootstraps.ps1` (version and archive SHA-256 filled in) and
+  published as the release assets `install.sh` / `install.ps1`.
+  `scripts/test-bootstraps.ps1` checks them offline.
+- The root `install.ps1` / `install.sh` are stubs for the old
+  `raw.githubusercontent.com/.../HEAD/install.*` one-liners. They print the
+  new command, download and change nothing, and exit with code 2 (piped into
+  `iex`, `install.ps1` sets `$LASTEXITCODE` to 2 instead of exiting).
+  `scripts/test-install-stub.ps1` and `scripts/test-install-stub.sh` check
+  them, through `scripts/test-install.ps1` / `scripts/test-install.sh`.
+- The old installer engine (`lib.*`, `deploy/install_local.*`,
+  `deploy/manage_*`, `deploy/*_onboarding.*`, `deploy/check_worker.*`,
+  `deploy/install_binary.ps1`) and its tests stay until the release after
+  the stubs ships (reliable-installers task 9.3). With a checkout you can
+  still run `bash deploy/install_local.sh` or
+  `powershell -File deploy\install_local.ps1` against `target/release/mmhmem`
+  or an explicit binary path; it is not a supported user install.
+- `tests/install_docs.rs` checks that README.md, the user docs, the release
+  notes template (`.github/release-notes.md`) and the stubs use the release
+  one-liners only.
+- The installer end-to-end gate is `.github/workflows/installer-e2e.yml`; it
+  runs in CI only.
 
 ## Default Linux release build
 

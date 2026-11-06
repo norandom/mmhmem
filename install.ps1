@@ -1,45 +1,32 @@
-#requires -Version 5.1
-# mmhmem-transition-delegator
+# mmhmem: this installer has moved.
 #
-# TRANSITION INSTALLER. This file replaces the old repository-HEAD installer so
-# that the one-liner
-#   irm https://raw.githubusercontent.com/norandom/mmhmem/HEAD/install.ps1 | iex
-# keeps working while HEAD moves ahead of the published release. It installs the
-# latest published release exactly as that release's own installer does, with
-# every download pinned to that release's tag:
-#   1. resolve the latest stable release tag (vX.Y.Z) from the GitHub API;
-#   2. fetch that tag's own install.ps1;
-#   3. rewrite its /HEAD and releases/latest/download URLs to the tag;
-#   4. run it with your parameters.
-# It refuses, changing nothing, if the tag lookup or fetch fails, if a /HEAD
-# reference would remain, or if the fetched script is itself this delegator.
-# Task 9.2 in .kiro/specs/reliable-installers replaces this file with a stub that
-# points at the new release assets.
-[CmdletBinding()]
-param(
-    [string]$Agent,
-    [string]$WorkerModel,
-    [string]$WorkerUrl,
-    [string]$WorkerApiKey,
-    [switch]$Remove,
-    [switch]$DryRun
-)
-$ErrorActionPreference = 'Stop'
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-function Stop-Delegator([string]$Message) { throw "mmhmem: $Message Nothing was changed." }
-try {
-    $release = Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/norandom/mmhmem/releases/latest'
-    $tag = [string]$release.tag_name
-} catch { Stop-Delegator 'could not look up the latest mmhmem release.' }
-if ($tag -notmatch '^v\d+\.\d+\.\d+$') { Stop-Delegator "the latest release tag '$tag' is not a stable version (vX.Y.Z)." }
-try {
-    $response = Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/norandom/mmhmem/$tag/install.ps1"
-    $text = [Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray()).TrimStart([char]0xFEFF)
-} catch { Stop-Delegator "could not download the installer for release $tag." }
-if (-not $text.Trim()) { Stop-Delegator "the installer for release $tag is empty." }
-if ($text.Contains('mmhmem-transition-delegator')) { Stop-Delegator "release $tag ships the transition delegator itself; refusing to recurse." }
-$text = $text.Replace('https://raw.githubusercontent.com/norandom/mmhmem/HEAD', "https://raw.githubusercontent.com/norandom/mmhmem/$tag")
-$text = $text.Replace('https://github.com/norandom/mmhmem/releases/latest/download', "https://github.com/norandom/mmhmem/releases/download/$tag")
-if ($text.Contains('/HEAD')) { Stop-Delegator "the installer for release $tag still refers to the moving HEAD; refusing." }
-if ($text.Contains('releases/latest')) { Stop-Delegator "the installer for release $tag still refers to the latest release; refusing." }
-& ([scriptblock]::Create($text)) @PSBoundParameters
+# This file only prints the new install command. It downloads nothing, changes
+# nothing and ignores every option (old ones such as -Agent or -Hooks are now
+# chosen in mmhmem setup). The real installer is a per-release asset:
+#   irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex
+#
+# Exit code 2 means "nothing was installed, use the new command". Run as a file
+# (.\install.ps1 or powershell -File install.ps1) it exits with 2. Piped into
+# iex it never calls exit, because that would close your terminal; it sets
+# $LASTEXITCODE to 2 instead.
+function Show-MmhmemMoved {
+    Write-Host 'The mmhmem installer has moved. This script did not download or change anything.'
+    Write-Host ''
+    Write-Host 'To install mmhmem, run this in PowerShell:'
+    Write-Host ''
+    Write-Host '  irm https://github.com/norandom/mmhmem/releases/latest/download/install.ps1 | iex'
+    Write-Host ''
+    Write-Host 'It installs the latest signed release and opens mmhmem setup, where you choose'
+    Write-Host 'your tools and features. Options such as -Agent or -Hooks are no longer used.'
+    Write-Host ''
+    Write-Host 'Updating? With mmhmem v0.5.1 or later run: mmhmem update'
+    Write-Host 'With v0.5.0 run: mmhmem setup. Older versions: use the command above.'
+}
+Show-MmhmemMoved
+# A function defined by a script file knows that file; one defined through iex does not.
+if (${function:Show-MmhmemMoved}.File) {
+    Remove-Item -LiteralPath function:Show-MmhmemMoved
+    exit 2
+}
+Remove-Item -LiteralPath function:Show-MmhmemMoved
+$global:LASTEXITCODE = 2

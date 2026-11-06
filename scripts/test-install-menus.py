@@ -1,4 +1,4 @@
-"""Exercise piped Bash bootstrap menus (via the transition delegator and the tag installer fixture) through a real pseudo-terminal (CI only)."""
+"""Exercise piped Bash bootstrap menus (the tag-pinned release installer fixture, written by test-install.sh) through a real pseudo-terminal (CI only)."""
 import errno
 import json
 import os
@@ -25,7 +25,7 @@ def terminal_case(answers, dry_run=True):
     if pid == 0:
         command = 'cat "$1" | bash -s --' + (' --dry-run' if dry_run else '')
         os.execvpe('bash', ['bash', '-c', command,
-                          'test', str(root / 'install.sh')], env)
+                          'test', str(scratch / 'release-install.sh')], env)
     output = bytearray()
     deadline = time.monotonic() + 20
     os.write(fd, answers.encode())

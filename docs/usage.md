@@ -43,7 +43,7 @@ Ask your agent to call `shunt_warmup` for key project files, up to 25 per batch,
 to prepare summaries before the first read.
 
 After a context clear, `/mmhmem-recap` retrieves the latest checkpoint without
-a service restart or worker model. The installers supply recap guidance for
+a service restart or worker model. `mmhmem setup` installs recap guidance for
 Claude Code, OpenCode, and Codex without client-side hooks. Checkpoint save time
 and timestamped breadcrumbs are shown separately: breadcrumbs record activity
 and do not reconstruct an unsaved working-state summary.
@@ -56,7 +56,7 @@ whether it exists.
 
 The new recovery timestamps and complete history-only responses require an
 updated binary; proactive save cadence requires updated skills/commands.
-Refresh them through the installer, then use the harness's normal restart or
+Refresh them with `mmhmem update`, then use the harness's normal restart or
 reconnect lifecycle to load updates. Recovery itself requires no restart and
 there is no store migration or new service configuration.
 
