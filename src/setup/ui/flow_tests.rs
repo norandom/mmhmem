@@ -87,6 +87,21 @@ fn a_set_up_worker_model_shows_as_configured() {
 }
 
 #[test]
+fn the_record_says_whether_a_worker_model_is_set_up() {
+    let fx = with_clis();
+    install(&fx);
+    let stored = fx.deps.store.load().expect("load").expect("record");
+    assert!(!stored.worker_configured);
+    // A worker model set up later shows in the record after a check.
+    let mut fx = fx;
+    fx.deps.env = fx.deps.env.clone().with_worker_configured(true);
+    let mut flow = fx.flow(Newest::Unknown);
+    flow.begin(&HomeAction::Check);
+    let stored = fx.deps.store.load().expect("load").expect("record");
+    assert!(stored.worker_configured);
+}
+
+#[test]
 fn ticking_a_tool_on_turns_on_its_hook_too() {
     let fx = with_clis();
     let mut flow = fx.flow(Newest::Checking);

@@ -125,6 +125,12 @@ impl Flow {
         };
         let mut applied = ApplyReport { agents: Vec::new() };
         let verify = checker.run(&self.selection, &mut applied, &mut record);
+        if record.worker_configured != self.worker_ready {
+            record.worker_configured = self.worker_ready;
+            if let Err(e) = self.deps.store.save(&record) {
+                self.loaded.notes.push(self.tidy(&e.to_string()));
+            }
+        }
         self.progress = Some(self.progress_of(&applied, &verify, &[]));
         self.loaded.record = Some(record);
     }
@@ -169,6 +175,7 @@ impl Flow {
         if record.agents.is_empty() {
             return;
         }
+        record.worker_configured = self.worker_ready;
         record.release = Some(self.deps.version.clone());
         self.finish_install(record, &planned.plan);
     }
