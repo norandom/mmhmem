@@ -18,11 +18,13 @@
 //! - **Instructions**: the `<!-- mmhmem:routing:… -->` section in
 //!   `~/.claude/rules/mmhmem.md`, in the exact form `manage_routing.ps1`
 //!   writes (`edit::markdown`).
-//! - **Read hook**: one group in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`
+//! - **Read hook**: one handler in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`
 //!   `hooks.PreToolUse`, the shape `manage_hooks.ps1` writes (lines 201-205
-//!   and 230-232): matcher `Read|Bash|PowerShell`, one handler
-//!   `{type: "command", command: <binary>, args: ["hook", "claude"],
-//!   timeout: 10}`.
+//!   and 230-232): `{type: "command", command: <binary>, args: ["hook",
+//!   "claude"], timeout: 10}`, new in its own group with matcher
+//!   `Read|Bash|PowerShell`. mmhmem owns the handler, never the group: one
+//!   already in a user's group is updated or removed there alone
+//!   (`hook_entry.rs`).
 //!
 //! The installed binary path comes from the caller ([`ClaudeCode::new`]).
 //!
@@ -40,7 +42,7 @@ use serde_json::{Value, json};
 
 use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
-    Invocation, Selection,
+    Invocation, Selection, hook_entry,
 };
 use crate::setup::assets::{CLAUDE_RECAP_COMMAND, ROUTING_INSTRUCTIONS, UNIFIED_MEMORY_SKILL};
 use crate::setup::edit::json::{self as edit_json, JsonEditError};
@@ -243,28 +245,12 @@ impl ClaudeCode {
         let text = chain.text(file)?.unwrap_or_default();
         let want = hook_group(&self.binary_text());
         let matcher = ElementMatcher::MmhmemHook(HookHarness::Claude);
-        let own =
-            edit_json::array_find(&text, &HOOK_POINTER, |v| matcher.matches(v)).map_err(&err)?;
-        let current = edit_json::get(&text, &HOOK_POINTER).map_err(&err)?;
-        let unchanged = own.len() == 1
-            && current
-                .as_ref()
-                .and_then(|a| a.get(own[0]))
-                .is_some_and(|g| *g == want);
-        let mut after = text.clone();
-        let mut missing = 0;
-        if !unchanged {
-            for index in own.iter().rev() {
-                after = edit_json::array_remove(&after, &HOOK_POINTER, *index).map_err(&err)?;
-            }
-            missing = edit_json::missing_keys(&after, &HOOK_POINTER).map_err(&err)?;
-            after = edit_json::array_append(&after, &HOOK_POINTER, &want).map_err(&err)?;
-        }
+        let planned = hook_entry::install(&text, &HOOK_POINTER, matcher, &want).map_err(&err)?;
         Ok(Proposal {
             target: hook_target(paths),
             file: file.clone(),
-            after: after.into_bytes(),
-            missing_parents: Some(missing as u32),
+            after: planned.after.into_bytes(),
+            missing_parents: Some(planned.missing as u32),
             summary: say::add(What::ReadHook, AgentId::ClaudeCode.label(), file),
         })
     }

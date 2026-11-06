@@ -314,61 +314,37 @@ impl HookHarness {
     }
 }
 
-/// How mmhmem's element of a shared JSON array is recognised. A closed set:
+/// How mmhmem's entry in a shared JSON array is recognised. A closed set:
 /// the record stores which rule applies, never the element's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ElementMatcher {
-    /// A hook group: an object whose `hooks` array holds at least one handler
-    /// that runs the mmhmem binary (file name `mmhmem` or `mmhmem.exe`) with
+    /// mmhmem's read-routing hook HANDLER inside a hook group (an object
+    /// with a `hooks` array). mmhmem owns the handler, never the group: the
+    /// old installers could leave it in a group that also holds the user's
+    /// handlers (see `record_hook.rs`). A handler is mmhmem's when it runs
+    /// the mmhmem binary (file name `mmhmem` or `mmhmem.exe`) with
     /// `hook <harness>`, either as `command` = binary path plus
     /// `args = ["hook", "<harness>"]` (Claude Code form), or as a `command`
-    /// string `[& ]<binary path, bare or quoted with ' or "> hook <harness>`
-    /// (Codex shell form).
+    /// string `[& ]<binary path, bare or quoted> hook <harness>` (Codex
+    /// shell form).
     MmhmemHook(HookHarness),
 }
 
 impl ElementMatcher {
-    /// Whether `element` is mmhmem's element under this rule.
+    /// Whether the group `element` holds at least one of mmhmem's handlers.
     pub fn matches(self, element: &serde_json::Value) -> bool {
+        !self.own_handlers(element).is_empty()
+    }
+
+    /// The indices of mmhmem's handlers in the `hooks` array of `element`.
+    pub fn own_handlers(self, element: &serde_json::Value) -> Vec<usize> {
         let Self::MmhmemHook(harness) = self;
-        element
-            .get("hooks")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|hooks| hooks.iter().any(|h| is_own_handler(h, harness)))
+        let hooks = element.get("hooks").and_then(serde_json::Value::as_array);
+        hooks.map_or_else(Vec::new, |hooks| {
+            (0..hooks.len())
+                .filter(|i| super::hook::is_own_handler(&hooks[*i], harness))
+                .collect()
+        })
     }
-}
-
-fn is_mmhmem_binary(path: &str) -> bool {
-    let name = path.rsplit(['/', '\\']).next().unwrap_or("");
-    name == "mmhmem" || name == "mmhmem.exe"
-}
-
-fn is_own_handler(handler: &serde_json::Value, harness: HookHarness) -> bool {
-    let Some(command) = handler.get("command").and_then(serde_json::Value::as_str) else {
-        return false;
-    };
-    let want = ["hook", harness.as_str()];
-    match handler.get("args").and_then(serde_json::Value::as_array) {
-        Some(args) => {
-            is_mmhmem_binary(command)
-                && args.len() == 2
-                && args.iter().zip(want).all(|(a, w)| a.as_str() == Some(w))
-        }
-        None => shell_form_matches(command, &want),
-    }
-}
-
-/// `[& ]<path> hook <harness>` with the path bare or quoted.
-fn shell_form_matches(command: &str, want: &[&str; 2]) -> bool {
-    let rest = command.trim();
-    let rest = rest.strip_prefix('&').map_or(rest, str::trim_start);
-    let (path, tail) = match rest.chars().next() {
-        Some(q @ ('\'' | '"')) => match rest[1..].find(q) {
-            Some(end) => (&rest[1..=end], &rest[end + 2..]),
-            None => return false,
-        },
-        _ => rest.split_once(' ').unwrap_or((rest, "")),
-    };
-    is_mmhmem_binary(path) && tail.split_whitespace().eq(want.iter().copied())
 }

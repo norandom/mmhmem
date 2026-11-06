@@ -85,6 +85,7 @@ released.
   - _Requirements: 2.1, 8.1, 8.4_
 
 - [x] 3.2 (P) Claude Code
+  - Status 2026-11-06 (follow-up G1, also Codex 3.4): setup owns its hook handler, never the group; a handler in a user's group is updated or removed there alone, duplicates collapse, drift hashes the handler (research.md "Note 2026-11-06"). Tests: `src/setup/agents/hook_group_tests.rs`.
   - Decide (from the 2.5 review): `plan.rs` applies file bytes only. Either plan the `~/.claude.json` `mcpServers.mmhmem` edit as file bytes with `edit::json` (reviewable, journaled, rollback-safe), or treat `claude mcp add/remove` as a separate non-file step with its own record and rollback. Prefer file bytes unless 1.1 fixtures show Claude Code rewrites the file in a way that conflicts.
   - Detect the CLI, plan MCP registration through `claude mcp add --scope user`, the skill, the recap command, the delimited section in `CLAUDE.md` and the optional hook entry in `settings.json`, and plan removal of only those.
   - Done when temp-home tests cover install, re-plan with no changes, the hook on and off, removal leaving unrelated settings byte-identical, and an invalid `settings.json` skipping only Claude Code.

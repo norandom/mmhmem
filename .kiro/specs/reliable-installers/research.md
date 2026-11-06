@@ -476,3 +476,30 @@ Verified on Windows only: `cargo build` (default and `otel`), `cargo clippy
 spike tests. **Pending:** Linux and macOS builds. This machine has no Linux
 or macOS Rust targets, and WSL has no Rust toolchain. They are first proven
 by CI (task 8.1), so task 1.4 stays open until then.
+
+## Note 2026-11-06: follow-ups G1 and G3 (hook handlers, Codex command)
+
+**G1, a user's handler in mmhmem's hook group.** Claude Code `settings.json`
+and Codex `hooks.json` hold `hooks.PreToolUse: [{matcher, hooks: [handler,
+...]}]`. `ElementMatcher::MmhmemHook` treated a whole group as mmhmem's when
+it held mmhmem's handler, so an update (remove the group, append a new one)
+and a removal (remove the group) also took the user's handlers in that group.
+The old `manage_hooks.ps1`/`.py` owned only the handler: they updated its
+`command` in place inside a shared group, removed only the handler, dropped a
+group only when it became empty, and removed duplicate handlers. Adoption
+takes such files over, so this was a likely data loss. Fix: setup owns the
+handler, never the group (`src/setup/agents/hook_entry.rs`, nested edits in
+`src/setup/edit/json_nested.rs`). A new handler gets its own group (never
+merged into a user group, even one with the same matcher); an existing one
+is updated in place, key by key, when its group has mmhmem's matcher or holds
+nothing else, and otherwise moves to mmhmem's own group; duplicates are
+removed; removal takes only mmhmem's handlers and drops a group only when
+they were all it held. The record's hash describes the handler
+(`src/setup/record_hook.rs` `handler_view`: the group's `matcher` plus that
+handler), so edits to the user's handlers are not drift. For a group with
+only mmhmem's handler the view equals the group, so existing records keep
+their hashes. Several mmhmem handlers now hash as a set no record matches
+(drift: "changed") instead of `Unreadable`, so the plan check accepts the
+file and an install can collapse them. The e2e harness strips mmhmem's
+handlers, not groups (`Remove-MmhmemHookHandlers`,
+`scripts/e2e-home-state.ps1`).

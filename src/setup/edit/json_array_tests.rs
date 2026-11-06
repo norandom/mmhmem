@@ -133,3 +133,40 @@ fn invalid_input_reports_position_without_secrets() {
         assert!(!format!("{err} {err:?}").contains("SECRET"));
     }
 }
+
+/// A user group holding the user's handler and mmhmem's (follow-up G1):
+/// JSONC, CRLF and a BOM.
+const SHARED: &str = "\u{feff}{\r\n  // mine\r\n  \"hooks\": {\r\n    \"PreToolUse\": [\r\n      { \"matcher\": \"Bash\", \"hooks\": [\r\n        { \"type\": \"command\", \"command\": \"audit.sh\" },  // keep\r\n        { \"type\": \"command\", \"command\": \"/old/mmhmem\", \"timeout\": 10 },\r\n      ] }\r\n    ]\r\n  }\r\n}\r\n";
+
+#[test]
+fn nested_edits_change_only_the_named_handler() {
+    let inner = Some(("hooks", 1));
+    let new = json!("/new/mmhmem");
+    let set = nested_set(SHARED, HOOKS, 0, inner, "command", &new).unwrap();
+    assert_eq!(set, SHARED.replace("/old/mmhmem", "/new/mmhmem"));
+    assert_eq!(
+        nested_set(&set, HOOKS, 0, inner, "command", &new).unwrap(),
+        set
+    );
+    let added = nested_set(SHARED, HOOKS, 0, inner, "args", &json!(["hook"])).unwrap();
+    assert!(added.contains("\"args\": [\"hook\"]"));
+    assert!(added.starts_with('\u{feff}') && !added.replace("\r\n", "").contains('\n'));
+    let dropped = nested_remove_key(SHARED, HOOKS, 0, inner, "timeout").unwrap();
+    assert_eq!(dropped, SHARED.replace(", \"timeout\": 10", ""));
+    let matcher = nested_set(SHARED, HOOKS, 0, None, "matcher", &json!("Read")).unwrap();
+    assert_eq!(matcher, SHARED.replace("\"Bash\"", "\"Read\""));
+    let removed = nested_remove(SHARED, HOOKS, 0, "hooks", 1).unwrap();
+    let mine = "{ \"type\": \"command\", \"command\": \"audit.sh\" },  // keep\r\n";
+    assert!(removed.contains(mine), "{removed:?}");
+    assert!(!removed.contains("mmhmem"));
+    assert_eq!(dialect(&removed).unwrap(), Dialect::Jsonc);
+    for (outer, index) in [(1, 0), (0, 5)] {
+        assert_eq!(
+            nested_remove(SHARED, HOOKS, outer, "hooks", index).unwrap(),
+            SHARED
+        );
+        let inner = Some(("hooks", index));
+        let same = nested_set(SHARED, HOOKS, outer, inner, "x", &json!(1)).unwrap();
+        assert_eq!(same, SHARED);
+    }
+}

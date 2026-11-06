@@ -1,5 +1,5 @@
 //! Removal of Claude Code entries from the install record (task 3.2):
-//! mmhmem's keys of a JSON entry, its elements of a shared JSON array, its
+//! mmhmem's keys of a JSON entry, its hook handlers in a shared JSON array, its
 //! Markdown section and its own files. Everything else stays byte-identical.
 
 use std::io;
@@ -8,7 +8,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::{SCOPE, hides_contents, json_problem};
-use crate::setup::agents::{AgentId, AgentProblem, FileChain, section_left};
+use crate::setup::agents::{AgentId, AgentProblem, FileChain, hook_entry, section_left};
 use crate::setup::edit::json::{self as edit_json, JsonEditError};
 use crate::setup::edit::markdown::{self, routing};
 use crate::setup::plan::{Action, Change, target_file};
@@ -52,22 +52,16 @@ fn remove_entry(
     }
 }
 
-/// Takes every element `matcher` accepts out of the array; the last removal
-/// prunes up to `missing` containers.
+/// Takes every handler `matcher` accepts out of the array (never the user's
+/// handlers in the same group); an emptied group goes, then up to `missing`
+/// containers.
 fn remove_elements(
     text: &str,
     pointer: &[KeySegment],
     matcher: ElementMatcher,
     missing: usize,
 ) -> Result<String, JsonEditError> {
-    let pointer = segments(pointer);
-    let own = edit_json::array_find(text, &pointer, |v| matcher.matches(v))?;
-    let mut out = text.to_owned();
-    for (n, index) in own.iter().rev().enumerate() {
-        let prune = if n + 1 == own.len() { missing } else { 0 };
-        out = edit_json::array_remove_and_prune(&out, &pointer, *index, prune)?;
-    }
-    Ok(out)
+    hook_entry::remove(text, &segments(pointer), matcher, missing)
 }
 
 /// The change that takes `entry` out of its file, `None` when nothing is

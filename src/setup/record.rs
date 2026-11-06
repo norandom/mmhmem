@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 mod check;
 #[path = "record_drift.rs"]
 mod drift;
+#[path = "record_hook.rs"]
+mod hook;
 #[path = "record_store.rs"]
 mod store;
 #[path = "record_types.rs"]
@@ -39,6 +41,7 @@ pub use drift::{
     Drift, DriftReport, Observation, Probe, Recovery, RecoveryReport, detect_drift, normalize_json,
     normalize_text, observe, observe_in, path_entry_hash, recovery_scan,
 };
+pub use hook::{handler_view, own_handlers, same_handler};
 pub use store::{
     BACKUPS_DIR, LocationError, LocationInput, Os, RECORD_FILE, RecordError, RecordStore,
     UnreadableKind, parse_record,

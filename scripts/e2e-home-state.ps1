@@ -256,7 +256,7 @@ function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$
     try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add('the earlier ~/.claude/settings.json is not JSON');return ,$failures.ToArray()}
     try {$after=$AfterText | ConvertFrom-Json} catch {$failures.Add('~/.claude/settings.json is no longer valid JSON');return ,$failures.ToArray()}
     if ($HookInstalled) {
-        $stripped=Remove-MmhmemHookGroups $after
+        $stripped=Remove-MmhmemHookHandlers $after
         if (-not $stripped.found) {$failures.Add('~/.claude/settings.json has no mmhmem read-routing hook')}
         $after=$stripped.json
     }
@@ -287,13 +287,17 @@ function Compare-ClaudeSettings([string]$BeforeText,[string]$AfterText,[string]$
 
 # ------------------------------------------------- read-routing hooks ---
 # The read-routing hook is on by default (setup flow_select.rs), so an
-# install adds one group running `<mmhmem> hook <harness>` to the agent's
-# hooks file. These helpers take exactly those groups out, so every other
-# hook, event and key can still be compared with the seed.
-$script:MmhmemHookCommand='(?i)mmhmem(\.exe)?["'']?\s+hook\s+(claude|codex|opencode)\b'
-# @{json=<parsed copy without mmhmem's groups>; found=<whether one was there>}.
-# An event array that only held mmhmem's group is dropped.
-function Remove-MmhmemHookGroups($Json) {
+# install adds one handler running `<mmhmem> hook <harness>` to the agent's
+# hooks file. mmhmem owns that HANDLER, never its group: setup adds it in a
+# group of its own, but one it finds inside a user's group (old installs,
+# adoption) stays there (src/setup/agents/hook_entry.rs). These helpers take
+# exactly mmhmem's handlers out, so every other handler, group, event and key
+# can still be compared with the seed.
+$script:MmhmemHookCommand='(?i)mmhmem(\.exe)?["''‘’‚‛]?\s+hook\s+(claude|codex|opencode)\b'
+# @{json=<parsed copy without mmhmem's handlers>; found=<whether one was there>}.
+# A group left without handlers is dropped, and then an event array left
+# without groups.
+function Remove-MmhmemHookHandlers($Json) {
     $copy=($Json | ConvertTo-Json -Depth 32) | ConvertFrom-Json
     $found=$false
     $hooks=(Get-JsonMember $copy 'hooks')[1]
@@ -301,24 +305,28 @@ function Remove-MmhmemHookGroups($Json) {
     foreach ($event in @(Get-JsonNames $hooks)) {
         $groups=@($hooks.$event)
         $kept=@()
+        $changed=$false
         foreach ($group in $groups) {
+            $handlers=@($group.hooks)
             # Claude Code's handler is in exec form (command = the binary,
             # args = hook claude); Codex's is one command string.
-            $commands=@($group.hooks | ForEach-Object {(@([string]$_.command)+@($_.args | ForEach-Object {[string]$_})) -join ' '})
-            if (@($commands | Where-Object {$_ -match $script:MmhmemHookCommand}).Count) {$found=$true} else {$kept+=,$group}
+            $others=@($handlers | Where-Object {((@([string]$_.command)+@($_.args | ForEach-Object {[string]$_})) -join ' ') -notmatch $script:MmhmemHookCommand})
+            if ($others.Count -eq $handlers.Count) {$kept+=,$group;continue}
+            $found=$true;$changed=$true
+            if ($others.Count) {$group.hooks=$others;$kept+=,$group}
         }
-        if ($kept.Count -eq $groups.Count) {continue}
+        if (-not $changed) {continue}
         if ($kept.Count) {$hooks.$event=$kept} else {$hooks.PSObject.Properties.Remove($event)}
     }
     return @{json=$copy;found=$found}
 }
 # Failure messages for a hooks file (Codex ~/.codex/hooks.json) after an
-# install: parsed, it must equal the earlier text plus mmhmem's group.
+# install: parsed, it must equal the earlier text plus mmhmem's handler.
 function Compare-HooksFile([string]$Label,[string]$BeforeText,[string]$AfterText) {
     $failures=New-Object Collections.Generic.List[string]
     try {$before=$BeforeText | ConvertFrom-Json} catch {$failures.Add("the earlier $Label is not JSON");return ,$failures.ToArray()}
     try {$after=$AfterText | ConvertFrom-Json} catch {$failures.Add("$Label is no longer valid JSON");return ,$failures.ToArray()}
-    $stripped=Remove-MmhmemHookGroups $after
+    $stripped=Remove-MmhmemHookHandlers $after
     if (-not $stripped.found) {$failures.Add("$Label has no mmhmem read-routing hook")}
     if ((ConvertTo-CanonicalJson $before) -cne (ConvertTo-CanonicalJson $stripped.json)) {$failures.Add("$Label changed beyond the mmhmem hook")}
     return ,$failures.ToArray()

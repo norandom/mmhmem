@@ -406,6 +406,10 @@ fn from_jsonc(value: JsonValue<'_>) -> Result<Value, JsonEditError> {
 mod array;
 pub use array::{array_append, array_find, array_remove, array_remove_and_prune, missing_keys};
 
+#[path = "json_nested.rs"]
+mod nested;
+pub use nested::{Inner, nested_remove, nested_remove_key, nested_set};
+
 #[cfg(test)]
 #[path = "json_tests.rs"]
 mod tests;

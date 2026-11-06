@@ -315,6 +315,22 @@ try {
     Assert-True ((Compare-HooksFile 'hooks.json' $seedHooks $seedHooks).Count -eq 1) 'Codex hooks without the mmhmem group fail'
     $h.hooks.SessionStart[0].hooks[0].command='echo changed'
     Assert-True (@(Compare-HooksFile 'hooks.json' $seedHooks ($h | ConvertTo-Json -Depth 16)) -match 'changed beyond').Count -eq 1 'a changed user hook in Codex fails'
+    # mmhmem owns its HANDLER, never the group: inside a user's group (old
+    # installs, adoption) only the handler is taken out, and the group stays.
+    $shared=$seedSettings | ConvertFrom-Json
+    $shared.hooks.PreToolUse[0].hooks=@($shared.hooks.PreToolUse[0].hooks)+@([pscustomobject]$ours.hooks[0])
+    $sharedText=$shared | ConvertTo-Json -Depth 16
+    Assert-True ((Compare-ClaudeSettings $seedSettings $sharedText $null -HookInstalled).Count -eq 0) 'mmhmem handler inside the user group passes'
+    $stripped=Remove-MmhmemHookHandlers ($sharedText | ConvertFrom-Json)
+    Assert-True ($stripped.found -and @($stripped.json.hooks.PreToolUse).Count -eq 1 -and @($stripped.json.hooks.PreToolUse[0].hooks).Count -eq 1) 'only the handler is stripped from a shared group'
+    $shared.hooks.PreToolUse[0].hooks=@([pscustomobject]$ours.hooks[0])
+    Assert-True (@(Compare-ClaudeSettings $seedSettings ($shared | ConvertTo-Json -Depth 16) $null -HookInstalled) -match 'key hooks changed').Count -eq 1 'a user handler lost from a shared group is reported'
+    $quoted=$seedHooks | ConvertFrom-Json
+    $userHandler=$quoted.hooks.SessionStart[0].hooks[0]
+    $quoted.hooks.SessionStart[0].hooks=@($userHandler,[pscustomobject]@{type='command';command="& 'C:\Users\O''Brien\mmhmem.exe' hook codex";timeout=10})
+    Assert-True ((Compare-HooksFile 'hooks.json' $seedHooks ($quoted | ConvertTo-Json -Depth 16)).Count -eq 0) 'Codex handler with a quoted path inside a user group passes'
+    $quoted.hooks.SessionStart[0].hooks=@([pscustomobject]@{type='command';command='echo mmhmem-like hook-codex';timeout=10},$userHandler)
+    Assert-True ((Compare-HooksFile 'hooks.json' $seedHooks ($quoted | ConvertTo-Json -Depth 16)).Count -eq 2) 'a handler that is not mmhmem is kept and compared'
     $check={param($result,$steps) [pscustomobject]@{last_check=[pscustomobject]@{result=$result};pending_user_steps=$steps}}
     Assert-True (Test-AgentCheckOk 'claude_code' (& $check 'pass' @())) 'a pass is OK'
     Assert-True (Test-AgentCheckOk 'codex' (& $check 'user_steps_pending' @('approve_hook_in_codex'))) 'Codex waiting for the hook approval is OK'

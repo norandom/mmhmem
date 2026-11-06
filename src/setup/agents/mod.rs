@@ -18,7 +18,8 @@
 //! **Rule for every agent module** (from the 2.2/2.3 reviews): edit leaf keys
 //! of mmhmem's own entry (e.g. `mcp.servers.mmhmem.command`), never replace a
 //! whole user-visible object or array. Use the JSON array element functions
-//! for shared arrays (Claude Code `hooks.PreToolUse`) and keep user-added
+//! for shared arrays (`hooks.PreToolUse`: mmhmem owns its hook handler, never
+//! the group, see `hook_entry.rs`) and keep user-added
 //! keys inside mmhmem's entry. Record `missing_parents` before a `set` so
 //! removal prunes only parents mmhmem created.
 
@@ -35,6 +36,7 @@ pub mod claude_code;
 pub mod claude_desktop;
 pub mod codex;
 mod env;
+mod hook_entry;
 pub mod opencode;
 mod problem;
 
@@ -54,6 +56,8 @@ pub(crate) mod check_tests;
 pub(crate) mod doubles;
 #[cfg(test)]
 pub(crate) mod doubles_cli;
+#[cfg(test)]
+mod hook_group_tests;
 #[cfg(test)]
 mod registry_tests;
 #[cfg(test)]

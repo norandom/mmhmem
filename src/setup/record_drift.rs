@@ -16,9 +16,11 @@
 //!   down to those top-level keys first (an absent key stays absent), so
 //!   keys the user adds inside mmhmem's entry are not drift. An object that
 //!   holds none of those keys is `Missing` (only user keys are left).
-//! - `json_array_element`: the one array element its `ElementMatcher`
-//!   accepts, in canonical JSON. No match is `Missing`; more than one is
-//!   `Unreadable`.
+//! - `json_array_element`: the one hook handler its `ElementMatcher`
+//!   accepts, with its group's `matcher` (`record_hook.rs` `handler_view`;
+//!   the user's handlers in the same group are left out), in canonical
+//!   JSON. No match is `Missing`; more than one hashes all of them, which no
+//!   recorded hash matches.
 //! - `markdown_section`: the bytes from the start-marker line through the
 //!   end-marker line, CRLF turned into LF.
 //! - `file`: the file bytes, with CRLF turned into LF when the file is UTF-8
@@ -285,13 +287,17 @@ fn observe_element(text: &str, pointer: &[KeySegment], matcher: ElementMatcher) 
         Ok(None) => return Observation::Missing,
         Err(e) => return Observation::Unreadable(e.to_string()),
     };
-    let mut own = array.iter().filter(|e| matcher.matches(e));
-    match (own.next(), own.next()) {
-        (Some(element), None) => hash_value(element),
-        (None, _) => Observation::Missing,
-        (Some(_), Some(_)) => {
-            Observation::Unreadable("mmhmem's entry appears more than once".to_owned())
-        }
+    // mmhmem's handler, not the group it sits in (`record_hook.rs`).
+    let views: Vec<Value> = super::hook::own_handlers(&array, matcher)
+        .into_iter()
+        .map(|(group, handler)| super::hook::handler_view(&array[group], handler))
+        .collect();
+    match views.as_slice() {
+        [] => Observation::Missing,
+        [one] => hash_value(one),
+        // Duplicates (hand edits, old installs) never match a recorded hash,
+        // so drift shows them as changed; an install collapses them to one.
+        several => hash_value(&serde_json::json!({ "duplicates": several })),
     }
 }
 

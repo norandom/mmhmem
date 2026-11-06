@@ -9,9 +9,11 @@
 //!   keeps every other key of the table (`tool_timeout_sec`, `env`, ...). The
 //!   record hashes only `command` and `args`. The old installer's
 //!   `# BEGIN mmhmem` block is converted in the same change.
-//! - `hooks.json`: one `PreToolUse` group (matcher `^(Bash|shell)$`, command
-//!   `<binary> hook codex`, timeout 10 s: the shape of `manage_hooks.ps1` and
-//!   `manage_hooks.py`) as one element of the shared array.
+//! - `hooks.json`: one `PreToolUse` handler (command `<binary> hook codex`,
+//!   timeout 10 s: the shape of `manage_hooks.ps1` and `manage_hooks.py`),
+//!   new in its own group with matcher `^(Bash|shell)$`. mmhmem owns the
+//!   handler, never the group: one in a user's group is updated or removed
+//!   there alone (`hook_entry.rs`).
 //! - `prompts/mmhmem-recap.md`, and in `~/.agents/skills` the
 //!   `unified-memory` and `mmhmem-recap` skills.
 //!
@@ -31,13 +33,13 @@ use serde_json::{Value, json};
 
 use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
-    Invocation, PendingUserStep, Selection,
+    Invocation, PendingUserStep, Selection, hook_entry,
 };
 
 #[path = "codex_check.rs"]
 mod verify;
 use crate::setup::assets::{self, Asset};
-use crate::setup::edit::json::{self as ejson, JsonEditError};
+use crate::setup::edit::json::JsonEditError;
 use crate::setup::edit::toml::{self as etoml, McpServerEntry, TomlEditError};
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{
@@ -257,29 +259,18 @@ impl Codex {
         let before = chain.bytes(file)?;
         let mut text = chain.text(file)?.unwrap_or_else(|| "{}\n".to_owned());
         let problem = json_problem(file);
-        let found =
-            ejson::array_find(&text, &HOOK_PATH, |v| OWN_HOOK.matches(v)).map_err(&problem)?;
         let want = self.hook_group(env.os());
         let target = hook_target(file);
         let prior = rec
             .and_then(|r| r.managed.iter().find(|e| e.target == target))
             .and_then(|e| e.missing_parents);
-        let mut missing = prior.unwrap_or(0);
-        let current = ejson::get(&text, &HOOK_PATH).map_err(&problem)?;
-        let up_to_date = found.len() == 1
-            && current
-                .as_ref()
-                .and_then(Value::as_array)
-                .is_some_and(|a| a[found[0]] == want);
-        if !up_to_date {
-            for index in found.iter().rev() {
-                text = ejson::array_remove(&text, &HOOK_PATH, *index).map_err(&problem)?;
-            }
-            if found.is_empty() {
-                missing = ejson::missing_keys(&text, &HOOK_PATH).map_err(&problem)? as u32;
-            }
-            text = ejson::array_append(&text, &HOOK_PATH, &want).map_err(&problem)?;
-        }
+        let planned = hook_entry::install(&text, &HOOK_PATH, OWN_HOOK, &want).map_err(&problem)?;
+        let missing = if planned.found {
+            prior.unwrap_or(0)
+        } else {
+            planned.missing as u32
+        };
+        text = planned.after;
         let mut c = change(
             target,
             file,
@@ -288,7 +279,7 @@ impl Codex {
             say::add(What::ReadHook, ID.label(), file),
         );
         c.missing_parents = Some(missing);
-        if found.is_empty() {
+        if !planned.found {
             c.action = Action::Add;
         }
         push_unless_noop(chain, rec, c);
@@ -357,16 +348,10 @@ impl Codex {
                 let Some(text) = chain.text(file)? else {
                     return Ok(None);
                 };
-                let problem = json_problem(file);
                 let path = pointer_of(pointer);
-                let found =
-                    ejson::array_find(&text, &path, |v| matcher.matches(v)).map_err(&problem)?;
                 let levels = entry.missing_parents.unwrap_or(0) as usize;
-                let mut after = text.clone();
-                for index in found.iter().rev() {
-                    after = ejson::array_remove_and_prune(&after, &path, *index, levels)
-                        .map_err(&problem)?;
-                }
+                let after = hook_entry::remove(&text, &path, *matcher, levels)
+                    .map_err(json_problem(file))?;
                 let c = change(
                     entry.target.clone(),
                     file,

@@ -107,7 +107,10 @@ pub fn missing_keys(input: &str, path: &[&str]) -> Result<usize, JsonEditError> 
 
 /// The array at `path`, `None` when absent, or an error when the value there
 /// is not an array.
-fn find_array(root: &CstRootNode, path: &[&str]) -> Result<Option<CstArray>, JsonEditError> {
+pub(super) fn find_array(
+    root: &CstRootNode,
+    path: &[&str],
+) -> Result<Option<CstArray>, JsonEditError> {
     if path.is_empty() {
         return Err(JsonEditError::EmptyPath);
     }

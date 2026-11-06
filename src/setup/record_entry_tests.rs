@@ -163,8 +163,10 @@ fn hook_group_drift_ignores_user_groups() {
     assert!(matches!(only_drift(&record), Drift::Changed { .. }));
     std::fs::write(&file, settings(USER_A, &[])).unwrap();
     assert_eq!(only_drift(&record), Drift::Missing);
+    // A duplicate is a change outside setup (an install collapses it), not
+    // an unreadable file: the plan's check must still accept the file.
     std::fs::write(&file, settings(USER_A, &[OURS, OURS])).unwrap();
-    assert!(matches!(only_drift(&record), Drift::Unreadable { .. }));
+    assert!(matches!(only_drift(&record), Drift::Changed { .. }));
     std::fs::write(&file, "{\"theme\": \"dark\"}").unwrap();
     assert_eq!(only_drift(&record), Drift::Missing);
 }
