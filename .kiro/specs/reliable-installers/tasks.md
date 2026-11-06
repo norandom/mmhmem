@@ -211,7 +211,8 @@ released.
   - _Depends: 7.1, 7.2, 8.1_
   - _Requirements: 10.3, 10.4_
 
-- [ ] 8.3 Block publishing on the gate
+- [x] 8.3 Block publishing on the gate
+  - Status 2026-11-06: proven by the v0.5.0 release (run 42189177772, tag on a1de88f with green CI 42187133907 and installer e2e 42187133942): the publish job waited for approval of the `release` environment, built and checked the draft, attested the four archives (`gh attestation verify` passes for each, signer `release.yml@refs/tags/v0.5.0`) and published it. A fresh download verifies: every asset matches `SHA256SUMS`, `SHA256SUMS.sig` and all four archive signatures verify with the key in `RELEASE_PUBLIC_KEYS`, a one-byte change fails, and the bootstraps carry the archive hashes.
   - Status 2026-11-05: implemented, open until it runs on GitHub. `scripts/publish-ci-release.ps1` now requires, besides main CI, the newest `push` run of `installer-e2e.yml` on `main` for the tag commit to be completed and successful with its `installer-e2e` job green (waiting up to 30 min, like the CI wait); `workflow_dispatch` runs (the only kind that can carry `sabotage=wrong-hash`) and `pull_request` runs never count. The check runs in the script, not via a second `workflow_run` trigger, so all three entry points (tag push, CI completion, dispatch) pass the same fail-closed gate before any artifact download or release write. The build step leaves the release a draft and checks its exact asset set; attestation follows; a last step (`-PublishDraft`, no signing key) re-checks the tag, both runs and the asset set, then publishes. Proven locally (pwsh 7 and PowerShell 5.1): `test-publish-ci-release.ps1` shows the publisher refuses with no, a red, an unfinished or only a `workflow_dispatch` installer run, or a red aggregate job, with zero `gh` calls, and proceeds to the artifact download when both are green; the draft is published only with an exact, fully uploaded asset set, and release.yml orders draft, attest, publish. Not proven until a real tag release: the GitHub API answers in that shape for these queries, the step outputs reach the later steps, the attestation of the draft's archives, and publishing the draft.
   - Make the release workflow require a green `installer-e2e` run for the exact tag commit, in the same way it already requires main CI.
   - Follow-up from the 5.2 review: the provenance attestation currently runs after the release is published. Keep the release a draft until signing, upload verification and attestation all succeed, then publish it as the last step.
@@ -226,6 +227,7 @@ released.
   - _Requirements: 1.1, 1.2, 2.2_
 
 - [ ] 9.2 Transition release
+  - Status 2026-11-06: v0.5.0, the first release with `mmhmem setup`, is published and verified (see 8.3). Open: the root `install.ps1` / `install.sh` stubs, and installing with the published one-liners on all matrix platforms.
   - Replace the root `install.ps1` / `install.sh` with stubs that print the new one-liner and exit without downloading. Publish the first release with `mmhmem setup`, then push `main`.
   - Done when the release passes the installer gate and the published one-liners install it on all matrix platforms.
   - _Depends: 8.3, 9.1_
