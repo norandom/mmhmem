@@ -15,7 +15,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - _Boundary: Content cache_
   - _Requirements: 4.1, 4.3, 4.5_
 
-- [ ] 1.3 (P) Cache cap configuration
+- [x] 1.3 (P) Cache cap configuration
   - Environment key with fail-fast validation and documented default; local-profile JSON key with the existing precedence rules
   - Observable completion: config tests cover default, valid override, invalid value error text, and local JSON precedence
   - _Boundary: Config key_

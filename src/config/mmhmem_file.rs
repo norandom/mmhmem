@@ -11,16 +11,21 @@
 //! pure parser `Config::from_env_local` (research.md F2). The serve
 //! profile never touches this module (Req 7.4). The worker API key from
 //! any source never appears in logs or diagnostics (Req 7.5) — redaction
-//! is source-agnostic in `Config::redacted_debug`. One non-worker key is
-//! read too: `update_check` (`false` turns off the local-mode update
-//! notice, see `services::update_check`); it is not part of `Config`.
+//! is source-agnostic in `Config::redacted_debug`. Two non-worker keys
+//! are read too: `update_check` (`false` turns off the local-mode update
+//! notice, see `services::update_check`; it is not part of `Config`) and
+//! `shunt_content_cache_max_rows` (the content-cache row cap,
+//! shunt-content-tool Req 4.3, surfaced through the shared parser).
 
 use std::path::Path;
 
 use serde::Deserialize;
 
 use super::local_dirs;
-use super::{ConfigError, ENV_WORKER_API_KEY, ENV_WORKER_API_URL, ENV_WORKER_MODEL};
+use super::{
+    ConfigError, ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, ENV_WORKER_API_KEY, ENV_WORKER_API_URL,
+    ENV_WORKER_MODEL,
+};
 
 /// Worker settings from `.mmhmem.json` — every field optional (Req 7.2).
 /// Unknown JSON fields are ignored, so installers may extend the file
@@ -36,6 +41,9 @@ pub struct MmhmemFile {
     /// `update_check` — `false` turns off the session-start update notice
     /// and its once-a-day release lookup (local mode only).
     pub update_check: Option<bool>,
+    /// `shunt_content_cache_max_rows` — content-cache row cap (u32 > 0,
+    /// shunt-content-tool Req 4.3).
+    pub shunt_content_cache_max_rows: Option<u32>,
 }
 
 impl MmhmemFile {
@@ -58,6 +66,9 @@ impl MmhmemFile {
             worker_api_url: p.worker_api_url.or(g.worker_api_url),
             worker_api_key: p.worker_api_key.or(g.worker_api_key),
             update_check: p.update_check.or(g.update_check),
+            shunt_content_cache_max_rows: p
+                .shunt_content_cache_max_rows
+                .or(g.shunt_content_cache_max_rows),
         })
     }
 
@@ -80,8 +91,9 @@ impl MmhmemFile {
         }
     }
 
-    /// File-sourced value for a worker env key (None for every other key —
-    /// the file carries worker settings only).
+    /// File-sourced value for a file-backed env key (None for every other
+    /// key — the file carries worker, update-check and cache-cap settings
+    /// only).
     fn setting(&self, key: &str) -> Option<String> {
         if key == ENV_WORKER_MODEL {
             self.worker_model.clone()
@@ -89,6 +101,8 @@ impl MmhmemFile {
             self.worker_api_url.clone()
         } else if key == ENV_WORKER_API_KEY {
             self.worker_api_key.clone()
+        } else if key == ENV_SHUNT_CONTENT_CACHE_MAX_ROWS {
+            self.shunt_content_cache_max_rows.map(|n| n.to_string())
         } else {
             None
         }
@@ -377,5 +391,57 @@ mod tests {
         assert_eq!(file.update_check, Some(true));
         let empty = write_file(dir.path(), "e.json", "{}");
         assert_eq!(MmhmemFile::load(&empty, &empty).unwrap().update_check, None);
+    }
+
+    #[test]
+    fn shunt_content_cache_max_rows_merges_env_project_global_default() {
+        // shunt-content-tool Req 4.3: env > project > global > default.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let global = write_file(
+            dir.path(),
+            "g.json",
+            r#"{"shunt_content_cache_max_rows":100}"#,
+        );
+        let project = write_file(
+            dir.path(),
+            "p.json",
+            r#"{"shunt_content_cache_max_rows":200}"#,
+        );
+        let file = MmhmemFile::load(&global, &project).expect("ok");
+        let map = local_user_env(&[]);
+        let cfg =
+            Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file)).expect("ok");
+        assert_eq!(cfg.shunt_content_cache_max_rows, 200, "project over global");
+
+        let file = MmhmemFile::load(&global, &dir.path().join("missing")).expect("ok");
+        let cfg =
+            Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file)).expect("ok");
+        assert_eq!(cfg.shunt_content_cache_max_rows, 100, "global fills");
+
+        let map = local_user_env(&[(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, "300")]);
+        let cfg =
+            Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file)).expect("ok");
+        assert_eq!(cfg.shunt_content_cache_max_rows, 300, "env wins over file");
+    }
+
+    #[test]
+    fn shunt_content_cache_max_rows_zero_in_file_fails_fast() {
+        // A zero cap from any source is rejected by the shared parser with
+        // the key-naming error, never silently coerced.
+        let file = MmhmemFile {
+            shunt_content_cache_max_rows: Some(0),
+            ..MmhmemFile::default()
+        };
+        let map = local_user_env(&[]);
+        let err = Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file))
+            .expect_err("zero cap must fail fast");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidShuntContentCacheMaxRows(_)
+        ));
+        assert!(
+            err.to_string().contains("SHUNT_CONTENT_CACHE_MAX_ROWS"),
+            "error must name the key: {err}"
+        );
     }
 }

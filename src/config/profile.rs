@@ -16,10 +16,12 @@ use super::mmhmem_file::MmhmemFile;
 use super::{
     Config, ConfigError, DEFAULT_AUDIT_MAX_BYTES_LOCAL, DEFAULT_AUDIT_ROTATE_KEEP,
     DEFAULT_BUSY_TIMEOUT_MS, DEFAULT_HOST, DEFAULT_MCP_PATH, DEFAULT_OTEL_SERVICE_NAME,
+    DEFAULT_PORT, DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS, DEFAULT_SHUNT_MIN_LINES,
     DEFAULT_WORKER_API_URL, ENV_ALLOWED_ROOTS, ENV_AUDIT_MAX_BYTES, ENV_AUDIT_ROTATE_KEEP,
     ENV_BUSY_TIMEOUT_MS, ENV_DATA_DIR, ENV_HOST, ENV_LOG_FILE, ENV_MCP_PATH, ENV_OTEL_ENDPOINT,
-    ENV_OTEL_HEADERS, ENV_OTEL_SERVICE_NAME, ENV_TOKEN, ENV_WORKER_API_KEY, ENV_WORKER_API_URL,
-    ENV_WORKER_MODEL, optional, parse_port, parse_shunt_min_lines, present,
+    ENV_OTEL_HEADERS, ENV_OTEL_SERVICE_NAME, ENV_PORT, ENV_SHUNT_CONTENT_CACHE_MAX_ROWS,
+    ENV_SHUNT_MIN_LINES, ENV_TOKEN, ENV_WORKER_API_KEY, ENV_WORKER_API_URL, ENV_WORKER_MODEL,
+    optional, present,
 };
 
 /// Operating profile of a loaded `Config`.
@@ -81,6 +83,7 @@ impl Config {
             busy_timeout_ms: parse_busy_timeout_ms(get)?,
             audit_max_bytes: parse_audit_max_bytes(get, DEFAULT_AUDIT_MAX_BYTES_LOCAL)?,
             audit_rotate_keep: parse_audit_rotate_keep(get)?,
+            shunt_content_cache_max_rows: parse_shunt_content_cache_max_rows(get)?,
             profile: Profile::Local,
         })
     }
@@ -126,9 +129,57 @@ pub fn parse_audit_rotate_keep(get: &dyn Fn(&str) -> Option<String>) -> Result<u
     }
 }
 
+/// `AGENT_MEM_PORT` parsed as u16 (shared by both profiles).
+pub fn parse_port(get: &dyn Fn(&str) -> Option<String>) -> Result<u16, ConfigError> {
+    match present(get, ENV_PORT) {
+        Some(raw) => raw
+            .parse::<u16>()
+            .map_err(|_| ConfigError::InvalidPort(raw)),
+        None => Ok(DEFAULT_PORT),
+    }
+}
+
+/// `SHUNT_MIN_LINES` parsed as u32 and required to be > 0 (Req 3.9).
+pub fn parse_shunt_min_lines(get: &dyn Fn(&str) -> Option<String>) -> Result<u32, ConfigError> {
+    match present(get, ENV_SHUNT_MIN_LINES) {
+        Some(raw) => {
+            let n = raw
+                .parse::<u32>()
+                .map_err(|_| ConfigError::InvalidShuntMinLines(raw.clone()))?;
+            if n == 0 {
+                return Err(ConfigError::InvalidShuntMinLines(raw));
+            }
+            Ok(n)
+        }
+        None => Ok(DEFAULT_SHUNT_MIN_LINES),
+    }
+}
+
+/// `SHUNT_CONTENT_CACHE_MAX_ROWS` parsed as u32 and required to be > 0
+/// (shunt-content-tool Req 4.3); shared by both profiles.
+pub fn parse_shunt_content_cache_max_rows(
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<u32, ConfigError> {
+    match present(get, ENV_SHUNT_CONTENT_CACHE_MAX_ROWS) {
+        Some(raw) => {
+            let n = raw
+                .parse::<u32>()
+                .map_err(|_| ConfigError::InvalidShuntContentCacheMaxRows(raw.clone()))?;
+            if n == 0 {
+                return Err(ConfigError::InvalidShuntContentCacheMaxRows(raw));
+            }
+            Ok(n)
+        }
+        None => Ok(DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::{DEFAULT_AUDIT_MAX_BYTES, ENV_SHUNT_MIN_LINES};
+    use super::super::{
+        DEFAULT_AUDIT_MAX_BYTES, DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS,
+        ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, ENV_SHUNT_MIN_LINES,
+    };
     use super::*;
     use std::collections::HashMap;
 
@@ -340,5 +391,63 @@ mod tests {
                 "raw={raw:?}"
             );
         }
+    }
+
+    #[test]
+    fn shunt_content_cache_max_rows_defaults_in_both_profiles() {
+        let map = serve_base(&[]);
+        assert_eq!(
+            Config::from_env(&get(&map))
+                .unwrap()
+                .shunt_content_cache_max_rows,
+            DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS
+        );
+        let map = local_user_env(&[]);
+        assert_eq!(
+            Config::from_env_local(&get(&map))
+                .unwrap()
+                .shunt_content_cache_max_rows,
+            DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS
+        );
+    }
+
+    #[test]
+    fn shunt_content_cache_max_rows_parses_env_override() {
+        let map = serve_base(&[(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, "250")]);
+        assert_eq!(
+            Config::from_env(&get(&map))
+                .unwrap()
+                .shunt_content_cache_max_rows,
+            250
+        );
+        let map = local_user_env(&[(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, "250")]);
+        assert_eq!(
+            Config::from_env_local(&get(&map))
+                .unwrap()
+                .shunt_content_cache_max_rows,
+            250
+        );
+    }
+
+    #[test]
+    fn shunt_content_cache_max_rows_invalid_fails_fast_naming_the_key() {
+        for raw in ["0", "abc", "-1", "1.5", "4294967296"] {
+            let map = serve_base(&[(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, raw)]);
+            let err = Config::from_env(&get(&map)).expect_err("invalid cap must fail fast");
+            assert!(
+                matches!(err, ConfigError::InvalidShuntContentCacheMaxRows(_)),
+                "raw={raw:?}"
+            );
+            let text = err.to_string();
+            assert!(
+                text.contains(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS) && text.contains(raw),
+                "error must name the key and the raw value: {text}"
+            );
+        }
+        let map = local_user_env(&[(ENV_SHUNT_CONTENT_CACHE_MAX_ROWS, "0")]);
+        assert!(matches!(
+            Config::from_env_local(&get(&map)),
+            Err(ConfigError::InvalidShuntContentCacheMaxRows(_))
+        ));
     }
 }

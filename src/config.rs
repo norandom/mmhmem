@@ -34,6 +34,8 @@ pub const ENV_PORT: &str = "AGENT_MEM_PORT";
 pub const ENV_MCP_PATH: &str = "AGENT_MEM_MCP_PATH";
 /// `SHUNT_MIN_LINES` — smart_read shunt threshold in lines (u32 > 0, Req 3.9).
 pub const ENV_SHUNT_MIN_LINES: &str = "SHUNT_MIN_LINES";
+/// `SHUNT_CONTENT_CACHE_MAX_ROWS` — content cache cap in rows (u32 > 0).
+pub const ENV_SHUNT_CONTENT_CACHE_MAX_ROWS: &str = "SHUNT_CONTENT_CACHE_MAX_ROWS";
 /// `AGENT_MEM_BUSY_TIMEOUT_MS` — store busy-lock wait in milliseconds (Req 6.2).
 pub const ENV_BUSY_TIMEOUT_MS: &str = "AGENT_MEM_BUSY_TIMEOUT_MS";
 /// `AGENT_MEM_AUDIT_MAX_BYTES` — audit rotation threshold in bytes; 0 disables
@@ -73,6 +75,8 @@ pub const DEFAULT_PORT: u16 = 8443;
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
 /// Default shunt threshold in lines (Req 3.9).
 pub const DEFAULT_SHUNT_MIN_LINES: u32 = 150;
+/// Default content cache cap in rows (shunt-content-tool Req 4.3).
+pub const DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS: u32 = 5000;
 /// Default store busy-lock wait (Req 6.2: 5 seconds).
 pub const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
 /// Serve profile: audit rotation disabled — host logrotate owns rotation
@@ -109,6 +113,8 @@ pub struct Config {
     pub mcp_path: String,
     /// smart_read shunt threshold in lines (`SHUNT_MIN_LINES`).
     pub shunt_min_lines: u32,
+    /// Content cache cap in rows (`SHUNT_CONTENT_CACHE_MAX_ROWS`).
+    pub shunt_content_cache_max_rows: u32,
     /// Worker chat-completions URL (`WORKER_API_URL`).
     pub worker_api_url: String,
     /// Worker model name (`WORKER_MODEL`, optional).
@@ -142,6 +148,8 @@ pub enum ConfigError {
     InvalidPort(String),
     /// `SHUNT_MIN_LINES` is not a u32 > 0.
     InvalidShuntMinLines(String),
+    /// `SHUNT_CONTENT_CACHE_MAX_ROWS` is not a u32 > 0.
+    InvalidShuntContentCacheMaxRows(String),
     /// The per-user location variable (`HOME`/`APPDATA`) is unset or blank,
     /// so the local profile cannot resolve its default data dir (Req 3.1).
     MissingUserDirEnv(&'static str),
@@ -175,6 +183,13 @@ impl fmt::Display for ConfigError {
                 write!(
                     f,
                     "{ENV_SHUNT_MIN_LINES}={raw:?} is not a valid shunt threshold (u32 > 0)"
+                )
+            }
+            ConfigError::InvalidShuntContentCacheMaxRows(raw) => {
+                write!(
+                    f,
+                    "{ENV_SHUNT_CONTENT_CACHE_MAX_ROWS}={raw:?} is not a valid content cache \
+                     cap (u32 > 0)"
                 )
             }
             ConfigError::MissingUserDirEnv(var) => write!(
@@ -223,8 +238,8 @@ impl Config {
     pub fn from_env(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let token = present(get, ENV_TOKEN).ok_or(ConfigError::MissingToken)?;
         let allowed_roots = parse_allowed_roots(get)?;
-        let port = parse_port(get)?;
-        let shunt_min_lines = parse_shunt_min_lines(get)?;
+        let port = profile::parse_port(get)?;
+        let shunt_min_lines = profile::parse_shunt_min_lines(get)?;
         Ok(Self {
             data_dir: PathBuf::from(optional(get, ENV_DATA_DIR, DEFAULT_DATA_DIR)),
             log_file: PathBuf::from(optional(get, ENV_LOG_FILE, DEFAULT_LOG_FILE)),
@@ -243,6 +258,7 @@ impl Config {
             busy_timeout_ms: profile::parse_busy_timeout_ms(get)?,
             audit_max_bytes: profile::parse_audit_max_bytes(get, DEFAULT_AUDIT_MAX_BYTES)?,
             audit_rotate_keep: profile::parse_audit_rotate_keep(get)?,
+            shunt_content_cache_max_rows: profile::parse_shunt_content_cache_max_rows(get)?,
             profile: profile::Profile::Serve,
         })
     }
@@ -283,6 +299,10 @@ impl fmt::Debug for Config {
             .field("busy_timeout_ms", &self.busy_timeout_ms)
             .field("audit_max_bytes", &self.audit_max_bytes)
             .field("audit_rotate_keep", &self.audit_rotate_keep)
+            .field(
+                "shunt_content_cache_max_rows",
+                &self.shunt_content_cache_max_rows,
+            )
             .field("profile", &self.profile)
             .finish()
     }
@@ -314,32 +334,6 @@ fn parse_allowed_roots(get: &dyn Fn(&str) -> Option<String>) -> Result<Vec<PathB
         return Err(ConfigError::MissingAllowedRoots);
     }
     Ok(roots)
-}
-
-/// `AGENT_MEM_PORT` parsed as u16.
-fn parse_port(get: &dyn Fn(&str) -> Option<String>) -> Result<u16, ConfigError> {
-    match present(get, ENV_PORT) {
-        Some(raw) => raw
-            .parse::<u16>()
-            .map_err(|_| ConfigError::InvalidPort(raw)),
-        None => Ok(DEFAULT_PORT),
-    }
-}
-
-/// `SHUNT_MIN_LINES` parsed as u32 and required to be > 0 (Req 3.9).
-fn parse_shunt_min_lines(get: &dyn Fn(&str) -> Option<String>) -> Result<u32, ConfigError> {
-    match present(get, ENV_SHUNT_MIN_LINES) {
-        Some(raw) => {
-            let n = raw
-                .parse::<u32>()
-                .map_err(|_| ConfigError::InvalidShuntMinLines(raw.clone()))?;
-            if n == 0 {
-                return Err(ConfigError::InvalidShuntMinLines(raw));
-            }
-            Ok(n)
-        }
-        None => Ok(DEFAULT_SHUNT_MIN_LINES),
-    }
 }
 
 #[cfg(test)]
