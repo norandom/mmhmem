@@ -20,8 +20,10 @@
 
 use std::cell::Cell;
 
-use super::flow::{Confirmed, EXIT_CANCELLED, Flow, Newest, Next, Resumed};
+use super::flow::{Confirmed, EXIT_CANCELLED, Flow, HomeAction, Newest, Next, Resumed};
 use super::text;
+use crate::setup::download_line;
+use crate::setup::record::ReleaseTag;
 
 #[path = "app_draw.rs"]
 mod draw;
@@ -233,13 +235,7 @@ impl App {
             Key::Quit | Key::Esc => Control::Exit(EXIT_CANCELLED),
             Key::Enter => {
                 if let Some(action) = actions.get(self.cursor) {
-                    match self.flow.begin(action) {
-                        Next::Agents => self.go(Screen::Agents),
-                        Next::Review => self.go(Screen::Review),
-                        Next::Progress => self.go(Screen::Progress),
-                        Next::Note(note) => self.note = Some(note),
-                        Next::Restart => return Control::Exit(0),
-                    }
+                    return self.begin_action(action, None);
                 }
                 Control::Continue
             }
@@ -248,6 +244,46 @@ impl App {
                 Control::Continue
             }
         }
+    }
+
+    /// Enter on "Update to …" while the terminal is suspended: the
+    /// download draws its progress line on the plain screen (bugfix
+    /// 2026-11-07: the screen used to freeze for the whole download).
+    pub fn update_key(&mut self, progress: Option<download_line::ProgressHook>) -> Control {
+        let actions = self.flow.home().actions;
+        if let Some(action) = actions.get(self.cursor) {
+            return self.begin_action(action, progress);
+        }
+        Control::Continue
+    }
+
+    /// The "Update to …" action under the cursor, when the Home screen
+    /// offers one there (the event loop suspends the full-screen menu
+    /// around it so the download can draw).
+    pub fn selected_update(&self) -> Option<ReleaseTag> {
+        if self.screen != Screen::Home {
+            return None;
+        }
+        match self.flow.home().actions.into_iter().nth(self.cursor) {
+            Some(HomeAction::UpdateTo(tag)) => Some(tag),
+            _ => None,
+        }
+    }
+
+    /// Starts `action` and moves to the screen it leads to.
+    fn begin_action(
+        &mut self,
+        action: &HomeAction,
+        progress: Option<download_line::ProgressHook>,
+    ) -> Control {
+        match self.flow.begin_with(action, progress) {
+            Next::Agents => self.go(Screen::Agents),
+            Next::Review => self.go(Screen::Review),
+            Next::Progress => self.go(Screen::Progress),
+            Next::Note(note) => self.note = Some(note),
+            Next::Restart => return Control::Exit(0),
+        }
+        Control::Continue
     }
 
     fn agents_key(&mut self, key: Key) -> Control {

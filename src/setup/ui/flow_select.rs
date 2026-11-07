@@ -158,7 +158,9 @@ impl Flow {
             });
             for feature in agent.features() {
                 let (label, mut help) = text::feature_label(*feature);
-                if *feature == Feature::ReadHook && !self.worker_ready {
+                // Live lookup (bugfix): a worker model set up while the menu
+                // is open is seen without restarting the program.
+                if *feature == Feature::ReadHook && !self.deps.env.worker_configured() {
                     help = text::FEATURE_HOOK_HELP_NO_WORKER;
                 }
                 rows.push(FeatureRow {
@@ -176,9 +178,10 @@ impl Flow {
     }
 
     /// The worker model line: ticked and locked when one is already set up,
-    /// else a choice noted for a later step.
+    /// else a choice noted for a later step. The check is live, so a worker
+    /// model connected while the menu is open shows without a restart.
     fn worker_row(&self) -> FeatureRow {
-        if self.worker_ready {
+        if self.deps.env.worker_configured() {
             return FeatureRow {
                 agent: None,
                 feature: None,

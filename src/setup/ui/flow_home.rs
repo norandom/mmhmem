@@ -4,6 +4,7 @@
 
 use super::{Flow, Newest, Next, text};
 use crate::setup::agents::{AgentId, AgentRecord, DISPLAY_ORDER, Detection, Feature, Selection};
+use crate::setup::download_line;
 use crate::setup::record::{CheckResult, ReleaseTag};
 
 /// One action on the home screen.
@@ -111,13 +112,24 @@ impl Flow {
 
     /// Starts `action`; only [`Flow::confirm`] and the check write.
     pub fn begin(&mut self, action: &HomeAction) -> Next {
+        self.begin_with(action, None)
+    }
+
+    /// [`Flow::begin`] with a download-progress hook (the update download
+    /// calls it with bytes so far and total; see
+    /// [`crate::setup::download_line`]).
+    pub fn begin_with(
+        &mut self,
+        action: &HomeAction,
+        progress: Option<download_line::ProgressHook>,
+    ) -> Next {
         self.planned = None;
         self.delete_memories = false;
         self.relaunch = None;
         self.progress = None;
         self.intro = None;
         match action {
-            HomeAction::UpdateTo(tag) => self.update_to(tag),
+            HomeAction::UpdateTo(tag) => self.update_to(tag, progress),
             HomeAction::Remove => self.plan_removal(),
             HomeAction::Check => {
                 self.run_check();

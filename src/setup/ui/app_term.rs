@@ -21,6 +21,7 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{App, Control, Key, Screen};
+use crate::setup::download_line;
 use crate::setup::ui::flow::{Flow, Newest};
 use crate::setup::ui::text;
 
@@ -102,7 +103,33 @@ fn event_loop(
         if press.kind != KeyEventKind::Press {
             continue;
         }
-        if let Control::Exit(code) = app.key(key_of(press)) {
+        let key = key_of(press);
+        // "Update to …": the full-screen menu gives way to one progress
+        // line on the plain screen while the release downloads (bugfix
+        // 2026-11-07: the screen used to freeze for the whole download),
+        // then the menu comes back.
+        if key == Key::Enter
+            && let Some(tag) = app.selected_update()
+        {
+            let _ = ratatui::try_restore();
+            let reporter = download_line::Reporter::stderr(tag.as_str());
+            let control = app.update_key(reporter.hook());
+            reporter.finish();
+            let restored = ratatui::try_init().and_then(|new_terminal| {
+                *terminal = new_terminal;
+                terminal.clear()
+            });
+            if restored.is_err() {
+                return Err(std::io::Error::other(
+                    "the terminal could not be reopened after the download",
+                ));
+            }
+            if let Control::Exit(code) = control {
+                return Ok(code);
+            }
+            continue;
+        }
+        if let Control::Exit(code) = app.key(key) {
             return Ok(code);
         }
     }

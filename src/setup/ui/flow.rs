@@ -37,6 +37,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::text;
 use crate::setup::adopt::{self, Scan};
@@ -84,6 +85,11 @@ pub type Clock = Arc<dyn Fn() -> UtcTimestamp + Send + Sync>;
 /// at the given path (an AI tool's `mmhmem stdio`, another window).
 pub type InUse = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
 
+/// Looks for model names on a local worker endpoint (the worker-model
+/// guidance after an install): the worker api URL and a timeout go in,
+/// the names found come out (`None`: nothing answered).
+pub type ModelSource = Arc<dyn Fn(&str, Duration) -> Option<Vec<String>> + Send + Sync>;
+
 /// Everything the flow needs from outside.
 #[derive(Clone)]
 pub struct Deps {
@@ -113,6 +119,9 @@ pub struct Deps {
     /// Whether another program still runs the installed program (a
     /// removal keeps it then, see `flow_remove.rs`).
     pub in_use: InUse,
+    /// Looks for local worker-endpoint models for the after-install
+    /// worker-model guidance.
+    pub models: ModelSource,
 }
 
 impl Deps {
@@ -131,6 +140,7 @@ impl Deps {
             memories: None,
             restart: Restart::default(),
             in_use: Arc::new(crate::setup::running::used_by_other_process),
+            models: Arc::new(crate::setup::worker_guide::local_models),
         }
     }
 }
@@ -181,8 +191,6 @@ pub struct Flow {
     selection: Selection,
     profile: Option<PathBuf>,
     worker: bool,
-    /// A worker model is already set up (decided as `mmhmem hook` does).
-    worker_ready: bool,
     planned: Option<review::Planned>,
     progress: Option<Progress>,
     /// A line above the next review (after an update).
@@ -231,7 +239,6 @@ impl Flow {
             profiles,
             current: false,
         };
-        let worker_ready = deps.env.worker_configured();
         let mut flow = Self {
             deps,
             loaded,
@@ -239,7 +246,6 @@ impl Flow {
             selection: Selection::new(),
             profile: None,
             worker: false,
-            worker_ready,
             planned: None,
             progress: None,
             intro: None,

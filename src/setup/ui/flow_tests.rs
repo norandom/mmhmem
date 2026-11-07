@@ -102,6 +102,46 @@ fn the_record_says_whether_a_worker_model_is_set_up() {
 }
 
 #[test]
+fn the_ticked_worker_model_ends_with_the_promised_how_to() {
+    let fx = with_clis();
+    let mut flow = fx.flow(Newest::Unknown);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    let worker = flow.feature_rows().pop().expect("worker row");
+    assert_eq!(worker.label, text::FEATURE_WORKER);
+    flow.toggle_feature(&worker);
+    flow.make_plan();
+    assert_eq!(flow.confirm(), Confirmed::Done);
+    let progress = flow.progress().expect("results");
+    let file = fx.home.home().join(".mmhmem.json");
+    let want = text::worker_guide(&file.display().to_string(), None);
+    assert!(
+        want.iter().all(|l| progress.next_steps.contains(l)),
+        "{:?}",
+        progress.next_steps
+    );
+}
+
+#[test]
+fn no_worker_how_to_when_one_is_already_set_up() {
+    let mut fx = with_clis();
+    fx.deps.env = fx.deps.env.clone().with_worker_configured(true);
+    let mut flow = fx.flow(Newest::Unknown);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    let worker = flow.feature_rows().pop().expect("worker row");
+    assert_eq!(worker.label, text::FEATURE_WORKER_CONFIGURED);
+    flow.toggle_feature(&worker); // locked: the tick does not come off
+    flow.make_plan();
+    assert_eq!(flow.confirm(), Confirmed::Done);
+    let progress = flow.progress().expect("results");
+    assert!(
+        !progress
+            .next_steps
+            .iter()
+            .any(|l| l.contains("Worker model: connect one"))
+    );
+}
+
+#[test]
 fn ticking_a_tool_on_turns_on_its_hook_too() {
     let fx = with_clis();
     let mut flow = fx.flow(Newest::Checking);

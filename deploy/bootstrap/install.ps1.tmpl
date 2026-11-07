@@ -48,7 +48,17 @@ function Install-Mmhmem {
         Write-Host "Installing mmhmem $tag for Windows (x64)."
         Write-Host "Downloading $url"
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file
+            # curl.exe (ships with Windows 10+) draws its own meter with
+            # speed and time left; Invoke-WebRequest stays the fallback and
+            # stays quiet ($ProgressPreference) because its progress UI
+            # slows the download on Windows PowerShell 5.1.
+            $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+            if ($curl) {
+                & $curl.Source -fLS --retry 2 -o $file $url
+                if ($LASTEXITCODE -ne 0) { throw "curl exited with $LASTEXITCODE" }
+            } else {
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file
+            }
         } catch {
             Stop-Install "The download failed: $url`nCheck your internet connection. If it keeps failing, this release may not be published yet.`n($($_.Exception.Message))"
             return

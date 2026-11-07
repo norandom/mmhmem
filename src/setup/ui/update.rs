@@ -193,15 +193,21 @@ pub fn session(
         p.say(note);
         return 1;
     }
+    // One progress line (bytes, percent, speed, time left) while the
+    // release downloads (bugfix 2026-11-07: a frozen "Downloading…").
+    let reporter = crate::setup::download_line::Reporter::stderr(newest.as_str());
+    let hook = reporter.hook();
     p.start(&text::update::downloading(newest.as_str()));
-    match flow.begin(&HomeAction::UpdateTo(newest.clone())) {
+    match flow.begin_with(&HomeAction::UpdateTo(newest.clone()), hook) {
         Next::Restart => {
+            reporter.finish();
             p.say(&format!(" {}", text::update::VERIFIED));
             0
         }
         // The release is this program's own (or no restart is set up): go
         // on here with the files of this program.
         Next::Review => {
+            reporter.finish();
             p.say(&format!(" {}", text::update::VERIFIED));
             finish(
                 flow,
@@ -211,6 +217,7 @@ pub fn session(
             )
         }
         Next::Note(note) => {
+            reporter.finish();
             p.say("");
             if note == text::UPDATE_FAILED
                 && let Some(reason) = flow.last_note()

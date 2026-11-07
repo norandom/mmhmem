@@ -64,6 +64,25 @@ fn next_steps_and_update_label_are_listed() {
     assert!(text::LEGEND.contains("esc back"));
 }
 
+#[test]
+fn snippet_and_worker_how_to_lines_are_built() {
+    let lines = text::antigravity_snippet("/opt/mmhmem/antigravity-mcp.json", "{\n  \"a\": 1\n}");
+    assert_eq!(
+        lines[0],
+        "Antigravity: paste this JSON into its server settings (saved to /opt/mmhmem/antigravity-mcp.json):"
+    );
+    assert_eq!(lines[1], "  {");
+    assert_eq!(lines[3], "  }");
+    let guide = text::worker_guide("~/.mmhmem.json", Some(&["qwen3:1.7b".to_owned()]));
+    assert_eq!(
+        guide[0],
+        "Worker model: connect one to turn the read hook on — add this to ~/.mmhmem.json:"
+    );
+    assert!(guide[1].contains("\"worker_model\""));
+    assert!(guide.iter().any(|l| l.contains("qwen3:1.7b")));
+    assert_eq!(*guide.last().unwrap(), text::WORKER_GUIDE_NEXT);
+}
+
 /// Every kind of change summary the text module builds, for every agent.
 fn generated_summaries() -> Vec<String> {
     use super::text::changes::{self as say, ALL_WHAT};

@@ -64,6 +64,37 @@ files for you. It needs extra setup, so it is left off unless you ask for it.";
 pub const WORKER_LATER: &str = "Worker model: setup will show you how to connect one \
 after the install. Nothing about it changes now.";
 
+/// Contains `{file}`. The first line of the after-install worker guidance.
+pub const WORKER_GUIDE: &str =
+    "Worker model: connect one to turn the read hook on — add this to {file}:";
+/// Shown only when a local endpoint answered. Contains `{models}`.
+pub const WORKER_GUIDE_FOUND: &str =
+    "Local models found: {models} — use one as the Worker model name.";
+/// The last line of the worker guidance.
+pub const WORKER_GUIDE_NEXT: &str =
+    "Then start a new session and run the check again to see it active.";
+
+/// The example the worker guidance shows (the keys of `.mmhmem.json`).
+/// Not in [`ALL`]: it is a JSON example, not prose, so the plain-language
+/// rule (which explains terms in prose) does not apply to it.
+const WORKER_GUIDE_JSON: &str =
+    "  {\"worker_model\": \"<name>\", \"worker_api_url\": \"http://127.0.0.1:11434/v1\"}";
+
+/// The after-install worker guidance: where the file is, what to put in
+/// it, the models a local endpoint offered (when it answered) and what to
+/// do next.
+pub fn worker_guide(file: &str, models: Option<&[String]>) -> Vec<String> {
+    let mut lines = vec![
+        fill(WORKER_GUIDE, &[("file", file)]),
+        WORKER_GUIDE_JSON.to_owned(),
+    ];
+    if let Some(models) = models {
+        lines.push(fill(WORKER_GUIDE_FOUND, &[("models", &models.join(", "))]));
+    }
+    lines.push(WORKER_GUIDE_NEXT.to_owned());
+    lines
+}
+
 pub const COL_AGENT: &str = "Tool";
 pub const COL_STATUS: &str = "mmhmem";
 pub const COL_FEATURES: &str = "Features";
@@ -186,6 +217,18 @@ pub const NEXT_OPENCODE: &str = "OpenCode: start a new session.";
 pub const NEXT_DESKTOP: &str = "Claude Desktop: quit it completely and open it again.";
 pub const NEXT_ANTIGRAVITY: &str = "Antigravity: import the snippet that setup saved, \
 then start a new session.";
+
+/// Contains `{path}`. Shown above the snippet lines in the results.
+pub const NEXT_ANTIGRAVITY_SNIPPET: &str =
+    "Antigravity: paste this JSON into its server settings (saved to {path}):";
+
+/// The Antigravity next step: where the snippet was saved, then the JSON
+/// itself, indented, one line per entry.
+pub fn antigravity_snippet(path: &str, snippet: &str) -> Vec<String> {
+    let mut lines = vec![fill(NEXT_ANTIGRAVITY_SNIPPET, &[("path", path)])];
+    lines.extend(snippet.lines().map(|l| format!("  {l}")));
+    lines
+}
 
 /// Fills `{key}` placeholders in `template`.
 fn fill(template: &str, values: &[(&str, &str)]) -> String {
@@ -391,6 +434,7 @@ pub const ALL: &[&str] = &[
     NEXT_OPENCODE,
     NEXT_DESKTOP,
     NEXT_ANTIGRAVITY,
+    NEXT_ANTIGRAVITY_SNIPPET,
     LEGEND_HOME,
     LEGEND_REVIEW,
     LEGEND_DIFF,
@@ -399,6 +443,9 @@ pub const ALL: &[&str] = &[
     FEATURE_SKILL,
     FEATURE_SKILL_HELP,
     WORKER_LATER,
+    WORKER_GUIDE,
+    WORKER_GUIDE_FOUND,
+    WORKER_GUIDE_NEXT,
     COL_AGENT,
     COL_STATUS,
     COL_FEATURES,

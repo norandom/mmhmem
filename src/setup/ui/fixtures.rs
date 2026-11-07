@@ -70,6 +70,7 @@ pub(crate) fn fx() -> Fx {
         }),
         restart: Restart::default(),
         in_use: Arc::new(|_| false),
+        models: Arc::new(|_, _| None),
     };
     Fx { home, deps }
 }

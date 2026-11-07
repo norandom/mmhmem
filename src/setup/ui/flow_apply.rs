@@ -11,9 +11,11 @@
 //! check results with pending user steps, and the next step per agent.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use super::review::Planned;
 use super::{Flow, text};
+use crate::setup::agents::antigravity;
 use crate::setup::agents::{AgentId, Feature, Selection};
 use crate::setup::plan::{ApplyReport, Outcome, apply_with};
 use crate::setup::record::{AgentRecord, CheckResult, InstallRecord, Scope};
@@ -95,6 +97,11 @@ impl Flow {
         if !record.agents.is_empty() {
             progress.next_steps.extend(self.path_next_step());
         }
+        // The guidance the features screen promises (WORKER_LATER): only
+        // when the worker line was ticked and none is set up yet.
+        if self.worker && !self.deps.env.worker_configured() {
+            progress.next_steps.extend(self.worker_guide());
+        }
         if let Err(e) = self.deps.store.save(&record) {
             progress.lines.push(self.tidy(&e.to_string()));
             progress.code = 1;
@@ -125,8 +132,9 @@ impl Flow {
         };
         let mut applied = ApplyReport { agents: Vec::new() };
         let verify = checker.run(&self.selection, &mut applied, &mut record);
-        if record.worker_configured != self.worker_ready {
-            record.worker_configured = self.worker_ready;
+        let worker_ready = self.deps.env.worker_configured();
+        if record.worker_configured != worker_ready {
+            record.worker_configured = worker_ready;
             if let Err(e) = self.deps.store.save(&record) {
                 self.loaded.notes.push(self.tidy(&e.to_string()));
             }
@@ -178,9 +186,25 @@ impl Flow {
         if record.agents.is_empty() {
             return;
         }
-        record.worker_configured = self.worker_ready;
+        record.worker_configured = self.deps.env.worker_configured();
         record.release = Some(self.deps.version.clone());
         self.finish_install(record, &planned.plan);
+    }
+
+    /// The promised "how to connect one" step (see [`text::WORKER_LATER`]):
+    /// what to put where, plus the models a local endpoint offers.
+    fn worker_guide(&self) -> Vec<String> {
+        let url = crate::config::Config::load_local()
+            .ok()
+            .map(|c| c.worker_api_url)
+            .unwrap_or_else(|| crate::config::DEFAULT_WORKER_API_URL.to_owned());
+        let found = (self.deps.models)(&url, Duration::from_millis(1500));
+        let file = self
+            .deps
+            .env
+            .home()
+            .join(crate::config::local_dirs::CONFIG_FILE_NAME);
+        text::worker_guide(&file.display().to_string(), found.as_deref())
     }
 
     fn progress_of(
@@ -206,12 +230,24 @@ impl Flow {
             lines.extend(verify.lines().iter().map(|l| self.tidy(l)));
         }
         lines.extend(verify.record_errors.iter().map(|e| self.tidy(e)));
-        let next_steps = verify
+        let mut next_steps: Vec<String> = Vec::new();
+        for v in verify
             .agents
             .iter()
             .filter(|v| v.report.result != CheckResult::Fail)
-            .map(|v| text::next_step(v.agent()).to_owned())
-            .collect();
+        {
+            if v.agent() == AgentId::Antigravity {
+                // The snippet itself, not just a pointer to it (bugfix:
+                // "paste the snippet shown above" pointed at nothing).
+                let agent = antigravity::Antigravity::new(self.deps.binary.clone());
+                next_steps.extend(text::antigravity_snippet(
+                    &agent.snippet_file().display().to_string(),
+                    &agent.snippet(),
+                ));
+            } else {
+                next_steps.push(text::next_step(v.agent()).to_owned());
+            }
+        }
         let ok = !failed && verify.all_passed() && verify.record_errors.is_empty();
         Progress {
             lines,

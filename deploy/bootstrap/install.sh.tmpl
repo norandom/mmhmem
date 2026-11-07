@@ -52,10 +52,13 @@ It is available for Linux (x86_64), macOS (Intel and Apple Silicon) and 64-bit W
 }
 
 download() { # url destination
+    # No -s / -q: curl's and wget's own meters show progress, speed and
+    # time left on a terminal (and stay silent when piped), instead of a
+    # frozen screen for the whole download.
     if have curl; then
-        curl -fsSL --retry 2 -o "$2" "$1"
+        curl -fLS --retry 2 -o "$2" "$1"
     elif have wget; then
-        wget -q -O "$2" "$1"
+        wget -O "$2" "$1"
     else
         fail "This installer needs either curl or wget, and neither was found."
     fi

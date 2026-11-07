@@ -51,6 +51,7 @@ use std::time::Duration;
 
 use self_update::backends::github::{Update, UpdateBuilder};
 
+use crate::setup::download_line;
 use crate::setup::record::{ReleaseTag, Sha256Hex};
 
 #[path = "release_error.rs"]
@@ -152,17 +153,29 @@ pub struct InstalledBinary {
 
 /// Download, verify (see the module docs for the order) and unpack the
 /// release `tag` for `target` into a temporary folder. Nothing outside that
-/// folder is changed.
+/// folder is changed. `progress` is the download-progress hook, when the
+/// caller shows one.
 pub fn verify_and_fetch(
     source: &ReleaseSource,
     tag: &ReleaseTag,
     target: Target,
     keys: &[[u8; 32]],
 ) -> Result<VerifiedArchive, ReleaseError> {
+    verify_and_fetch_with_progress(source, tag, target, keys, None)
+}
+
+/// [`verify_and_fetch`] with a download-progress hook.
+pub fn verify_and_fetch_with_progress(
+    source: &ReleaseSource,
+    tag: &ReleaseTag,
+    target: Target,
+    keys: &[[u8; 32]],
+    progress: Option<download_line::ProgressHook>,
+) -> Result<VerifiedArchive, ReleaseError> {
     let keys = checked_keys(keys)?;
     let dir = tempfile::tempdir().map_err(install_io)?;
     let binary = dir.path().join(target.entry_name());
-    let done = off_runtime(|| fetch_into(source, tag, target, keys, &binary))?;
+    let done = off_runtime(|| fetch_into(source, tag, target, keys, &binary, progress))?;
     Ok(VerifiedArchive {
         tag: tag.clone(),
         target,
@@ -177,7 +190,9 @@ pub fn verify_and_fetch(
 /// Download, verify and install the release `tag` for `target` at
 /// `install_path`. Pass the running program's path
 /// (`std::env::current_exe()`) to update it in place; any other path is
-/// replaced by a rename (tests). On any failure `install_path` is unchanged.
+/// replaced by a rename (tests). On any failure `install_path` is
+/// unchanged. `progress`, when given, is called with the download's bytes
+/// so far and total (see [`crate::setup::download_line`]).
 pub fn update_binary(
     source: &ReleaseSource,
     tag: &ReleaseTag,
@@ -185,8 +200,20 @@ pub fn update_binary(
     keys: &[[u8; 32]],
     install_path: &Path,
 ) -> Result<InstalledBinary, ReleaseError> {
+    update_binary_with_progress(source, tag, target, keys, install_path, None)
+}
+
+/// [`update_binary`] with a download-progress hook.
+pub fn update_binary_with_progress(
+    source: &ReleaseSource,
+    tag: &ReleaseTag,
+    target: Target,
+    keys: &[[u8; 32]],
+    install_path: &Path,
+    progress: Option<download_line::ProgressHook>,
+) -> Result<InstalledBinary, ReleaseError> {
     let keys = checked_keys(keys)?;
-    let done = off_runtime(|| fetch_into(source, tag, target, keys, install_path))?;
+    let done = off_runtime(|| fetch_into(source, tag, target, keys, install_path, progress))?;
     Ok(InstalledBinary {
         tag: tag.clone(),
         archive_sha256: done.archive_sha256,
@@ -324,6 +351,7 @@ fn fetch_into(
     target: Target,
     keys: &[[u8; 32]],
     install_path: &Path,
+    progress: Option<download_line::ProgressHook>,
 ) -> Result<Fetched, ReleaseError> {
     // Checked again here, next to the only `update_extended` call.
     let keys = checked_keys(keys)?;
@@ -348,6 +376,9 @@ fn fetch_into(
         .verifying_keys(keys.to_vec())
         .checksum_from_asset(SUMS_NAME)
         .verify_archive(gate.callback());
+    if let Some(progress) = progress {
+        builder.progress_callback(move |bytes, total| progress(bytes, total));
+    }
     let status = builder
         .build()
         .and_then(|u| u.update_extended())

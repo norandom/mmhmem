@@ -44,6 +44,7 @@ use std::sync::Arc;
 
 use super::home::is_newer;
 use super::{Confirmed, Flow, Next, ReviewView, text};
+use crate::setup::download_line;
 use crate::setup::record::{BinaryInfo, InstallRecord, ReleaseTag, Target};
 use crate::setup::release::{self, LocalRelease, ReleaseSource};
 use crate::setup::release_keys::trusted_release_keys;
@@ -256,7 +257,12 @@ impl Flow {
     }
 
     /// Updates the program to `tag`, then plans the recorded choices again.
-    pub(super) fn update_to(&mut self, tag: &ReleaseTag) -> Next {
+    /// `progress` (the download-progress hook) is handed to the download.
+    pub(super) fn update_to(
+        &mut self,
+        tag: &ReleaseTag,
+        progress: Option<download_line::ProgressHook>,
+    ) -> Next {
         if let Some(note) = self.update_refusal() {
             return Next::Note(note);
         }
@@ -264,12 +270,13 @@ impl Flow {
         let Some(target) = releases.target else {
             return Next::Note(text::UPDATE_NO_PLATFORM);
         };
-        let installed = match release::update_binary(
+        let installed = match release::update_binary_with_progress(
             &releases.source,
             tag,
             target,
             &releases.keys,
             &self.deps.binary,
+            progress,
         ) {
             Ok(installed) => installed,
             Err(e) => {
