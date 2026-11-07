@@ -43,7 +43,9 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - Register the tenth tool with the documented parameter schema; validate kind and size before calling the service; render exactly one text block holding the JSON result with absent fields omitted; map errors to actionable tool errors; wrap in the telemetry span
   - Observable completion: HTTP and stdio enumeration tests list ten tools with the conservative annotations; round trips over both transports and in local mode parse the JSON for summarized, cached and bypassed outcomes; invalid kind, empty and oversized content return the documented error texts and leave no rows behind
   - _Depends: 2.2_
-  - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.3, 2.4, 6.4_- [x] 3.2 Update tool-count pins and adjacent suites
+  - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.3, 2.4, 6.4_
+
+- [x] 3.2 Update tool-count pins and adjacent suites
   - Update tests that pin nine tools to ten with a citation of this spec; assert prune (command and tool) leaves content rows untouched; extend audit redaction coverage to content bypasses
   - Observable completion: the whole suite passes, and the prune report still counts only file-cache rows after content rows exist
   - _Depends: 3.1_
@@ -51,7 +53,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
 
 ## 4. Validation and house rules
 
-- [ ] 4.1 Gates, help text and README
+- [x] 4.1 Gates, help text and README
   - Run formatting, strict clippy, size caps and the full test suite; add the tool to the help text and the README tool list with the one-line distinction from `smart_read` and the cache cap setting
   - Observable completion: all gates green; README and help list ten tools; the consumer contract in the design matches the wire result byte for byte in an integration test fixture saved for the consumer's fake endpoint
   - _Requirements: 6.1, 6.2, 6.3_
@@ -66,3 +68,4 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
 - tests/shunt_content_service.rs is at 747/800 lines — 3.x additions should go to a new test file or slim helpers, not extend it.
 - Bypass crumbs use the AUDIT vocabulary (BypassReason::as_str: security_critical_bypass/below_line_threshold); the WIRE vocabulary in the JSON result (security_critical/below_threshold) is separate — do not conflate.
 - shunt.rs and shunt_content.rs sit at 500/500 and 499/500 lines: new engine logic belongs in new files or must first extract helpers.
+- 4.1 (2026-11-07): loc_caps rider done — 0-hash raw-string lexing fixed (starts_raw_string requires the quote; the blanker eats r+hashes+opener), and req_13_3_size_caps_hold now machine-enforces the 80-line cap on raw-string files again. Spec erratum: "ten tools" (requirements 6.1 / design / task 3.1–4.1 wording) predates the `status` tool (2026-11-04, commit 48a22b1); the real registered count is eleven — help text, README and the committed tests all pin eleven.

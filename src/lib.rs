@@ -68,6 +68,20 @@ pub fn help_text() -> String {
          \x20   healthcheck      Probe GET /healthz on the local daemon and exit 0 on\n\
          \x20                    HTTP 200 (container healthchecks; no curl in the image)\n\
          \n\
+         MCP TOOLS (same set over serve and stdio; docs/usage.md has details):\n\
+         \x20   session_resume_or_handoff  Resume or checkpoint working state\n\
+         \x20   smart_read                 Read exact lines or summarize large files\n\
+         \x20   boilerplate_write          Generate files through the worker\n\
+         \x20   mem_search                 Search the compact memory index\n\
+         \x20   mem_get_observations       Fetch selected observation details\n\
+         \x20   mem_record_observation     Store a project observation\n\
+         \x20   shunt_warmup               Prepare summaries in a batch\n\
+         \x20   shunt_prune                Remove stale cache entries\n\
+         \x20   mem_search_breadcrumbs     Search project action history\n\
+         \x20   status                     Report version and store health\n\
+         \x20   shunt_content              Summarize content a caller holds as a string\n\
+         \x20                              (programmatic consumers; for files use smart_read)\n\
+         \n\
          With no flag the daemon loads its env-only configuration (AGENT_MEM_*,\n\
          SHUNT_MIN_LINES, WORKER_*, OTEL_*) fail-fast and exits non-zero when a\n\
          required variable is missing; storage and MCP server wiring lands in a\n\

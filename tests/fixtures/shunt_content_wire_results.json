@@ -1,0 +1,22 @@
+{
+  "contract": "shunt-content-tool design.md 'mcp / shunt_content tool' wire result (requirements.md 2.1/2.2)",
+  "captured_by": "mmhmem tests/shunt_content_fixture.rs against a real serve-mode server with the stub worker (task 4.1)",
+  "for_consumer": "mvibe proxy-econ-client FakeMmhmem fake endpoint (tests/econ_helpers.py): serve these exact text-block bytes",
+  "request": {
+    "project": "proxy-econ",
+    "agent_harness": "mvibe-proxy",
+    "kind": "file_read",
+    "content_recipe": "lines 'line {i} of the historical file-read result\\n' for i in 1..=160",
+    "content_sha256": "a5d42758fcb097d80cd9ddb56ed6ad2a06a35bd61c51557c54a5c50babad236e",
+    "below_threshold_content": "one short line of output\n",
+    "security_critical_content": "-----BEGIN RSA PRIVATE KEY-----\nMIIfake\n-----END RSA PRIVATE KEY-----\n",
+    "stub_worker_model": "stub-model",
+    "stub_worker_summary": "- exports [L1-L160]"
+  },
+  "wire": {
+    "summarized": "{\"avoided_input_tokens_est\":1728,\"content_sha256\":\"a5d42758fcb097d80cd9ddb56ed6ad2a06a35bd61c51557c54a5c50babad236e\",\"latency_ms\":2,\"line_count\":160,\"outcome\":\"summarized\",\"summary\":\"- exports [L1-L160]\",\"worker_model\":\"stub-model\"}",
+    "cached": "{\"avoided_input_tokens_est\":1733,\"content_sha256\":\"a5d42758fcb097d80cd9ddb56ed6ad2a06a35bd61c51557c54a5c50babad236e\",\"latency_ms\":0,\"line_count\":160,\"outcome\":\"cached\",\"summary\":\"- exports [L1-L160]\"}",
+    "bypassed_below_threshold": "{\"bypass_reason\":\"below_threshold\",\"content_sha256\":\"84c76d0d3002141b612d7ae9c0dc5d6ea8a6ba098848a2766aa8843ff3c8a519\",\"line_count\":1,\"outcome\":\"bypassed\"}",
+    "bypassed_security_critical": "{\"bypass_reason\":\"security_critical\",\"content_sha256\":\"178d696bdd6fc5e8135762012d5bdf7ba8dba0b5df8beb769e2d64a50cae95cd\",\"line_count\":3,\"outcome\":\"bypassed\"}"
+  }
+}

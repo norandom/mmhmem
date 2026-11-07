@@ -97,6 +97,11 @@ Memory and targeted file reads work without a worker model. For large-file
 summaries and boilerplate generation, configure an OpenAI-compatible endpoint
 such as Ollama, vLLM or a hosted provider. See [worker settings](docs/configuration.md#worker-settings).
 
+Agents read files through `smart_read`; programs that already hold a
+tool-result string (such as the mvibe proxy) call `shunt_content` for the
+same cached summaries without a file path. The full tool list is in the
+[tool reference](docs/usage.md#mcp-tools).
+
 ## Optional server
 
 Use one shared Linux or Docker deployment when agents on different machines

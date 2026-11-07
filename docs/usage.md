@@ -39,7 +39,8 @@ mmhmem prune
 Statistics are grouped by day, project and agent. Estimated savings and
 client-reported values remain separately labelled. Pruning removes stale
 cache rows for missing or changed files; preview with `--dry-run` first.
-Ask your agent to call `shunt_warmup` for key project files, up to 25 per batch,
+It never touches the separate, size-bounded content cache behind
+`shunt_content`. Ask your agent to call `shunt_warmup` for key project files, up to 25 per batch,
 to prepare summaries before the first read.
 
 After a context clear, `/mmhmem-recap` retrieves the latest checkpoint without
@@ -74,6 +75,7 @@ there is no store migration or new service configuration.
 | `shunt_prune` | Remove stale cache entries |
 | `mem_search_breadcrumbs` | Search project action history |
 | `status` | Report version and store health (used by the installer's check) |
+| `shunt_content` | Summarize tool-result content a programmatic caller holds as a string (for repository files use `smart_read`) |
 
 ## State and audit
 

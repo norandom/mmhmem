@@ -22,7 +22,8 @@ Create `~/.mmhmem.json` for all projects, or `./.mmhmem.json` for one project:
 Use the model name and URL supplied by your provider; hosted providers may
 require an API key. Per-setting precedence is **environment > project file >
 global file > default**. Only `worker_model`, `worker_api_url`,
-`worker_api_key` and `update_check` are read. Unknown keys are ignored and
+`worker_api_key`, `update_check` and `shunt_content_cache_max_rows` are
+read. Unknown keys are ignored and
 preserved by updates. Invalid JSON fails startup and names the file.
 
 `mmhmem setup` never stores worker secrets in agent registrations; keep them
@@ -53,6 +54,7 @@ it off, set `MMHMEM_NO_UPDATE_CHECK=1` or add `"update_check": false` to
 | `AGENT_MEM_AUDIT_MAX_BYTES` | `10485760` | Local audit rotation threshold |
 | `AGENT_MEM_AUDIT_ROTATE_KEEP` | `5` | Rotated audit files to retain |
 | `SHUNT_MIN_LINES` | `150` | Minimum file length for worker summarization |
+| `SHUNT_CONTENT_CACHE_MAX_ROWS` | `5000` | Row cap for the `shunt_content` cache (`.mmhmem.json` key `shunt_content_cache_max_rows`); oldest-hit rows are evicted beyond it |
 | `WORKER_API_URL`, `WORKER_MODEL`, `WORKER_API_KEY` | Unset | Override worker-file settings |
 | `MMHMEM_NO_UPDATE_CHECK` | Unset | `1` turns off the update notice and its release lookup |
 

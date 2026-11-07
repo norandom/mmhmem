@@ -58,9 +58,17 @@ fn step_normal(b: &[u8], out: &mut [u8], i: &mut usize) -> St {
             St::Normal
         }
         _ if starts_raw_string(b, *i) => {
+            // Enter Raw state PAST the opening quote. Stopping at the quote
+            // made `raw_closes` judge the OPENER for 0 hashes, where its
+            // hash check is vacuously true: the quote closed itself, the
+            // content stayed as code, and the real closing quote opened a
+            // Str state that blanks newlines (task 4.1 rider). Blanking
+            // through `r`, the hashes and the quote fixes 0-hash `r"..."`
+            // and `r#"..."#` openers alike.
             let hashes = raw_hashes(b, *i);
-            out[*i] = b' ';
-            *i += 1;
+            let after_open = (*i + 1 + hashes as usize + 1).min(b.len());
+            blank_range(out, *i, after_open);
+            *i = after_open;
             St::Raw(hashes)
         }
         _ => {
@@ -120,9 +128,18 @@ fn blank_range(out: &mut [u8], a: usize, b: usize) {
     }
 }
 
-/// True when the `r` at `b[i]` opens an `r"..."` / `r#"..."#` literal.
+/// True when the `r` at `b[i]` opens an `r"..."` / `r#"..."#` literal: `r`,
+/// zero or more `#`, then the opening quote. The quote is required so raw
+/// identifiers (`r#type`) are not mistaken for raw strings.
 fn starts_raw_string(b: &[u8], i: usize) -> bool {
-    b[i] == b'r' && i + 1 < b.len() && (b[i + 1] == b'"' || b[i + 1] == b'#')
+    if b[i] != b'r' {
+        return false;
+    }
+    let mut j = i + 1;
+    while j < b.len() && b[j] == b'#' {
+        j += 1;
+    }
+    j < b.len() && b[j] == b'"'
 }
 
 /// Number of `#` in the raw-string opening whose `r` is at `b[i]`.
@@ -136,7 +153,10 @@ fn raw_hashes(b: &[u8], i: usize) -> u8 {
     n
 }
 
-/// True when the quote at `b[i]` is followed by `hashes` `#` bytes.
+/// True when the quote at `b[i]` is followed by `hashes` `#` bytes. For 0
+/// hashes every quote closes (the empty hash check is vacuous), which is
+/// correct for a content quote — the OPENER must never be evaluated, so
+/// `step_normal` skips past it before entering `St::Raw`.
 fn raw_closes(b: &[u8], i: usize, hashes: u8) -> bool {
     let end = i + 1 + hashes as usize;
     end <= b.len() && b[i + 1..end].iter().all(|&c| c == b'#')
@@ -297,4 +317,53 @@ fn req_13_3_size_caps_hold() {
             f.display()
         );
     }
+}
+
+/// Task 4.1 rider (2.2 review, 2026-11-07): 0-hash `r"..."` raw strings
+/// must not collapse the skeleton. The old lexer consumed only the `r`,
+/// entered `St::Raw(0)` AT the opening quote, and `raw_closes` then treated
+/// that quote as its own closer (its hash check is vacuous for 0 hashes),
+/// so the raw content stayed as code and the raw string's CLOSING quote
+/// opened `St::Str`, which blanks newlines — merging lines until the next
+/// quote and letting >80-line functions escape the cap.
+#[test]
+fn zero_hash_raw_strings_do_not_collapse_the_skeleton() {
+    // A 100-line function (cap 80): signature, a 0-hash raw string on the
+    // first body line, quote-bearing lines at 39 and 60 that the old lexer
+    // chained into long Str states, filler, closing brace on line 100.
+    let mut src = String::from("fn over_cap_raw_string() {\n");
+    src.push_str("    let banner = r\"no quotes inside\";\n"); // line 2
+    for line in 3..39 {
+        src.push_str(&format!("    let a{line} = {line};\n"));
+    }
+    src.push_str("    let msg = \"pair one\";\n"); // line 39
+    for line in 40..60 {
+        src.push_str(&format!("    let b{line} = {line};\n"));
+    }
+    src.push_str("    let q = '\"';\n"); // line 60
+    for line in 61..100 {
+        src.push_str(&format!("    let c{line} = {line};\n"));
+    }
+    src.push_str("}\n"); // line 100
+    assert_eq!(src.lines().count(), 100, "fixture sanity: 100 lines");
+
+    let skeleton = blank_non_code(&src);
+    assert_eq!(
+        skeleton.lines().count(),
+        100,
+        "blanking must preserve every newline (0-hash raw strings)"
+    );
+    assert!(
+        !skeleton.contains("no quotes inside"),
+        "raw-string content must be blanked, not kept as code"
+    );
+    let (_, sig, close) = fn_extents(&skeleton)
+        .into_iter()
+        .find(|(name, _, _)| name == "over_cap_raw_string")
+        .expect("fn extent");
+    assert_eq!(
+        close - sig + 1,
+        100,
+        "the 100-line function must measure 100 skeleton lines (cap 80)"
+    );
 }
