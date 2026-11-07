@@ -17,7 +17,10 @@ use tokio::process::{Child, ChildStdin, Command};
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN};
 use mmhmem::services::shunt::ShuntEngine;
-use mmhmem::services::shunt_cache::{cache_lookup, cache_store, query_fingerprint};
+use mmhmem::services::shunt_cache::{
+    ContentCacheRow, cache_lookup, cache_store, content_cache_lookup,
+    content_cache_store_and_evict, query_fingerprint,
+};
 use mmhmem::storage::audit::AuditWriter;
 use mmhmem::storage::audit::sha256_hex;
 use mmhmem::storage::db::Db;
@@ -547,6 +550,89 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
                 .is_some(),
             "fresh row survives"
         );
+    }
+
+    mcp.shutdown().await;
+}
+
+#[tokio::test]
+async fn prune_tool_leaves_content_rows_untouched_and_counts_only_file_rows() {
+    // shunt-content-tool Req 4.4: with content-cache rows present, the
+    // shunt_prune TOOL's preview and real run count ONLY file-cache rows
+    // and never delete a content row — content rows have no file to
+    // re-check on disk, so classifying them would be dishonest.
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+
+    let fresh = write_lines(files.path(), "fresh.rs", 20);
+    let (fresh_sha, fresh_key) = {
+        let body = std::fs::read(&fresh).expect("read");
+        (sha256_hex(&body), fresh.clone())
+    };
+    let missing_key = files.path().join("gone.rs").display().to_string();
+    let missing_sha = sha256_hex(b"gone content\n");
+    let (content_one, content_two) = (
+        sha256_hex(b"ephemeral one\n"),
+        sha256_hex(b"ephemeral two\n"),
+    );
+    {
+        let db = open_store(data.path());
+        cache_store(&db, Path::new(&fresh_key), &fresh_sha, "fp", "fresh", 20)
+            .await
+            .expect("seed fresh");
+        cache_store(
+            &db,
+            Path::new(&missing_key),
+            &missing_sha,
+            "fp",
+            "stale",
+            20,
+        )
+        .await
+        .expect("seed missing");
+        for (sha, summary) in [(&content_one, "one"), (&content_two, "two")] {
+            let row = ContentCacheRow {
+                content_sha256: sha,
+                query_fingerprint: "fp",
+                kind: "file_read",
+                structural_summary: summary,
+                line_count: 200,
+            };
+            content_cache_store_and_evict(&db, row, 5000)
+                .await
+                .expect("seed content row");
+        }
+    }
+
+    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
+    mcp.handshake().await;
+
+    for (args, labels) in [
+        (
+            json!({"project": "p", "agent_harness": "opencode", "dry_run": true}),
+            "preview",
+        ),
+        (
+            json!({"project": "p", "agent_harness": "opencode"}),
+            "real run",
+        ),
+    ] {
+        let resp = mcp.call("shunt_prune", args).await;
+        let text = StdioMcp::text_of(&resp);
+        assert!(
+            text.contains("1 missing") && text.contains("1 kept fresh"),
+            "{labels} counts ONLY file-cache rows: {text}"
+        );
+        let db = open_store(data.path());
+        for sha in [&content_one, &content_two] {
+            assert!(
+                content_cache_lookup(&db, sha, "fp", "file_read")
+                    .await
+                    .expect("content lookup")
+                    .is_some(),
+                "{labels} must leave content row {sha} untouched"
+            );
+        }
     }
 
     mcp.shutdown().await;

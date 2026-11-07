@@ -4,7 +4,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use mmhmem::services::shunt_cache::{cache_lookup, cache_store};
+use mmhmem::services::shunt_cache::{
+    ContentCacheRow, cache_lookup, cache_store, content_cache_lookup, content_cache_store_and_evict,
+};
 use mmhmem::storage::audit::sha256_hex;
 use mmhmem::storage::db::Db;
 
@@ -127,4 +129,61 @@ async fn real_run_removes_stale_keeps_fresh_exits_zero() {
     // One PRUNE audit event landed in the store's audit log.
     let audit = std::fs::read_to_string(data.path().join("audit.jsonl")).expect("audit file");
     assert!(audit.contains("PRUNE"), "audited deletion: {audit}");
+}
+
+/// Seeds two content-cache rows exactly as `shunt_content` delegations
+/// would (shunt-content-tool Req 4.1); returns their content hashes.
+async fn seed_content_rows(data_dir: &Path) -> (String, String) {
+    let db = Db::open(data_dir).expect("open store");
+    let one = sha256_hex(b"ephemeral tool output one\n");
+    let two = sha256_hex(b"ephemeral tool output two\n");
+    for (sha, summary) in [(&one, "content summary one"), (&two, "content summary two")] {
+        let row = ContentCacheRow {
+            content_sha256: sha,
+            query_fingerprint: "fp",
+            kind: "file_read",
+            structural_summary: summary,
+            line_count: 200,
+        };
+        let evicted = content_cache_store_and_evict(&db, row, 5000)
+            .await
+            .expect("seed content row");
+        assert_eq!(evicted, 0, "seeding within the cap must not evict");
+    }
+    drop(db);
+    (one, two)
+}
+
+#[tokio::test]
+async fn prune_command_leaves_content_rows_untouched_and_counts_only_file_rows() {
+    // shunt-content-tool Req 4.4: content-cache rows are ephemeral tool
+    // output with no file to re-check on disk, so the `mmhmem prune`
+    // COMMAND must neither delete nor count them — the report still
+    // describes only the file cache.
+    let data = tempfile::tempdir().unwrap();
+    seed_store(data.path()).await; // one stale-missing + one fresh file row
+    let (one, two) = seed_content_rows(data.path()).await;
+
+    let (ok, out) = prune(data.path(), false);
+    assert!(ok, "prune exits 0: {out}");
+    assert!(
+        out.contains("1 missing") && out.contains("1 kept fresh"),
+        "report counts ONLY the file-cache rows: {out}"
+    );
+
+    let db = Db::open(data.path()).expect("reopen store");
+    for sha in [&one, &two] {
+        assert!(
+            content_cache_lookup(&db, sha, "fp", "file_read")
+                .await
+                .expect("content lookup")
+                .is_some(),
+            "prune must leave content row {sha} untouched"
+        );
+    }
+    let rows: i64 = db
+        .with_conn(|c| c.query_row("SELECT COUNT(*) FROM shunt_content_cache", [], |r| r.get(0)))
+        .await
+        .expect("count content rows");
+    assert_eq!(rows, 2, "both content rows survive the prune command");
 }

@@ -7,9 +7,14 @@
 
 use std::collections::BTreeMap;
 
+use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_SHUNT_MIN_LINES, ENV_TOKEN};
+use mmhmem::services::session_bus::SessionBus;
+use mmhmem::services::shunt::ShuntEngine;
+use mmhmem::services::shunt_content::{ContentKind, ContentOutcome, ContentRequest};
 use mmhmem::storage::audit::{
     AuditEventType, AuditWriter, REDACTED_PRIVATE_TAG, REDACTED_SECRET, redact_secrets,
 };
+use mmhmem::storage::db::Db;
 use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -391,4 +396,196 @@ fn from_config_uses_agent_mem_log_file_env_path() {
         .write_event(AuditEventType::AuthFailure, "h", "p", json!({}))
         .unwrap();
     assert!(log.is_file());
+}
+
+// ---------- shunt-content-tool task 3.2: content-bypass redaction (Req 6.4) ----------
+//
+// design.md "Testing strategy / Audit": secrets in content never reach
+// audit or breadcrumbs. tests/shunt_content_bypass.rs (task 2.1) pinned
+// the bypass audit SHAPE; this sweep drives real `shunt_content`
+// bypasses — the full Req 3.2 secret corpus plus the hint-path and
+// below-threshold rules — through the real writer, store and session
+// bus, and proves the raw audit BYTES and breadcrumb rows stay clean.
+// Content bypasses are hash-only by construction (Req 3.4), so nothing
+// is ever left for the writer's redaction to catch.
+
+/// Engine plus live store and audit log for real content bypass calls.
+/// No worker: every case here bypasses before the worker stage
+/// (Req 3.1-3.3), so none is ever needed.
+struct ContentEngine {
+    #[allow(dead_code)]
+    data: tempfile::TempDir,
+    logs: tempfile::TempDir,
+    db: Db,
+    eng: ShuntEngine,
+}
+
+fn content_engine() -> ContentEngine {
+    let data = tempfile::tempdir().unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let mut env = std::collections::HashMap::new();
+    env.insert(ENV_TOKEN.to_string(), "tok".to_string());
+    env.insert(
+        ENV_ALLOWED_ROOTS.to_string(),
+        data.path().display().to_string(),
+    );
+    env.insert(ENV_SHUNT_MIN_LINES.to_string(), "150".to_string());
+    let cfg = Config::from_env(&|k| env.get(k).cloned()).unwrap();
+    let db = Db::open(data.path()).unwrap();
+    let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
+    let bus = SessionBus::new(db.clone(), audit.clone());
+    let eng = ShuntEngine::new(db.clone(), audit, cfg, Some(bus), None);
+    ContentEngine {
+        data,
+        logs,
+        db,
+        eng,
+    }
+}
+
+/// A FileRead content request with an optional source hint.
+fn content_req<'a>(content: &'a str, hint: Option<&'a str>) -> ContentRequest<'a> {
+    ContentRequest {
+        project: "redaction",
+        harness: "audit-test",
+        task: None,
+        content,
+        kind: ContentKind::FileRead,
+        source_hint: hint,
+        question: "q",
+    }
+}
+
+/// `total` filler lines with `inject` replacing the middle line, so the
+/// corpus sits above the 150-line threshold unless a rule bypasses it.
+fn filler_with(total: usize, inject: &str) -> String {
+    let mut lines: Vec<String> = (1..=total)
+        .map(|i| format!("plain filler row {i}"))
+        .collect();
+    lines[total / 2] = inject.to_string();
+    lines.join("\n")
+}
+
+#[tokio::test]
+async fn content_bypass_secrets_never_reach_audit_bytes_or_breadcrumbs() {
+    let ce = content_engine();
+    // The Req 3.2 corpus (PEM header, cloud key id, api-key assignment,
+    // bearer token, secret environment line), each embedded mid-content.
+    let pem =
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxKEYMAT\n-----END RSA PRIVATE KEY-----";
+    let cloud = "the key id is AKIAIOSFODNN7EXAMPLE here";
+    let assignment = "api_key = sk-W9Xqz0123456789bCdEf";
+    let bearer = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig";
+    let env_line = "GITHUB_TOKEN=ghp_16C7e42F292c6912E7710c838347Ae178B4a";
+    let mut cases: Vec<(String, Option<&str>)> = [pem, cloud, assignment, bearer, env_line]
+        .iter()
+        .map(|p| (filler_with(160, p), None))
+        .collect();
+    cases.push((
+        filler_with(160, "mid benign row"),
+        Some("src/auth/token.rs"),
+    ));
+    cases.push((filler_with(149, "mid benign row"), None));
+    for (content, hint) in &cases {
+        let out = ce
+            .eng
+            .shunt_content(&content_req(content, *hint))
+            .await
+            .unwrap();
+        assert!(
+            matches!(out, ContentOutcome::Bypassed { .. }),
+            "every corpus case must bypass, got {out:?}"
+        );
+    }
+
+    // The raw audit bytes: no secret payload, no benign content line.
+    let raw = std::fs::read_to_string(ce.logs.path().join("audit.jsonl")).unwrap();
+    let needles = [
+        pem,
+        cloud,
+        assignment,
+        bearer,
+        env_line,
+        "MIIEowIBAAKCAQEAxKEYMAT",
+        "AKIAIOSFODNN7EXAMPLE",
+        "sk-W9Xqz0123456789bCdEf",
+        "eyJhbGciOiJIUzI1NiJ9.payload.sig",
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "plain filler row",
+        "mid benign row",
+    ];
+    for needle in needles {
+        assert!(
+            !raw.contains(needle),
+            "leak into audit bytes: {needle} in {raw}"
+        );
+    }
+
+    // Every bypass line is a verified record with hash-only details
+    // (source label + optional hint, kind, sha, lines, reason).
+    let allowed: BTreeMap<&str, ()> = [
+        "bypass_reason",
+        "hint",
+        "kind",
+        "sha256",
+        "source",
+        "total_lines",
+    ]
+    .into_iter()
+    .map(|k| (k, ()))
+    .collect();
+    let mut bypass_events = 0usize;
+    for line in raw.lines() {
+        let record = verify_record(line);
+        if record["event_type"].as_str() != Some("IO_DIRECT_READ") {
+            continue;
+        }
+        bypass_events += 1;
+        let d = &record["details"];
+        assert_eq!(d["source"], "content", "content bypass label: {line}");
+        assert_eq!(d["kind"], "file_read", "kind carried: {line}");
+        let sha = d["sha256"].as_str().unwrap();
+        assert_eq!(sha.len(), 64, "content hash carried: {line}");
+        assert!(
+            d.as_object()
+                .unwrap()
+                .keys()
+                .all(|k| allowed.contains_key(k.as_str())),
+            "hash-only details (never content): {line}"
+        );
+    }
+    assert_eq!(
+        bypass_events, 7,
+        "exactly one audit event per bypass: {raw}"
+    );
+
+    // The breadcrumb rows the bypasses appended stay clean too.
+    let crumbs: Vec<(String, String)> = ce
+        .db
+        .with_conn(|c| {
+            let mut s = c
+                .prepare("SELECT target_resource, action_summary FROM session_breadcrumbs")
+                .unwrap();
+            let rows = s
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            Ok(rows)
+        })
+        .await
+        .unwrap();
+    assert_eq!(crumbs.len(), 7, "one crumb per bypass");
+    for (resource, summary) in &crumbs {
+        for needle in needles {
+            assert!(
+                !resource.contains(needle),
+                "leak into crumb resource: {resource}"
+            );
+            assert!(
+                !summary.contains(needle),
+                "leak into crumb summary: {summary}"
+            );
+        }
+    }
 }
