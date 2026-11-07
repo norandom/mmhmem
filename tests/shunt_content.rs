@@ -1,8 +1,10 @@
 //! Content-shunt type + shared source seam tests (shunt-content-tool task
 //! 1.1; requirements.md Req 6.2 — the engine is extended through a shared
-//! evaluation path, not duplicated). The evaluation, secret-bypass and
-//! cache tests for `shunt_content` land with tasks 2.1/2.2; this file pins
-//! what task 1.1 owns:
+//! evaluation path, not duplicated). The task 2.1 evaluation tests (secret
+//! patterns, hint path, threshold, hash-only bypass audit) live in
+//! `tests/shunt_content_bypass.rs` (the 800-line test-file cap of
+//! `tests/loc_caps.rs`); the cache-hit and delegation tests land with
+//! task 2.2. This file pins:
 //!   - the content request, kind and outcome types exist with design.md's
 //!     exact field names and render the wire result contract (one flat
 //!     JSON object, absent fields omitted, never null);

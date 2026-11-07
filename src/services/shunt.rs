@@ -96,6 +96,11 @@ impl ShuntEngine {
         self.config.shunt_min_lines
     }
 
+    /// Audit access for the `shunt_content` impl block in `shunt_content.rs`.
+    pub(crate) fn audit_writer(&self) -> &AuditWriter {
+        &self.audit
+    }
+
     /// Canonicalize `raw` and require it to lie under an allowed root;
     /// violations are audited (design.md Security Considerations).
     pub fn confine(&self, raw: &str, ctx: &CallCtx<'_>) -> Result<PathBuf, ShuntError> {

@@ -23,7 +23,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
 
 ## 2. Core: evaluation and orchestration
 
-- [ ] 2.1 Content secret patterns and bypass evaluation
+- [x] 2.1 Content secret patterns and bypass evaluation
   - Implement the documented secret pattern set and the hint-path check; apply them before the threshold check; audit bypasses with reason and hash only; write no cache row and no statistics on bypass
   - Observable completion: a fixture corpus (PEM header, cloud key id, api-key assignment, bearer token, secret-bearing environment line, sensitive hint path) yields `security_critical`, a 149-line benign content yields `below_threshold`, and the audit lines contain hashes and reasons but no content
   - _Depends: 1.1_
