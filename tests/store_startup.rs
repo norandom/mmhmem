@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_BUSY_TIMEOUT_MS, ENV_DATA_DIR, ENV_TOKEN};
 use mmhmem::storage::db::{DB_FILE_NAME, Db};
+use mmhmem::storage::schema::SCHEMA_VERSION;
 use rusqlite::Connection;
 
 fn open_with_timeout(root: &Path, milliseconds: u64) -> anyhow::Result<Db> {
@@ -145,7 +146,11 @@ fn eight_concurrent_first_opens_preserve_a_complete_store() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 1);
+    // Pinned to the constant, not a literal: shunt-content-tool task 1.2
+    // bumps the schema version to add `shunt_content_cache` additatively
+    // (design.md "Revalidation Triggers": schema version bump policy →
+    // store_startup tests).
+    assert_eq!(version, SCHEMA_VERSION);
 }
 
 #[test]
@@ -172,4 +177,57 @@ fn schema_initialization_failure_rolls_back_all_new_objects() {
         (0, 0),
         "schema error committed partial initialization"
     );
+}
+
+#[tokio::test]
+async fn preexisting_store_gains_content_cache_additively() {
+    // shunt-content-tool task 1.2 / Req 4.5: opening a v1 store must add
+    // `shunt_content_cache` and its LRU index without altering existing
+    // tables or data. The fixture hand-builds a v1 store (one real v1
+    // table, a seeded row, user_version=1) exactly like an older binary
+    // would have left it.
+    let directory = tempfile::tempdir().unwrap();
+    {
+        let connection = Connection::open(directory.path().join(DB_FILE_NAME)).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE shunt_file_cache (file_path TEXT NOT NULL, \
+                 content_sha256 TEXT NOT NULL, query_fingerprint TEXT NOT NULL, \
+                 structural_summary TEXT NOT NULL, line_count INTEGER NOT NULL, \
+                 created_at_epoch INTEGER NOT NULL, \
+                 PRIMARY KEY (file_path, content_sha256, query_fingerprint)); \
+                 INSERT INTO shunt_file_cache VALUES \
+                 ('src/a.rs', 'sha-a', 'fp1', 'summary one', 12, 111); \
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+    }
+    let db = open_with_timeout(directory.path(), 1000).unwrap();
+    let (table, index, seeded, version): (i64, i64, String, u32) = db
+        .with_conn(|c| {
+            let table: i64 = c.query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                  WHERE type='table' AND name='shunt_content_cache'",
+                [],
+                |r| r.get(0),
+            )?;
+            let index: i64 = c.query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                  WHERE type='index' AND name='idx_shunt_content_cache_lru'",
+                [],
+                |r| r.get(0),
+            )?;
+            let seeded: String = c.query_row(
+                "SELECT structural_summary FROM shunt_file_cache WHERE file_path = 'src/a.rs'",
+                [],
+                |r| r.get(0),
+            )?;
+            let version: u32 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+            Ok((table, index, seeded, version))
+        })
+        .await
+        .unwrap();
+    assert_eq!((table, index), (1, 1), "table and LRU index must be added");
+    assert_eq!(seeded, "summary one", "pre-existing data must survive");
+    assert_eq!(version, SCHEMA_VERSION);
 }

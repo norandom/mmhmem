@@ -9,7 +9,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - Observable completion: the existing shunt, warmup and prune suites pass unchanged, and audit details for file reads now carry an explicit source label
   - _Requirements: 6.2_
 
-- [ ] 1.2 (P) Dedicated content cache table and helpers
+- [x] 1.2 (P) Dedicated content cache table and helpers
   - Additive table and index per the design; lookup that touches last-use and hit count; store-and-evict in one transaction that deletes least-recently-used rows beyond the cap and returns the evicted count
   - Observable completion: storage tests show the table created on a pre-existing store, lookup/touch semantics, and eviction of exactly the oldest-hit rows beyond the cap
   - _Boundary: Content cache_

@@ -11,8 +11,13 @@ use std::cmp::Ordering;
 use rusqlite::Connection;
 use rusqlite::ffi;
 
-/// Schema version stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: u32 = 1;
+/// Schema version stored in `PRAGMA user_version`. v2 (shunt-content-tool
+/// task 1.2, Req 4.1/4.5) adds the `shunt_content_cache` table and its LRU
+/// index additatively: the DDL below is idempotent (`IF NOT EXISTS`), so an
+/// on-disk v1 store is upgraded in place without touching existing tables
+/// or rows — `apply` re-runs the batch because the stamped version is
+/// older, then stamps v2.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Full DDL from design.md "Physical Data Model (SQLite, WAL)", made
 /// idempotent with `IF NOT EXISTS`. Kept as one `const &str` so the Req 13.4
@@ -86,6 +91,18 @@ CREATE TABLE IF NOT EXISTS token_stats (
   -- SQLite rejects a table with two PRIMARY KEY clauses.
 );
 CREATE INDEX IF NOT EXISTS idx_token_stats_proj ON token_stats(project, agent_harness, ts_epoch_ms);
+CREATE TABLE IF NOT EXISTS shunt_content_cache (
+  content_sha256 TEXT NOT NULL,
+  query_fingerprint TEXT NOT NULL,
+  kind TEXT NOT NULL,               -- v1: file_read (ContentKind::as_str)
+  structural_summary TEXT NOT NULL,
+  line_count INTEGER NOT NULL,
+  created_at_epoch INTEGER NOT NULL,
+  last_hit_epoch INTEGER NOT NULL,  -- LRU clock: set at store, touched at hit
+  hits INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (content_sha256, query_fingerprint, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_shunt_content_cache_lru ON shunt_content_cache (last_hit_epoch, created_at_epoch);
 "#;
 
 /// Applies the schema idempotently and stamps `PRAGMA user_version`.

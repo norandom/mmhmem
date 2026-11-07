@@ -187,12 +187,14 @@ mod tests {
             "observations",
             "observations_fts",
             "shunt_file_cache",
+            "shunt_content_cache",
             "token_stats",
         ] {
             assert!(has("table", name), "missing table: {name}");
         }
         assert!(has("index", "idx_breadcrumbs_proj"));
         assert!(has("index", "idx_token_stats_proj"));
+        assert!(has("index", "idx_shunt_content_cache_lru"));
         assert!(has("trigger", "obs_ai"));
         drop(db);
     }
