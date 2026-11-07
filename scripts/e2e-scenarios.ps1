@@ -375,7 +375,10 @@ function Invoke-UpdateCommandPhase {
     $null=Invoke-Pty 'update-command' $paths.Program @('update','--release-dir',(Join-Path $script:Site $current.tag)) @(
         'timeout 240',"expect mmhmem $(ConvertTo-TagPattern $old.tag) is installed\. $(ConvertTo-TagPattern $current.tag) is available\.",
         'expect Update now\? \[Y/n\]','send y enter',
-        'timeout 600',"expect Downloading $(ConvertTo-TagPattern $current.tag) \.\.\. signature and checksum OK\.",
+        'timeout 600',
+        # The download progress line redraws in place over the plain
+        # "Downloading ..." prefix; the verified suffix lands after it.
+        "expect Downloading $(ConvertTo-TagPattern $current.tag).*signature and checksum OK\.",
         "expect Updated to $(ConvertTo-TagPattern $current.tag)\. Checking your tools",
         'timeout 900','exit 0')
     Assert-Updated 'update-command'
