@@ -58,7 +58,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - Observable completion: all gates green; README and help list ten tools; the consumer contract in the design matches the wire result byte for byte in an integration test fixture saved for the consumer's fake endpoint
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ]* 4.2 Live worker check
+- [x]* 4.2 Live worker check
   - With a locally configured worker model, run one real content shunt on a 200-line benign file read and record latency, summary shape and the statistics delta in the spec's validation notes
   - Observable completion: figures recorded; no change to the deterministic gate
   - _Requirements: 5.1_
