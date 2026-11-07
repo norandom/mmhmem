@@ -1,0 +1,23 @@
+{
+  "feature_name": "shunt-content-tool",
+  "created_at": "2026-11-03T11:10:00Z",
+  "updated_at": "2026-11-03T11:50:00Z",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true,
+  "notes": "Fast-tracked (-y) on 2026-11-03 for handover to a separate implementation session. Consumer spec: ../mvibe/.kiro/specs/proxy-econ-client (depends on this tool's contract; implement this spec first)."
+}
