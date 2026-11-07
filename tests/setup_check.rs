@@ -116,7 +116,8 @@ fn real_server_passes_and_lists_exactly_this_releases_tools() {
     );
     assert_eq!(
         check.line(AgentId::Codex),
-        "✔ Codex — mmhmem connected, 10 tools"
+        // shunt-content-tool Req 6.1: eleven tools with shunt_content.
+        "✔ Codex — mmhmem connected, 11 tools"
     );
     // A leading `v` (a release tag) is accepted as well.
     let tagged = check_mcp(

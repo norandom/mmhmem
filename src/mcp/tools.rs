@@ -15,7 +15,10 @@ use super::server::McpServer;
 
 // The ServerHandler impl lives in the same module as the tool router (the
 // generated `tool_router` fn is module-private in rmcp 3.x).
-#[tool_handler]
+// shunt-content-tool task 3.1: the tenth* shunt surface is declared in the
+// child module `shunt_content_tool` (tools.rs is at its LOC cap); its
+// `#[tool]`-generated metadata fn is attached to the router here.
+#[tool_handler(router = Self::tool_router().with_route((Self::shunt_content_tool_attr(), Self::shunt_content)))]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> InitializeResult {
         let mut info = InitializeResult::default();
@@ -41,6 +44,8 @@ use crate::services::shunt_types::{CallCtx, ReadRequest as ShuntReadRequest};
 use crate::services::warmup::{render_report as render_warmup, run_warmup};
 
 use super::tool_support::{err, ok_text, with_span};
+
+mod shunt_content_tool;
 
 #[tool_router]
 impl McpServer {

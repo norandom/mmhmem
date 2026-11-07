@@ -220,13 +220,14 @@ fn real_configs_and_the_real_server_pass_with_codex_approval_pending() {
     };
     let verdicts = checker.run(&selection(), &mut applied, &mut record);
     let lines = verdicts.lines();
+    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
     assert_eq!(
         lines,
         [
-            "✔ Claude Code — mmhmem connected, 10 tools",
-            "✔ Codex — mmhmem connected, 10 tools",
+            "✔ Claude Code — mmhmem connected, 11 tools",
+            "✔ Codex — mmhmem connected, 11 tools",
             "● Codex — approve the mmhmem hook if you have not yet: open Codex, type /hooks, approve \"mmhmem read routing\"",
-            "✔ OpenCode — mmhmem connected, 10 tools",
+            "✔ OpenCode — mmhmem connected, 11 tools",
         ],
         "{verdicts:#?}"
     );

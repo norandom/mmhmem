@@ -202,3 +202,26 @@ pub struct StatusParams {
     /// Calling harness.
     pub agent_harness: String,
 }
+
+/// `shunt_content` arguments (shunt-content-tool design.md API contract).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ShuntContentParams {
+    /// Project name.
+    pub project: String,
+    /// Calling harness (the consumer sends `mvibe-proxy`).
+    pub agent_harness: String,
+    /// The tool-result string to summarize; 1..=1048576 bytes (the handler
+    /// rejects empty or oversized content before the service runs).
+    pub content: String,
+    /// Content discriminator; v1 accepts `file_read` only.
+    pub kind: String,
+    /// Optional label for the path-based security regex and audit lines;
+    /// never opened or confined (Req 1.5).
+    #[serde(default)]
+    pub source_hint: Option<String>,
+    /// Question for the worker; defaults to the fixed canonical question
+    /// shared with `smart_read` so identical content shares one cache
+    /// identity across callers (Req 1.6).
+    #[serde(default = "default_question")]
+    pub question: String,
+}

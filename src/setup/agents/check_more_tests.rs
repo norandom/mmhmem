@@ -28,7 +28,8 @@ fn opencode_race_first_answer_none_then_connected_passes() {
     let (fx, agent) = opencode_fx(&[Feature::Mcp]);
     let report = fx.check(&agent, &want(AgentId::OpenCode, &[Feature::Mcp]));
     assert_eq!(report.result, CheckResult::Pass, "{}", report.line);
-    assert_eq!(report.line, "✔ OpenCode — mmhmem connected, 10 tools");
+    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
+    assert_eq!(report.line, "✔ OpenCode — mmhmem connected, 11 tools");
     let lists: Vec<_> = fx
         .home
         .runner
@@ -214,7 +215,7 @@ fn desktop_and_antigravity_pass_with_their_user_steps_pending() {
     assert_eq!(
         report.lines(),
         [
-            "✔ Claude Desktop — mmhmem connected, 10 tools",
+            "✔ Claude Desktop — mmhmem connected, 11 tools",
             "● Claude Desktop — restart Claude Desktop so it starts mmhmem: quit it \
              completely, then open it again",
         ]

@@ -39,7 +39,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
 
 ## 3. Integration: MCP surface
 
-- [ ] 3.1 Tool handler, parameters, description and annotations
+- [x] 3.1 Tool handler, parameters, description and annotations
   - Register the tenth tool with the documented parameter schema; validate kind and size before calling the service; render exactly one text block holding the JSON result with absent fields omitted; map errors to actionable tool errors; wrap in the telemetry span
   - Observable completion: HTTP and stdio enumeration tests list ten tools with the conservative annotations; round trips over both transports and in local mode parse the JSON for summarized, cached and bypassed outcomes; invalid kind, empty and oversized content return the documented error texts and leave no rows behind
   - _Depends: 2.2_

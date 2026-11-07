@@ -77,11 +77,12 @@ fn passing_and_pending_checks_are_stored_without_rollback() {
     let (applied, verdicts) = install_and_check(&mut fx, &registry, &want);
     assert!(verdicts.all_passed());
     assert!(verdicts.record_errors.is_empty());
+    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
     assert_eq!(
         verdicts.lines(),
         [
-            "✔ Claude Code — mmhmem connected, 10 tools",
-            "✔ Codex — mmhmem connected, 10 tools",
+            "✔ Claude Code — mmhmem connected, 11 tools",
+            "✔ Codex — mmhmem connected, 11 tools",
             "● Codex — approve the mmhmem hook if you have not yet: open Codex, type /hooks, approve \"mmhmem read routing\"",
         ]
     );
@@ -302,7 +303,7 @@ fn a_hook_without_a_worker_model_is_skipped_noted_and_kept() {
     assert_eq!(
         v.lines(),
         [
-            "✔ Codex — mmhmem connected, 10 tools",
+            "✔ Codex — mmhmem connected, 11 tools",
             "● Codex — approve the mmhmem hook if you have not yet: open Codex, type /hooks, approve \"mmhmem read routing\"",
             "● Codex — the read-routing hook is installed but stays inactive until a worker model is set up (choose \"Worker model\" in the menu)",
         ]
