@@ -30,7 +30,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - _Boundary: shunt_content service_
   - _Requirements: 1.2, 1.5, 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 2.2 Cache-hit and delegation path for content
+- [x] 2.2 Cache-hit and delegation path for content
   - Line-number the content into the worker payload; call the existing summarize operation; store the summary, evict beyond cap, record the delegated statistics row before returning; serve cache hits with zero worker calls and a cache-hit statistics row; append breadcrumbs; map worker failures to the existing actionable errors with a hash-only audit and no cache row
   - Observable completion: with the stub worker, first call returns `summarized` with one worker request; second identical call returns `cached` with byte-identical summary and no worker request; statistics rows are visible from a separate connection before the call returns; timeout, unconfigured and HTTP-error stubs produce the documented errors and no cache rows
   - _Depends: 1.2, 1.3, 2.1_
@@ -43,9 +43,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - Register the tenth tool with the documented parameter schema; validate kind and size before calling the service; render exactly one text block holding the JSON result with absent fields omitted; map errors to actionable tool errors; wrap in the telemetry span
   - Observable completion: HTTP and stdio enumeration tests list ten tools with the conservative annotations; round trips over both transports and in local mode parse the JSON for summarized, cached and bypassed outcomes; invalid kind, empty and oversized content return the documented error texts and leave no rows behind
   - _Depends: 2.2_
-  - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.3, 2.4, 6.4_
-
-- [ ] 3.2 Update tool-count pins and adjacent suites
+  - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.3, 2.4, 6.4_- [ ] 3.2 Update tool-count pins and adjacent suites
   - Update tests that pin nine tools to ten with a citation of this spec; assert prune (command and tool) leaves content rows untouched; extend audit redaction coverage to content bypasses
   - Observable completion: the whole suite passes, and the prune report still counts only file-cache rows after content rows exist
   - _Depends: 3.1_
@@ -62,3 +60,9 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
   - With a locally configured worker model, run one real content shunt on a 200-line benign file read and record latency, summary shape and the statistics delta in the spec's validation notes
   - Observable completion: figures recorded; no change to the deterministic gate
   - _Requirements: 5.1_
+
+## Implementation Notes
+- 2.2 review (2026-11-07) found `tests/loc_caps.rs`' skeleton blanker mishandles 0-hash `r"..."` raw strings (opening quote treated as own closer → Str state swallows newlines → skeleton collapses), so the 80-line function cap is NOT machine-enforced on files containing raw strings (shunt_content.rs, hook.rs, local_dirs.rs, stats_client.rs, ...). MANDATORY rider for task 4.1: fix the loc_caps lexer (correct `raw_closes` semantics for 0 hash counts) BEFORE certifying gates; until then function caps hold by manual review only (2.2 remediation manually verified all functions ≤ 80).
+- tests/shunt_content_service.rs is at 747/800 lines — 3.x additions should go to a new test file or slim helpers, not extend it.
+- Bypass crumbs use the AUDIT vocabulary (BypassReason::as_str: security_critical_bypass/below_line_threshold); the WIRE vocabulary in the JSON result (security_critical/below_threshold) is separate — do not conflate.
+- shunt.rs and shunt_content.rs sit at 500/500 and 499/500 lines: new engine logic belongs in new files or must first extract helpers.

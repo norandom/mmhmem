@@ -34,8 +34,7 @@ use crate::storage::db::Db;
 
 /// Bundled audit metadata for a shunt outcome (keeps audit_shunt under the
 /// clippy 7-arg limit, Req 13). The `ShuntSource` seam (shunt-content-tool
-/// design.md) labels the audit, stat and breadcrumb helpers for file and
-/// content callers alike.
+/// design.md) labels the audit/stat/breadcrumb helpers for both callers.
 struct ShuntAuditMeta<'a> {
     source: &'a ShuntSource,
     sha: &'a str,
@@ -57,11 +56,11 @@ struct Miss<'a> {
 /// The deterministic read-shunting engine (design.md ShuntEngine).
 #[derive(Clone)]
 pub struct ShuntEngine {
-    db: Db,
+    pub(crate) db: Db,
     audit: AuditWriter,
-    config: Config,
+    pub(crate) config: Config,
     bus: Option<SessionBus>,
-    worker: Option<WorkerClient>,
+    pub(crate) worker: Option<WorkerClient>,
     roots: AllowedRoots,
     /// Project folders for the security rule: the allowed roots and the
     /// working folder (a harness starts the stdio server in its project).
@@ -240,8 +239,7 @@ impl ShuntEngine {
         .await
     }
 
-    /// Cache-hit path (Req 3.4): audited, counted, breadcrumbed, < 50 ms,
-    /// zero worker calls.
+    /// Cache-hit path (Req 3.4): audited, counted, breadcrumbed, < 50 ms, no worker call.
     async fn serve_cached(
         &self,
         ctx: &CallCtx<'_>,
@@ -285,16 +283,13 @@ impl ShuntEngine {
             question,
             raw_chars,
         } = miss;
-        // ShuntSource seam (shunt-content-tool task 1.1): audit, stat and
-        // breadcrumb below are source-aware. Content delegation
-        // (`payload_from_content` + the dedicated content cache) lands with
-        // the content cache in tasks 1.2/2.2; until then only the File
-        // variant reaches the worker.
+        // ShuntSource seam (task 1.1). Content delegation lives in the
+        // `shunt_content` impl (task 2.2) — only the File variant runs here.
         let file_path = match &source {
             ShuntSource::File(path) => path,
             ShuntSource::Content { .. } => {
                 return Err(ShuntError::Invalid(
-                    "content delegation requires the content cache".to_string(),
+                    "content delegation must go through shunt_content".to_string(),
                 ));
             }
         };
@@ -445,7 +440,7 @@ impl ShuntEngine {
     /// `details.file` column value comes from the source: the path for
     /// files, `content:<sha12>` for content (columns unchanged, design.md
     /// ShuntSource seam).
-    async fn record_stat(
+    pub(crate) async fn record_stat(
         &self,
         ctx: &CallCtx<'_>,
         kind: &'static str,
@@ -476,8 +471,14 @@ impl ShuntEngine {
 
     /// Automatic breadcrumb when a session bus is attached (Req 2.4). The
     /// resource label comes from the source: the file path, or the content
-    /// hint / `content` fallback.
-    async fn crumb(&self, ctx: &CallCtx<'_>, tool: &str, source: &ShuntSource, summary: &str) {
+    /// hint / `content` fallback (also used by `shunt_content`, task 2.2).
+    pub(crate) async fn crumb(
+        &self,
+        ctx: &CallCtx<'_>,
+        tool: &str,
+        source: &ShuntSource,
+        summary: &str,
+    ) {
         if let Some(bus) = &self.bus {
             let task = ctx.task.unwrap_or(ctx.project);
             let resource = source.crumb_resource();

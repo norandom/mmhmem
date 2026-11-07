@@ -1,23 +1,28 @@
 //! Content-based shunt service (shunt-content-tool design.md "services /
-//! shunt_content"). Task 1.1 defined the request, kind and outcome types
-//! plus the wire result contract renderer; task 2.1 adds the evaluation:
-//! the content size re-check, the documented secret pattern set
-//! (`CONTENT_SECRET_RE`), the hint-path security check and the line-count
-//! threshold, in the design's order, with hash-only bypass audits and no
-//! cache row / no statistics on bypass. The cache-hit and delegation
-//! stages land with task 2.2 in the same impl block.
+//! shunt_content"). Task 1.1 defined the request/kind/outcome types and the
+//! wire contract renderer; task 2.1 added the evaluation (size re-check,
+//! `CONTENT_SECRET_RE`, hint-path rule, threshold) with hash-only bypass
+//! audits; task 2.2 adds the remaining stages: the content-cache hit path
+//! (zero worker calls, Req 4.2) and delegation through the EXISTING
+//! summarize operation with an `L<n>:`-numbered payload, store-and-evict
+//! beyond the configured cap (Req 4.3), stats rows committed before return
+//! (Req 5.1/5.2), hash-only audits (5.3), breadcrumbs (5.4) and the
+//! documented worker-failure errors with no cache row (5.5).
 //! Services may import `config` and `storage`, never `mcp` (steering
 //! structure.md) — the MCP handler renders, this module decides.
 
 use std::path::Path;
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use regex::Regex;
 use serde_json::{Value, json};
 
 use super::security_path::is_security_critical_path;
 use super::shunt::ShuntEngine;
+use super::shunt_cache as cache;
 use super::shunt_types::{BypassReason, CallCtx, ShuntError, ShuntSource};
+use super::stats;
 use super::worker::WorkerUsage;
 use crate::storage::audit::{AuditEventType, sha256_hex};
 
@@ -25,6 +30,12 @@ use crate::storage::audit::{AuditEventType, sha256_hex};
 /// Interface; 1 MiB bounds the worker payload). The handler pre-checks,
 /// the service re-checks (Req 1.4) — the same guard rejects both.
 pub const MAX_CONTENT_BYTES: usize = 1 << 20;
+
+/// The fixed default question (Req 1.6): same string as the `smart_read`
+/// default, so identical content from different callers shares one cache
+/// identity. The MCP handler applies it when the caller sends no question.
+pub const DEFAULT_QUESTION: &str =
+    "Summarize exported symbols, signatures, and control flow with exact line ranges.";
 
 /// The content kind discriminator (Req 1.3: validated, not extended — v1
 /// summarizes file reads only). `file_read` selects the file-read
@@ -217,15 +228,25 @@ pub fn is_secret_content(content: &str) -> bool {
     CONTENT_SECRET_RE.is_match(content)
 }
 
+/// Base audit details for every content shunt event (Req 5.3): the
+/// explicit `source` label (+ trimmed hint when supplied), the kind and
+/// the content hash — never the content itself.
+fn content_audit_details(source: &ShuntSource, kind: &str, sha: &str) -> Value {
+    let mut details = source.audit_details();
+    details["kind"] = Value::from(kind);
+    details["sha256"] = Value::from(sha);
+    details
+}
+
 impl ShuntEngine {
     /// Content-based shunt entry point (design.md Service Interface).
     ///
     /// Evaluation order (Req 1.2, same ordering as a shunted read):
     /// size re-check → hint path regex (Req 3.1) → content secret patterns
     /// (Req 3.2) → line-count threshold vs `shunt_min_lines` (Req 3.3) →
-    /// [task 2.2: content-cache lookup → worker delegation]. A bypass is
-    /// audited with the reason and the content hash only (Req 3.4) and
-    /// writes no cache row and no savings statistics (Req 3.5).
+    /// content-cache lookup (Req 4.2) → worker delegation + store/evict
+    /// (Req 4.3, 5.1). A bypass audits the reason and content hash only
+    /// (Req 3.4) and writes no cache row and no statistics (Req 3.5).
     pub async fn shunt_content(
         &self,
         req: &ContentRequest<'_>,
@@ -248,26 +269,209 @@ impl ShuntEngine {
             .source_hint
             .is_some_and(|h| is_security_critical_path(Path::new(h)));
         if hint_critical || is_secret_content(req.content) {
-            return self.content_bypass(req, BypassReason::SecurityCritical, &sha, line_count);
+            return self
+                .content_bypass(req, BypassReason::SecurityCritical, &sha, line_count)
+                .await;
         }
         if (line_count as u32) < self.shunt_min_lines() {
-            return self.content_bypass(req, BypassReason::BelowThreshold, &sha, line_count);
+            return self
+                .content_bypass(req, BypassReason::BelowThreshold, &sha, line_count)
+                .await;
         }
-        // Stages 3-4 (content-cache lookup and worker delegation) land with
-        // task 2.2; until then threshold-passing content keeps the engine's
-        // interim Content-arm guard.
-        Err(ShuntError::Invalid(
-            "content delegation requires the content cache".to_string(),
-        ))
+        // Stage 3: content-cache lookup keyed by (sha, question
+        // fingerprint, kind) — a hit serves the stored bytes with ZERO
+        // worker calls (Req 4.2).
+        let source = ShuntSource::content(req.source_hint);
+        let fp = cache::query_fingerprint(req.question);
+        let raw_chars = req.content.len();
+        let t0 = Instant::now();
+        if let Some(summary) =
+            cache::content_cache_lookup(&self.db, &sha, &fp, req.kind.as_str()).await?
+        {
+            let latency_ms = t0.elapsed().as_millis() as u64;
+            let est = stats::estimate_cache_hit(raw_chars);
+            return self
+                .content_serve_cached(req, &sha, line_count, est, latency_ms, summary)
+                .await;
+        }
+        // Stage 4: worker delegation (Req 5.1).
+        self.content_delegate(req, &source, &sha, &fp, line_count, raw_chars)
+            .await
     }
 
-    /// One bypass outcome: exactly one audit event carrying the reason and
-    /// the content hash — never the content (Req 3.4) — and no cache row,
-    /// no savings statistics (Req 3.5). `IO_DIRECT_READ` is reused
-    /// deliberately: like a file bypass, the content is read directly (by
-    /// the consumer), never summarized, and `details.source = "content"`
-    /// plus `details.kind` distinguish the path.
-    fn content_bypass(
+    /// Cache-hit path (Req 4.2, 5.2, 5.3, 5.4): one audit event carrying
+    /// the kind, hash, line count and latency, one cache-hit statistics
+    /// row (`record_stat` commits it before the response returns), one
+    /// breadcrumb naming the tool, the outcome and the hash prefix.
+    async fn content_serve_cached(
+        &self,
+        req: &ContentRequest<'_>,
+        sha: &str,
+        line_count: usize,
+        est: u64,
+        latency_ms: u64,
+        summary: String,
+    ) -> Result<ContentOutcome, ShuntError> {
+        let source = ShuntSource::content(req.source_hint);
+        let mut details = content_audit_details(&source, req.kind.as_str(), sha);
+        details["total_lines"] = Value::from(line_count);
+        details["avoided_input_tokens_est"] = Value::from(est);
+        details["latency_ms"] = Value::from(latency_ms);
+        self.audit_content(req, AuditEventType::IoShuntCacheHit, details);
+        self.record_stat(
+            &req.ctx(),
+            stats::kind::SHUNT_CACHE_HIT,
+            est,
+            &source,
+            sha,
+            None,
+        )
+        .await;
+        let text = format!(
+            "cached summary for {line_count}-line content sha {}",
+            &sha[..12]
+        );
+        self.crumb(&req.ctx(), "shunt_content:cache_hit", &source, &text)
+            .await;
+        Ok(ContentOutcome::Cached {
+            summary,
+            content_sha256: sha.to_string(),
+            line_count,
+            avoided_input_tokens_est: est,
+            latency_ms,
+        })
+    }
+
+    /// Delegation path (Req 5.1): the worker call runs in
+    /// [`Self::content_call_worker`]; on success this records
+    /// store-and-evict beyond the configured cap (Req 4.3, one count
+    /// audit event), the delegated audit, stats row and breadcrumb.
+    async fn content_delegate(
+        &self,
+        req: &ContentRequest<'_>,
+        source: &ShuntSource,
+        sha: &str,
+        fp: &str,
+        line_count: usize,
+        raw_chars: usize,
+    ) -> Result<ContentOutcome, ShuntError> {
+        let (summary, usage, latency_ms, model) = self.content_call_worker(req, sha).await?;
+        let est = stats::estimate_delegated_read(raw_chars, summary.len());
+        let row = cache::ContentCacheRow {
+            content_sha256: sha,
+            query_fingerprint: fp,
+            kind: req.kind.as_str(),
+            structural_summary: &summary,
+            line_count,
+        };
+        let evicted = cache::content_cache_store_and_evict(
+            &self.db,
+            row,
+            self.config.shunt_content_cache_max_rows,
+        )
+        .await?;
+        if evicted > 0 {
+            let mut details = content_audit_details(source, req.kind.as_str(), sha);
+            details["evicted"] = Value::from(evicted);
+            self.audit_content(req, AuditEventType::ContentCacheEvict, details);
+        }
+        let mut details = content_audit_details(source, req.kind.as_str(), sha);
+        details["total_lines"] = Value::from(line_count);
+        details["avoided_input_tokens_est"] = Value::from(est);
+        details["latency_ms"] = Value::from(latency_ms);
+        details["worker_model"] = Value::from(model.as_str());
+        details["worker_prompt_tokens"] = Value::from(usage.prompt_tokens);
+        details["worker_completion_tokens"] = Value::from(usage.completion_tokens);
+        self.audit_content(req, AuditEventType::IoShuntDelegated, details);
+        self.record_stat(
+            &req.ctx(),
+            stats::kind::SHUNT_DELEGATED,
+            est,
+            source,
+            sha,
+            Some(usage),
+        )
+        .await;
+        self.crumb(
+            &req.ctx(),
+            "shunt_content:delegated",
+            source,
+            &format!(
+                "worker summary for {line_count}-line content sha {} ({latency_ms} ms)",
+                &sha[..12]
+            ),
+        )
+        .await;
+        Ok(ContentOutcome::Summarized {
+            summary,
+            content_sha256: sha.to_string(),
+            line_count,
+            avoided_input_tokens_est: est,
+            latency_ms,
+            usage,
+            worker_model: model,
+        })
+    }
+
+    /// The worker call of a delegation (Req 5.1, 5.5): the EXISTING
+    /// `summarize_file` over the `L<n>:`-numbered payload; failures map
+    /// to the existing actionable errors with a hash-only WORKER_ERROR
+    /// audit. Returns (summary, usage, latency_ms, worker_model).
+    async fn content_call_worker(
+        &self,
+        req: &ContentRequest<'_>,
+        sha: &str,
+    ) -> Result<(String, WorkerUsage, u64, String), ShuntError> {
+        let worker = match self.worker.as_ref() {
+            Some(w) => w,
+            None => {
+                self.content_worker_error(
+                    req,
+                    sha,
+                    &super::worker::WorkerError::NotConfigured.to_string(),
+                );
+                return Err(ShuntError::WorkerNotConfigured);
+            }
+        };
+        let payload = cache::payload_from_content(req.content);
+        let t0 = Instant::now();
+        let (summary, usage) = match worker.summarize_file(&payload, req.question).await {
+            Ok(ok) => ok,
+            Err(e) => {
+                let text = e.to_string();
+                self.content_worker_error(req, sha, &text);
+                return Err(ShuntError::Worker(text));
+            }
+        };
+        let model = worker.model().to_string();
+        Ok((summary, usage, t0.elapsed().as_millis() as u64, model))
+    }
+
+    /// One hash-only WORKER_ERROR audit (Req 5.5) — the content hash, kind
+    /// and error text, never the content or summary.
+    fn content_worker_error(&self, req: &ContentRequest<'_>, sha: &str, error: &str) {
+        let mut details = content_audit_details(
+            &ShuntSource::content(req.source_hint),
+            req.kind.as_str(),
+            sha,
+        );
+        details["error"] = Value::from(error);
+        self.audit_content(req, AuditEventType::WorkerError, details);
+    }
+
+    /// One audit event for a content outcome; `details` are hash-only.
+    fn audit_content(&self, req: &ContentRequest<'_>, event: AuditEventType, details: Value) {
+        let _ = self
+            .audit_writer()
+            .write_event(event, req.harness, req.project, details);
+    }
+
+    /// One bypass outcome: exactly one audit event with the reason and the
+    /// content hash — never the content (Req 3.4) — no cache row and no
+    /// savings statistics (Req 3.5), plus one breadcrumb naming the tool,
+    /// the outcome and the hash prefix (Req 5.4). `IO_DIRECT_READ` +
+    /// `details.source`/`kind` distinguish it from a file bypass.
+    async fn content_bypass(
         &self,
         req: &ContentRequest<'_>,
         reason: BypassReason,
@@ -275,17 +479,17 @@ impl ShuntEngine {
         line_count: usize,
     ) -> Result<ContentOutcome, ShuntError> {
         let source = ShuntSource::content(req.source_hint);
-        let mut details = source.audit_details();
-        details["kind"] = Value::from(req.kind.as_str());
-        details["sha256"] = Value::from(sha);
+        let mut details = content_audit_details(&source, req.kind.as_str(), sha);
         details["total_lines"] = Value::from(line_count);
         details["bypass_reason"] = Value::from(reason.as_str());
-        let _ = self.audit_writer().write_event(
-            AuditEventType::IoDirectRead,
-            req.harness,
-            req.project,
-            details,
+        self.audit_content(req, AuditEventType::IoDirectRead, details);
+        let text = format!(
+            "{} for {line_count}-line content sha {}",
+            reason.as_str(),
+            &sha[..12]
         );
+        self.crumb(&req.ctx(), "shunt_content:bypassed", &source, &text)
+            .await;
         Ok(ContentOutcome::Bypassed {
             reason,
             content_sha256: sha.to_string(),

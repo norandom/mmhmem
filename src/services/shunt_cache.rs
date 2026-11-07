@@ -198,6 +198,25 @@ pub async fn line_numbered_payload(path: &Path) -> Result<String, ShuntError> {
     ))
 }
 
+/// Line-numbered caller content for the worker payload (shunt-content-tool
+/// design.md "Payload"; research.md "Worker payload for pre-numbered
+/// content"): every line gets the same `L<n>: ` prefix as
+/// [`line_numbered_payload`] regardless of any numbering already in the
+/// tool output, so worker `[L<a>-L<b>]` ranges refer to the original line
+/// positions 1:1. The wrapper mirrors the file payload's shape with
+/// `content` as the subject — the hint is an audit label, never a payload
+/// component (Req 1.5).
+pub fn payload_from_content(content: &str) -> String {
+    let count = content.lines().count();
+    let numbered = content
+        .lines()
+        .enumerate()
+        .map(|(i, l)| format!("L{}: {}", i + 1, l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("<content lines=\"{count}\">\n{numbered}\n</content>")
+}
+
 /// Millisecond epoch now.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()

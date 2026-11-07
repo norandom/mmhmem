@@ -73,7 +73,9 @@ pub struct SmartReadParams {
 }
 
 fn default_question() -> String {
-    "Summarize exported symbols, signatures, and control flow with exact line ranges.".to_string()
+    // Shared constant (shunt-content-tool Req 1.6): smart_read and
+    // shunt_content apply the same fixed default question.
+    crate::services::shunt_content::DEFAULT_QUESTION.to_string()
 }
 
 /// `boilerplate_write` arguments.

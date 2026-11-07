@@ -415,22 +415,22 @@ async fn benign_150_line_content_passes_the_threshold_stage() {
     let content = benign_lines(150, None);
     let sha = sha256_hex(content.as_bytes());
     let res = eng.shunt_content(&content_req(&content, None)).await;
-    // Task 2.2 replaces this interim guard with content-cache lookup and
-    // delegation; the Invalid error proves the threshold stage let the
-    // 150-line content pass (not below_threshold, never a worker call).
+    // Task 2.2 landed stages 3-4: threshold-passing content now reaches the
+    // content-cache lookup (miss on first sight) and DELEGATES — the
+    // Summarized outcome proves the threshold stage let the 150-line
+    // content pass (not below_threshold). The full delegation contract is
+    // pinned in tests/shunt_content_service.rs; this stays the stage
+    // boundary proof.
     match res {
-        Err(ShuntError::Invalid(m))
-            if m.as_str() == "content delegation requires the content cache" => {}
+        Ok(ContentOutcome::Summarized { .. }) => {}
         other => panic!("150 benign lines must pass the threshold stage: {other:?}"),
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    // No audit event is written for threshold-passing content (the interim
-    // guard errors before any stage records anything), so the log may not
-    // even exist; if it does, it must not mention this content's hash.
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "delegated exactly once");
+    // The delegated audit carries the hash (never the content).
     let log = std::fs::read_to_string(logs.path().join("audit.jsonl")).unwrap_or_default();
     assert!(
-        !log.contains(&sha),
-        "no bypass audit for threshold-passing content: {log}"
+        log.contains(&sha) && log.contains("IO_SHUNT_DELEGATED"),
+        "delegated audit carries the hash: {log}"
     );
 }
 

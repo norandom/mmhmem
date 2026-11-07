@@ -105,11 +105,12 @@ pub enum AuditEventType {
     HookRedirect,
     HookPass,
     StatusCheck,
+    ContentCacheEvict,
 }
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 21] = [
+    pub const ALL: [AuditEventType; 22] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -131,11 +132,12 @@ impl AuditEventType {
         AuditEventType::HookRedirect,
         AuditEventType::HookPass,
         AuditEventType::StatusCheck,
+        AuditEventType::ContentCacheEvict,
     ];
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 21] = [
+        const NAMES: [&str; 22] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -157,6 +159,7 @@ impl AuditEventType {
             "HOOK_REDIRECT",
             "HOOK_PASS",
             "STATUS_CHECK",
+            "CONTENT_CACHE_EVICT",
         ];
         NAMES[self as usize]
     }
@@ -367,7 +370,7 @@ mod tests {
         assert_eq!(AuditEventType::HookPass.as_str(), "HOOK_PASS");
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookRedirect));
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookPass));
-        assert_eq!(AuditEventType::ALL.len(), 21);
+        assert_eq!(AuditEventType::ALL.len(), 22); // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3)
         assert_eq!(AuditEventType::StatusCheck.as_str(), "STATUS_CHECK");
     }
 }
