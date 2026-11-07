@@ -4,7 +4,7 @@ All tasks are required unless marked `- [ ]*`. Sub-tasks are sized for 1–3 hou
 
 ## 1. Foundation: contract, storage and configuration
 
-- [ ] 1.1 Content types and shared source seam
+- [x] 1.1 Content types and shared source seam
   - Define the content request, kind, outcome and source types; thread the source through the engine's delegate, cached, audit, stat and breadcrumb helpers without changing file behaviour
   - Observable completion: the existing shunt, warmup and prune suites pass unchanged, and audit details for file reads now carry an explicit source label
   - _Requirements: 6.2_

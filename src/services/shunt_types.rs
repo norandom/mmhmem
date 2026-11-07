@@ -131,6 +131,10 @@ pub enum ShuntError {
     OutsideAllowedRoots(PathBuf),
     /// IO error reading the file.
     Io(String),
+    /// Invalid request on the requested shunt path — service-level
+    /// re-check of handler preconditions such as the content size guard
+    /// (shunt-content-tool design.md "Error Handling").
+    Invalid(String),
     /// File is shuntable but no worker model is configured (Req 9.4).
     WorkerNotConfigured,
     /// Worker call failed (Req 6.3) — audited as WORKER_ERROR.
@@ -145,6 +149,7 @@ impl std::fmt::Display for ShuntError {
                 write!(f, "path outside AGENT_MEM_ALLOWED_ROOTS: {}", p.display())
             }
             ShuntError::Io(e) => write!(f, "io error: {e}"),
+            ShuntError::Invalid(e) => write!(f, "invalid shunt request: {e}"),
             ShuntError::WorkerNotConfigured => write!(
                 f,
                 "file exceeds the shunt threshold but no worker model is configured (WORKER_MODEL)"
@@ -167,4 +172,83 @@ pub struct FileView<'a> {
     pub lines: &'a [&'a str],
     /// Total line count.
     pub total: usize,
+}
+
+/// Where shunted content comes from (shunt-content-tool design.md
+/// "ShuntSource seam"): a confined repository file (`smart_read`) or
+/// caller-supplied content with an optional label (`shunt_content`). One
+/// enum selects the cache table, payload builder and audit labels while
+/// the engine's stages stay shared (Req 6.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShuntSource {
+    /// A canonical, confined file path (smart_read path).
+    File(PathBuf),
+    /// Caller-supplied content; the hint is a label only — never opened,
+    /// never confined (shunt_content path, Req 1.5).
+    Content {
+        /// Optional caller source hint, trimmed to 256 chars at
+        /// construction (design.md shunt_content API contract).
+        hint: Option<String>,
+    },
+}
+
+/// Hint length cap for the content source label (design.md `source_hint`).
+const MAX_HINT_CHARS: usize = 256;
+
+impl ShuntSource {
+    /// Content source from an optional caller hint; the hint is trimmed to
+    /// [`MAX_HINT_CHARS`] here so every later use (audit, breadcrumbs) is
+    /// already bounded.
+    pub fn content(hint: Option<&str>) -> Self {
+        ShuntSource::Content {
+            hint: hint.map(|h| h.chars().take(MAX_HINT_CHARS).collect()),
+        }
+    }
+
+    /// The explicit audit label: `"file"` or `"content"`.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ShuntSource::File(_) => "file",
+            ShuntSource::Content { .. } => "content",
+        }
+    }
+
+    /// Base audit details for a shunt outcome: the explicit `source` label
+    /// plus the subject — the file path, or the trimmed hint for content
+    /// (no `hint` key when the caller supplied none).
+    pub fn audit_details(&self) -> serde_json::Value {
+        match self {
+            ShuntSource::File(path) => serde_json::json!({
+                "source": self.label(),
+                "file": path.display().to_string(),
+            }),
+            ShuntSource::Content { hint } => {
+                let mut v = serde_json::json!({"source": self.label()});
+                if let Some(h) = hint {
+                    v["hint"] = serde_json::Value::from(h.as_str());
+                }
+                v
+            }
+        }
+    }
+
+    /// The `token_stats` details `file` column value: the path for files,
+    /// `content:<sha12>` for content — keeps the token_stats columns
+    /// unchanged (design.md ShuntSource seam).
+    pub fn stat_subject(&self, sha: &str) -> String {
+        match self {
+            ShuntSource::File(path) => path.display().to_string(),
+            ShuntSource::Content { .. } => format!("content:{}", &sha[..12.min(sha.len())]),
+        }
+    }
+
+    /// Breadcrumb resource label for this source.
+    pub fn crumb_resource(&self) -> String {
+        match self {
+            ShuntSource::File(path) => path.display().to_string(),
+            ShuntSource::Content { hint } => {
+                hint.clone().unwrap_or_else(|| self.label().to_string())
+            }
+        }
+    }
 }

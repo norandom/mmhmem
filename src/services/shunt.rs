@@ -26,16 +26,18 @@ pub use crate::services::security_path::{is_security_critical_in, is_security_cr
 use crate::services::session_bus::SessionBus;
 use crate::services::shunt_cache as cache;
 pub use crate::services::shunt_types::{BypassReason, ReadOutcome, ShuntError};
-use crate::services::shunt_types::{CallCtx, Evaluation, FileView, ReadRequest};
+use crate::services::shunt_types::{CallCtx, Evaluation, FileView, ReadRequest, ShuntSource};
 use crate::services::stats;
 use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
 
 /// Bundled audit metadata for a shunt outcome (keeps audit_shunt under the
-/// clippy 7-arg limit, Req 13).
+/// clippy 7-arg limit, Req 13). The `ShuntSource` seam (shunt-content-tool
+/// design.md) labels the audit, stat and breadcrumb helpers for file and
+/// content callers alike.
 struct ShuntAuditMeta<'a> {
-    path: &'a std::path::Path,
+    source: &'a ShuntSource,
     sha: &'a str,
     line_count: usize,
     worker_info: Option<(&'a str, u64, crate::services::worker::WorkerUsage)>,
@@ -44,7 +46,7 @@ struct ShuntAuditMeta<'a> {
 
 /// Cache-miss delegation inputs (bundled to stay under the clippy 7-arg limit).
 struct Miss<'a> {
-    path: PathBuf,
+    source: ShuntSource,
     sha: String,
     fp: String,
     line_count: usize,
@@ -128,7 +130,7 @@ impl ShuntEngine {
                 self.crumb(
                     &ctx,
                     "smart_read:targeted",
-                    req.path,
+                    &ShuntSource::File(PathBuf::from(req.path)),
                     &format!("L{start}-L{end} of {total_lines}"),
                 )
                 .await;
@@ -147,7 +149,7 @@ impl ShuntEngine {
                 self.crumb(
                     &ctx,
                     "smart_read:direct",
-                    req.path,
+                    &ShuntSource::File(PathBuf::from(req.path)),
                     &format!("direct read ({total_lines} lines, {})", reason.as_str()),
                 )
                 .await;
@@ -214,14 +216,15 @@ impl ShuntEngine {
         let raw_chars = cache::raw_chars(&path).await?;
         if let Some(summary) = cache::cache_lookup(&self.db, &path, &sha, &fp).await? {
             let est = stats::estimate_cache_hit(raw_chars);
+            let source = ShuntSource::File(path);
             return self
-                .serve_cached(ctx, &path, &sha, line_count, est, summary)
+                .serve_cached(ctx, &source, &sha, line_count, est, summary)
                 .await;
         }
         self.delegate(
             ctx,
             Miss {
-                path,
+                source: ShuntSource::File(path),
                 sha,
                 fp,
                 line_count,
@@ -237,26 +240,26 @@ impl ShuntEngine {
     async fn serve_cached(
         &self,
         ctx: &CallCtx<'_>,
-        path: &std::path::Path,
+        source: &ShuntSource,
         sha: &str,
         line_count: usize,
         est: u64,
         summary: String,
     ) -> Result<ReadOutcome, ShuntError> {
         let meta = ShuntAuditMeta {
-            path,
+            source,
             sha,
             line_count,
             worker_info: None,
             avoided_est: est,
         };
         self.audit_shunt(ctx, AuditEventType::IoShuntCacheHit, &meta);
-        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, path, sha, None)
+        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, source, sha, None)
             .await;
         self.crumb(
             ctx,
             "smart_read:cache_hit",
-            &path.display().to_string(),
+            source,
             &format!("cached summary for {line_count}-line file"),
         )
         .await;
@@ -270,18 +273,31 @@ impl ShuntEngine {
     /// content-addressed cache, audit + count + breadcrumb.
     async fn delegate(&self, ctx: &CallCtx<'_>, miss: Miss<'_>) -> Result<ReadOutcome, ShuntError> {
         let Miss {
-            path,
+            source,
             sha,
             fp,
             line_count,
             question,
             raw_chars,
         } = miss;
+        // ShuntSource seam (shunt-content-tool task 1.1): audit, stat and
+        // breadcrumb below are source-aware. Content delegation
+        // (`payload_from_content` + the dedicated content cache) lands with
+        // the content cache in tasks 1.2/2.2; until then only the File
+        // variant reaches the worker.
+        let file_path = match &source {
+            ShuntSource::File(path) => path,
+            ShuntSource::Content { .. } => {
+                return Err(ShuntError::Invalid(
+                    "content delegation requires the content cache".to_string(),
+                ));
+            }
+        };
         let worker = self
             .worker
             .as_ref()
             .ok_or(ShuntError::WorkerNotConfigured)?;
-        let payload = cache::line_numbered_payload(&path).await?;
+        let payload = cache::line_numbered_payload(file_path).await?;
         let t0 = Instant::now();
         let (summary, usage) = worker
             .summarize_file(&payload, question)
@@ -291,15 +307,15 @@ impl ShuntEngine {
                     AuditEventType::WorkerError,
                     ctx.harness,
                     ctx.project,
-                    serde_json::json!({"file": path.display().to_string(), "error": e.to_string()}),
+                    serde_json::json!({"file": file_path.display().to_string(), "error": e.to_string()}),
                 );
                 ShuntError::Worker(e.to_string())
             })?;
         let latency_ms = t0.elapsed().as_millis() as u64;
         let est = stats::estimate_delegated_read(raw_chars, summary.len());
-        cache::cache_store(&self.db, &path, &sha, &fp, &summary, line_count).await?;
+        cache::cache_store(&self.db, file_path, &sha, &fp, &summary, line_count).await?;
         let meta = ShuntAuditMeta {
-            path: &path,
+            source: &source,
             sha: &sha,
             line_count,
             worker_info: Some((worker.model(), latency_ms, usage)),
@@ -310,7 +326,7 @@ impl ShuntEngine {
             ctx,
             stats::kind::SHUNT_DELEGATED,
             est,
-            &path,
+            &source,
             &sha,
             Some(usage),
         )
@@ -318,7 +334,7 @@ impl ShuntEngine {
         self.crumb(
             ctx,
             "smart_read:delegated",
-            &path.display().to_string(),
+            &source,
             &format!("worker summary for {line_count}-line file ({latency_ms} ms)"),
         )
         .await;
@@ -400,12 +416,15 @@ impl ShuntEngine {
         is_security_critical_in(path, &self.projects)
     }
 
-    /// One audit line for a shunt outcome (cache hit / delegated).
+    /// One audit line for a shunt outcome (cache hit / delegated). Details
+    /// carry the explicit `source` label plus the source's subject
+    /// (`file` path or `hint`), the sha, the line count and the estimate
+    /// (design.md ShuntSource seam).
     fn audit_shunt(&self, ctx: &CallCtx<'_>, event: AuditEventType, meta: &ShuntAuditMeta<'_>) {
-        let mut details = serde_json::json!({
-            "file": meta.path.display().to_string(), "sha256": meta.sha,
-            "total_lines": meta.line_count, "avoided_input_tokens_est": meta.avoided_est,
-        });
+        let mut details = meta.source.audit_details();
+        details["sha256"] = serde_json::json!(meta.sha);
+        details["total_lines"] = serde_json::json!(meta.line_count);
+        details["avoided_input_tokens_est"] = serde_json::json!(meta.avoided_est);
         if let Some((model, latency_ms, usage)) = meta.worker_info {
             details["worker_model"] = Value::from(model);
             details["latency_ms"] = Value::from(latency_ms);
@@ -417,13 +436,16 @@ impl ShuntEngine {
             .write_event(event, ctx.harness, ctx.project, details);
     }
 
-    /// One token_stats row for a shunt outcome (Req 10.1, 10.3).
+    /// One token_stats row for a shunt outcome (Req 10.1, 10.3). The
+    /// `details.file` column value comes from the source: the path for
+    /// files, `content:<sha12>` for content (columns unchanged, design.md
+    /// ShuntSource seam).
     async fn record_stat(
         &self,
         ctx: &CallCtx<'_>,
         kind: &'static str,
         avoided_in: u64,
-        path: &std::path::Path,
+        source: &ShuntSource,
         sha: &str,
         usage: Option<crate::services::worker::WorkerUsage>,
     ) {
@@ -436,7 +458,7 @@ impl ShuntEngine {
             avoided_output_tokens_est: 0,
             worker_prompt_tokens: usage.map(|u| u.prompt_tokens),
             worker_completion_tokens: usage.map(|u| u.completion_tokens),
-            details: serde_json::json!({"file": path.display().to_string(), "sha256": sha}),
+            details: serde_json::json!({"file": source.stat_subject(sha), "sha256": sha}),
         };
         // Req 10.1 (amendment 2026-11-02): commit the row BEFORE the tool
         // response returns. The previous fire-and-forget spawn raced
@@ -447,17 +469,20 @@ impl ShuntEngine {
         }
     }
 
-    /// Automatic breadcrumb when a session bus is attached (Req 2.4).
-    async fn crumb(&self, ctx: &CallCtx<'_>, tool: &str, resource: &str, summary: &str) {
+    /// Automatic breadcrumb when a session bus is attached (Req 2.4). The
+    /// resource label comes from the source: the file path, or the content
+    /// hint / `content` fallback.
+    async fn crumb(&self, ctx: &CallCtx<'_>, tool: &str, source: &ShuntSource, summary: &str) {
         if let Some(bus) = &self.bus {
             let task = ctx.task.unwrap_or(ctx.project);
+            let resource = source.crumb_resource();
             if let Err(e) = bus
                 .breadcrumb(
                     ctx.project,
                     task,
                     ctx.harness,
                     tool,
-                    Some(resource),
+                    Some(&resource),
                     summary,
                 )
                 .await

@@ -14,6 +14,7 @@ pub mod security_path;
 pub mod session_bus;
 pub mod shunt;
 pub mod shunt_cache;
+pub mod shunt_content;
 pub mod shunt_types;
 pub mod stats;
 pub mod status;

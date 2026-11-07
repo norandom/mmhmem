@@ -192,6 +192,15 @@ fn fold_outcome(
                 .notes
                 .push(format!("{path}: worker call failed ({reason})"));
         }
+        // Not reachable via smart_read's file path (the content-only
+        // service re-check); counted defensively, never fatal.
+        Err(ShuntError::Invalid(e)) => {
+            report.failed += 1;
+            let reason: String = e.chars().take(120).collect();
+            report
+                .notes
+                .push(format!("{path}: invalid request ({reason})"));
+        }
         Err(e @ ShuntError::WorkerNotConfigured) => return Err(e),
     }
     Ok(())
