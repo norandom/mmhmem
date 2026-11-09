@@ -1,0 +1,12 @@
+{
+	// Servers the user added in Antigravity; setup must not touch them.
+	"mcpServers" : {
+		"files":{"command":"npx","args":["-y", "@modelcontextprotocol/server-filesystem", "C:/work"]},
+		"github": {
+			"command": "docker",
+			"args": [ "run", "-i", "--rm", "ghcr.io/github/github-mcp-server" ],
+			"env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "<redacted>" },
+			/* off for now */ "disabled": true
+		}
+	}
+}

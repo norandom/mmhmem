@@ -41,7 +41,7 @@ CI-verified install counts as done.
   - _Boundary: Antigravity agent_
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 3.2 (P) MCP registration in Antigravity's global server file
+- [x] 3.2 (P) MCP registration in Antigravity's global server file
   - Plan the managed server entry (command and arguments) in the global Antigravity server file, creating the file with the needed parents when missing, keeping user keys inside the entry and everything else byte-identical.
   - Plan removal that takes out only the managed keys and the parents this install created.
   - Done when golden tests on a fixture with other servers, comments and odd formatting show add followed by remove is byte-identical, a missing file is created with the parent count recorded, and re-planning an unchanged, recorded entry yields no change.
@@ -113,3 +113,6 @@ CI-verified install counts as done.
 - 2026-11-09 (task 2.1): the pre-commit gate fails when `git commit` is run from the Git Bash tool (the installer stub test cannot invoke pwsh with `-File`); commit from native PowerShell.
 - 2026-11-09 (task 2.1 review): the hook repeat-window key is the path as sent; Antigravity sends `Path` in both slash styles, so a repeat in the other style is redirected again instead of passing. Non-blocking; normalise separators in the key if it shows up in task 5.3.
 - 2026-11-09 (task 2.2): `Steps::hook` in `check_agent.rs` skips the hook sample when no worker model is configured. For Antigravity a broken hook blocks every `read_file`, so task 3.5 must run the sample even without a worker (expecting `{"decision":"ask"}`), either by calling `hook_sample` directly or by extending `Steps` with an opt-in. The sample uses the check's fresh session id (not a literal) so re-runs never hit the hook's 2-minute repeat window.
+- 2026-11-09 (task 3.2 review): `plan` currently removes everything recorded when Mcp is deselected; once ReadHook exists (3.3), map each recorded entry to its feature as `claude_desktop.rs` does, so deselecting one feature removes only its entries.
+- 2026-11-09 (task 3.2 review): removing mmhmem over an entry written by `agy mcp add` leaves `"mmhmem": {"disabled": false}` (user keys stay). Task 5.3 must check how `agy mcp list` and the IDE show an entry without a command and raise a spec decision if it shows as broken.
+- 2026-11-09 (task 3.2 review): `remove_entry` only removes the old snippet file when it sits next to the current binary; task 3.4 should match the recorded `Target::File` by file name `antigravity-mcp.json` so a moved binary still migrates. `REMOVE_INSTRUCTION`/`removal_instruction()` are now dead apart from tests; drop in 4.1. antigravity.rs is at 331/500 lines and its tests at 436/500: 3.3/3.4 should split into `antigravity_check.rs` + tests as the design plans.

@@ -14,6 +14,8 @@ Captured 2026-11-09 on Windows 11 from `agy.exe` 1.5.3
 - `mcp_config-after-agy-mcp-add.json`: the exact file `agy mcp add` wrote to
   `~/.gemini/config/mcp_config.json` (keys sorted, two-space indent, adds
   `"disabled": false`). `agy mcp remove mmhmem` left `{"mcpServers": {}}`.
+- `mcp_config-other-servers.json`: hand-written golden input for the setup
+  plan tests (other servers, comments, odd formatting; not a capture).
 
 The CLI and the IDE read the same global file. The older
 `~/.gemini/antigravity/mcp_config.json` is not read (a mmhmem entry there is

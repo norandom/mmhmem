@@ -1,10 +1,24 @@
-//! Antigravity (reliable-installers task 3.5; Requirements 3.1 and 7.3):
-//! detect it and show the import snippet. Detection (antigravity-native-setup
-//! task 3.1) finds the `agy` CLI or Antigravity's own data folders under the
-//! Gemini home. Until the native setup lands, `plan` saves the import
-//! snippet as a file next to the installed binary (`antigravity-mcp.json`)
-//! for the user to paste into Antigravity's MCP settings, and records
-//! [`PendingUserStep::ImportAntigravitySnippet`].
+//! Antigravity (antigravity-native-setup, design.md "Antigravity agent";
+//! reliable-installers task 3.5).
+//!
+//! - **Detection** (task 3.1): the `agy` CLI on PATH or Antigravity's own
+//!   data folders under the Gemini home; the version is the first line of
+//!   `agy --version`.
+//! - **MCP** (task 3.2; Requirements 1.1–1.3 and 5.3): the leaf keys
+//!   `command` (the installed binary) and `args` (`["stdio"]`) of
+//!   `mcpServers.mmhmem` in the global server file
+//!   `~/.gemini/config/mcp_config.json`, which the CLI and the IDE both read.
+//!   A missing file is created with only that entry. Other servers, comments,
+//!   formatting and keys the user added inside mmhmem's entry are kept.
+//!   Removal takes out only `command` and `args` and then the parent objects
+//!   this install created, exactly as for Claude Desktop; an entry left with
+//!   only user keys counts as removed.
+//! - **Snippet era:** older installs saved an import snippet next to the
+//!   binary ([`SNIPPET_FILE`]) and recorded
+//!   [`PendingUserStep::ImportAntigravitySnippet`]. Nothing writes the
+//!   snippet any more; a recorded snippet file is still removed. The check
+//!   and the pending step use the snippet until tasks 3.4, 3.5 and 4.1
+//!   replace them.
 
 use std::path::{Path, PathBuf};
 
@@ -16,15 +30,16 @@ use super::{
 };
 use crate::setup::check::Registration;
 use crate::setup::check::agent::Steps;
+use crate::setup::edit::json as edit;
 use crate::setup::plan::{Action, Change};
-use crate::setup::record::{Scope, Target};
-use crate::setup::ui::text::changes as say;
+use crate::setup::record::{KeySegment, ManagedEntry, Scope, Target, key_path};
+use crate::setup::ui::text::changes::{self as say, What};
 
 /// What the user does to take mmhmem out again.
 pub const REMOVE_INSTRUCTION: &str =
     "Remove the mmhmem server in Antigravity's settings (MCP servers).";
 
-/// The saved import snippet, next to the installed binary.
+/// The import snippet older installs saved next to the binary (removal only).
 pub const SNIPPET_FILE: &str = "antigravity-mcp.json";
 
 const SCOPE: Scope = Scope::Agent(AgentId::Antigravity);
@@ -35,10 +50,14 @@ const PROGRAM: &str = "agy";
 /// Antigravity's CLI, app and IDE data folders under the Gemini home.
 const DATA_FOLDERS: [&str; 3] = ["antigravity-cli", "antigravity", "antigravity-ide"];
 
+const ENTRY: [&str; 2] = ["mcpServers", "mmhmem"];
+const COMMAND: [&str; 3] = ["mcpServers", "mmhmem", "command"];
+const ARGS: [&str; 3] = ["mcpServers", "mmhmem", "args"];
+
 /// The Antigravity integration.
 #[derive(Debug, Clone)]
 pub struct Antigravity {
-    /// The installed mmhmem binary the snippet runs.
+    /// The installed mmhmem binary Antigravity starts.
     pub binary: PathBuf,
 }
 
@@ -50,7 +69,7 @@ impl Antigravity {
         }
     }
 
-    /// The JSON the user imports in Antigravity.
+    /// The JSON older installs had the user import in Antigravity.
     pub fn snippet_value(&self) -> Value {
         json!({"mcpServers": {"mmhmem": {
             "command": self.binary.to_string_lossy(),
@@ -63,7 +82,7 @@ impl Antigravity {
         serde_json::to_string_pretty(&self.snippet_value()).expect("a JSON value serializes")
     }
 
-    /// The file the snippet is saved to, next to the installed binary.
+    /// The file older installs saved the snippet to, next to the binary.
     pub fn snippet_file(&self) -> PathBuf {
         self.binary
             .parent()
@@ -85,6 +104,23 @@ impl Antigravity {
         env.home().join(".gemini")
     }
 
+    /// Antigravity's global MCP server file, read by the CLI and the IDE.
+    pub fn mcp_file(env: &Env) -> PathBuf {
+        Self::gemini_dir(env).join("config").join("mcp_config.json")
+    }
+
+    /// Antigravity's global hook file.
+    pub fn hooks_file(env: &Env) -> PathBuf {
+        Self::gemini_dir(env).join("config").join("hooks.json")
+    }
+
+    /// The server file Antigravity no longer reads (stale entries only).
+    pub fn stale_file(env: &Env) -> PathBuf {
+        Self::gemini_dir(env)
+            .join("antigravity")
+            .join("mcp_config.json")
+    }
+
     /// The data folders that exist, in [`DATA_FOLDERS`] order. The Gemini
     /// home alone proves nothing: the Gemini CLI and other tools create it.
     fn data_dirs(env: &Env) -> Vec<PathBuf> {
@@ -95,6 +131,112 @@ impl Antigravity {
             .filter(|dir| dir.is_dir())
             .collect()
     }
+
+    /// Plans `command` and `args` of mmhmem's server entry; nothing when
+    /// both already hold the wanted values and the entry is recorded.
+    fn mcp_change(
+        &self,
+        chain: &mut FileChain,
+        env: &Env,
+        rec: Option<&AgentRecord>,
+    ) -> Result<(), AgentProblem> {
+        let file = Self::mcp_file(env);
+        let target = mcp_target(&file);
+        let recorded = rec.and_then(|r| r.managed.iter().find(|e| e.target == target));
+        let before = chain.bytes(&file)?;
+        let text = chain.text(&file)?;
+        let input = text.as_deref().unwrap_or("{}\n");
+        let bad = |error| AgentProblem::Json {
+            file: file.clone(),
+            error,
+        };
+        let command = json!(self.binary.to_string_lossy());
+        let args = json!(["stdio"]);
+        let same = edit::get(input, &COMMAND).map_err(bad)?.as_ref() == Some(&command)
+            && edit::get(input, &ARGS).map_err(bad)?.as_ref() == Some(&args);
+        if same && recorded.is_some() {
+            return Ok(());
+        }
+        let existed = edit::get(input, &ENTRY).map_err(bad)?.is_some();
+        let parents = edit::missing_parents(input, &COMMAND).map_err(bad)?;
+        let after = edit::set(input, &COMMAND, &command).map_err(bad)?;
+        let after = edit::set(&after, &ARGS, &args).map_err(bad)?;
+        let missing = recorded
+            .and_then(|e| e.missing_parents)
+            .unwrap_or(u32::try_from(parents).unwrap_or(0));
+        chain.push(Change {
+            scope: SCOPE,
+            target,
+            file: file.clone(),
+            action: if existed { Action::Update } else { Action::Add },
+            before,
+            after: Some(after.into_bytes()),
+            owner_only: false,
+            hide_diff: false,
+            missing_parents: Some(missing),
+            summary: say::add(What::Server, AgentId::Antigravity.label(), &file),
+        });
+        Ok(())
+    }
+
+    /// Plans taking one recorded entry out: mmhmem's keys of the server
+    /// entry (and the parents this install created) or an old snippet file.
+    /// Nothing for a missing file or a target that is not mmhmem's.
+    fn remove_entry(
+        &self,
+        chain: &mut FileChain,
+        entry: &ManagedEntry,
+    ) -> Result<(), AgentProblem> {
+        let (file, after) = match &entry.target {
+            Target::File { file } if *file == self.snippet_file() => {
+                if chain.bytes(file)?.is_none() {
+                    return Ok(());
+                }
+                (file, None)
+            }
+            Target::JsonEntry { file, pointer, .. } if is_entry(pointer) => {
+                let Some(text) = chain.text(file)? else {
+                    return Ok(());
+                };
+                let bad = |error| AgentProblem::Json {
+                    file: file.clone(),
+                    error,
+                };
+                let parents = entry.missing_parents.unwrap_or(0) as usize;
+                let text = edit::remove(&text, &COMMAND).map_err(bad)?;
+                let text = edit::remove_and_prune(&text, &ARGS, parents).map_err(bad)?;
+                (file, Some(text.into_bytes()))
+            }
+            _ => return Ok(()),
+        };
+        let before = chain.bytes(file)?;
+        chain.push(Change {
+            scope: SCOPE,
+            target: entry.target.clone(),
+            file: file.clone(),
+            action: Action::Remove,
+            before,
+            after,
+            owner_only: false,
+            hide_diff: false,
+            missing_parents: None,
+            summary: say::remove(AgentId::Antigravity.label(), file),
+        });
+        Ok(())
+    }
+}
+
+/// mmhmem's server entry in `file`; only `command` and `args` are its own.
+fn mcp_target(file: &Path) -> Target {
+    Target::JsonEntry {
+        file: file.to_path_buf(),
+        pointer: key_path(&ENTRY).expect("static keys"),
+        managed_keys: Some(key_path(&["command", "args"]).expect("static keys")),
+    }
+}
+
+fn is_entry(pointer: &[KeySegment]) -> bool {
+    pointer.iter().map(KeySegment::as_str).eq(ENTRY)
 }
 
 impl Agent for Antigravity {
@@ -126,90 +268,44 @@ impl Agent for Antigravity {
         &[Feature::Mcp]
     }
 
-    /// Saves the import snippet next to the binary (the whole file is
-    /// mmhmem's; Antigravity itself has no config to edit).
+    /// The server entry in [`Antigravity::mcp_file`]; when the feature is
+    /// no longer wanted, what the record lists comes back out.
     fn plan(
         &self,
-        _env: &Env,
+        env: &Env,
         want: &Selection,
         rec: Option<&AgentRecord>,
     ) -> Result<Vec<Change>, AgentProblem> {
-        if !want.wants(AgentId::Antigravity, Feature::Mcp) {
-            return Ok(Vec::new());
-        }
-        let file = self.snippet_file();
         let mut chain = FileChain::new();
-        let before = chain.bytes(&file)?;
-        let wanted = self.snippet().into_bytes();
-        let recorded = rec.is_some_and(|r| {
-            r.managed
-                .iter()
-                .any(|e| e.target == Target::File { file: file.clone() })
-        });
-        if before.as_deref() == Some(wanted.as_slice()) && recorded {
-            return Ok(Vec::new());
+        if want.wants(AgentId::Antigravity, Feature::Mcp) {
+            self.mcp_change(&mut chain, env, rec)?;
+        } else {
+            for entry in rec.map(|r| r.managed.as_slice()).unwrap_or_default() {
+                self.remove_entry(&mut chain, entry)?;
+            }
         }
-        chain.push(Change {
-            scope: SCOPE,
-            target: Target::File { file: file.clone() },
-            file: file.clone(),
-            action: if before.is_some() {
-                Action::Update
-            } else {
-                Action::Add
-            },
-            before,
-            after: Some(wanted),
-            owner_only: false,
-            hide_diff: false,
-            missing_parents: None,
-            summary: format!(
-                "Save the snippet you paste into Antigravity (adds the file {})",
-                file.display()
-            ),
-        });
         Ok(chain.into_changes())
     }
 
-    /// Antigravity has no CLI or config file mmhmem edits: the check starts
-    /// exactly the snippet the user imports; the import stays pending.
+    /// Starts exactly the command the snippet names (the same `command` and
+    /// `args` as the server entry); task 3.5 reads the server file instead.
     fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
         let snippet = self.snippet();
         let registration = Registration::from_claude_json(snippet.as_bytes(), "mmhmem");
         Steps::start(env, AgentId::Antigravity, registration).finish(rec)
     }
 
-    /// Takes the saved snippet file back out; Antigravity's own settings
-    /// are the user's to undo ([`REMOVE_INSTRUCTION`]).
+    /// Takes mmhmem's keys out of the server entry and an old snippet file
+    /// out; everything else in Antigravity's files stays as it was.
     fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {
         let mut chain = FileChain::new();
         for entry in &rec.managed {
-            let Target::File { file } = &entry.target else {
-                continue;
-            };
-            if *file != self.snippet_file() {
-                continue;
-            }
-            let Ok(Some(before)) = chain.bytes(file) else {
-                continue;
-            };
-            chain.push(Change {
-                scope: SCOPE,
-                target: entry.target.clone(),
-                file: file.clone(),
-                action: Action::Remove,
-                before: Some(before),
-                after: None,
-                owner_only: false,
-                hide_diff: false,
-                missing_parents: None,
-                summary: say::remove(AgentId::Antigravity.label(), file),
-            });
+            let _ = self.remove_entry(&mut chain, entry);
         }
         chain.into_changes()
     }
 
-    /// The user imports [`Antigravity::snippet`] themselves.
+    /// The user imports [`Antigravity::snippet`] themselves (until task 4.1).
     fn pending_steps(&self, want: &Selection) -> Vec<PendingUserStep> {
         if want.wants(AgentId::Antigravity, Feature::Mcp) {
             vec![Self::pending_step()]
