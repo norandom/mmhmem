@@ -128,6 +128,7 @@ impl Flow {
         self.planned = Some(Planned {
             plan,
             problems,
+            left_out: Vec::new(),
             adoption: false,
             removal: true,
         });

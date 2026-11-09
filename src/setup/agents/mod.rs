@@ -275,6 +275,15 @@ pub trait Agent: Send + Sync {
         rec: Option<&AgentRecord>,
     ) -> Result<Vec<Change>, AgentProblem>;
 
+    /// Problems that leave one selected feature out while [`Agent::plan`]
+    /// still plans the others (Antigravity's read hook when its command
+    /// cannot be written); the review lists them. Reading only; none by
+    /// default.
+    fn feature_problems(&self, env: &Env, want: &Selection) -> Vec<AgentProblem> {
+        let _ = (env, want);
+        Vec::new()
+    }
+
     /// Whether the agent really sees mmhmem (design.md §6; task 4.2).
     fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
         let _ = (env, rec);

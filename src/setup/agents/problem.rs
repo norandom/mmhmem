@@ -67,6 +67,27 @@ pub enum AgentProblem {
         /// Fixed reason, e.g. "the path contains a control character".
         reason: &'static str,
     },
+    /// Antigravity splits its hook command on whitespace and keeps quotes
+    /// literally, so a binary path with whitespace (and no whitespace-free
+    /// Windows short form) cannot be its first token. Only the read hook is
+    /// left out; the agent's other features are still planned.
+    HookCommandUnrepresentable {
+        /// The installed binary.
+        file: PathBuf,
+    },
+}
+
+/// `text` with control characters shown escaped (`\t`); backslashes stay.
+fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() {
+                c.escape_debug().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
 /// `a, b, c` for a list of paths.
@@ -106,6 +127,13 @@ impl fmt::Display for AgentProblem {
                  install mmhmem in a folder without such characters or turn the read hook off",
                 // Control characters are shown escaped (`\n`), not printed.
                 binary.display().to_string().escape_debug()
+            ),
+            Self::HookCommandUnrepresentable { file } => write!(
+                f,
+                "the read hook cannot be installed because Antigravity cannot run a program \
+                 whose path contains spaces ({}); install mmhmem in a folder without spaces \
+                 or turn the read hook off",
+                printable(&file.display().to_string())
             ),
         }
     }

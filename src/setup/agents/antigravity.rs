@@ -13,6 +13,14 @@
 //!   Removal takes out only `command` and `args` and then the parent objects
 //!   this install created, exactly as for Claude Desktop; an entry left with
 //!   only user keys counts as removed.
+//! - **Read hook** (task 3.3; Requirements 2.1, 2.3 and 2.5): the whole
+//!   named hook [`HOOK_NAME`] in the global hook file
+//!   `~/.gemini/config/hooks.json` (`antigravity_hook.rs`). When the binary's
+//!   path cannot be an Antigravity command, the hook is left out, the server
+//!   entry is still planned and [`Agent::feature_problems`] says why.
+//!   Removal takes out that one key.
+//! - **Per feature:** each recorded entry belongs to one feature; a feature
+//!   that is no longer selected loses only its own entries.
 //! - **Snippet era:** older installs saved an import snippet next to the
 //!   binary ([`SNIPPET_FILE`]) and recorded
 //!   [`PendingUserStep::ImportAntigravitySnippet`]. Nothing writes the
@@ -35,6 +43,10 @@ use crate::setup::plan::{Action, Change};
 use crate::setup::record::{KeySegment, ManagedEntry, Scope, Target, key_path};
 use crate::setup::ui::text::changes::{self as say, What};
 
+#[path = "antigravity_hook.rs"]
+mod hook;
+pub use hook::{HOOK_MATCHER, HOOK_NAME, HOOK_TIMEOUT, hook_command};
+
 /// What the user does to take mmhmem out again.
 pub const REMOVE_INSTRUCTION: &str =
     "Remove the mmhmem server in Antigravity's settings (MCP servers).";
@@ -42,7 +54,11 @@ pub const REMOVE_INSTRUCTION: &str =
 /// The import snippet older installs saved next to the binary (removal only).
 pub const SNIPPET_FILE: &str = "antigravity-mcp.json";
 
-const SCOPE: Scope = Scope::Agent(AgentId::Antigravity);
+const ID: AgentId = AgentId::Antigravity;
+const SCOPE: Scope = Scope::Agent(ID);
+
+/// The features in menu order.
+const FEATURES: [Feature; 2] = [Feature::Mcp, Feature::ReadHook];
 
 /// The Antigravity CLI program (`agy --version` prints `1.5.3`).
 const PROGRAM: &str = "agy";
@@ -180,8 +196,9 @@ impl Antigravity {
     }
 
     /// Plans taking one recorded entry out: mmhmem's keys of the server
-    /// entry (and the parents this install created) or an old snippet file.
-    /// Nothing for a missing file or a target that is not mmhmem's.
+    /// entry (and the parents this install created), mmhmem's named hook or
+    /// an old snippet file. Nothing for a missing file or a target that is
+    /// not mmhmem's.
     fn remove_entry(
         &self,
         chain: &mut FileChain,
@@ -194,18 +211,20 @@ impl Antigravity {
                 }
                 (file, None)
             }
-            Target::JsonEntry { file, pointer, .. } if is_entry(pointer) => {
+            Target::JsonEntry { file, pointer, .. } if feature_of(&entry.target).is_some() => {
                 let Some(text) = chain.text(file)? else {
                     return Ok(());
                 };
-                let bad = |error| AgentProblem::Json {
+                let left = if hook::is_hook(pointer) {
+                    hook::without_hook(&text)
+                } else {
+                    without_server(&text, entry.missing_parents)
+                };
+                let left = left.map_err(|error| AgentProblem::Json {
                     file: file.clone(),
                     error,
-                };
-                let parents = entry.missing_parents.unwrap_or(0) as usize;
-                let text = edit::remove(&text, &COMMAND).map_err(bad)?;
-                let text = edit::remove_and_prune(&text, &ARGS, parents).map_err(bad)?;
-                (file, Some(text.into_bytes()))
+                })?;
+                (file, Some(left.into_bytes()))
             }
             _ => return Ok(()),
         };
@@ -239,6 +258,25 @@ fn is_entry(pointer: &[KeySegment]) -> bool {
     pointer.iter().map(KeySegment::as_str).eq(ENTRY)
 }
 
+/// The feature a recorded entry belongs to (the snippet-era import file was
+/// the server registration); `None` for a target that is not mmhmem's.
+fn feature_of(target: &Target) -> Option<Feature> {
+    match target {
+        Target::File { .. } => Some(Feature::Mcp),
+        Target::JsonEntry { pointer, .. } if is_entry(pointer) => Some(Feature::Mcp),
+        Target::JsonEntry { pointer, .. } if hook::is_hook(pointer) => Some(Feature::ReadHook),
+        _ => None,
+    }
+}
+
+/// The text without mmhmem's `command` and `args`, and without the
+/// `parents` objects this install created for them.
+fn without_server(text: &str, parents: Option<u32>) -> Result<String, edit::JsonEditError> {
+    let parents = parents.unwrap_or(0) as usize;
+    let text = edit::remove(text, &COMMAND)?;
+    edit::remove_and_prune(&text, &ARGS, parents)
+}
+
 impl Agent for Antigravity {
     fn id(&self) -> AgentId {
         AgentId::Antigravity
@@ -265,11 +303,13 @@ impl Agent for Antigravity {
     }
 
     fn features(&self) -> &'static [Feature] {
-        &[Feature::Mcp]
+        &FEATURES
     }
 
-    /// The server entry in [`Antigravity::mcp_file`]; when the feature is
-    /// no longer wanted, what the record lists comes back out.
+    /// The server entry in [`Antigravity::mcp_file`] and the named hook in
+    /// [`Antigravity::hooks_file`]; what the record lists for a feature no
+    /// longer wanted comes back out. A hook command that cannot be written
+    /// leaves only the hook out ([`Agent::feature_problems`]).
     fn plan(
         &self,
         env: &Env,
@@ -277,14 +317,29 @@ impl Agent for Antigravity {
         rec: Option<&AgentRecord>,
     ) -> Result<Vec<Change>, AgentProblem> {
         let mut chain = FileChain::new();
-        if want.wants(AgentId::Antigravity, Feature::Mcp) {
-            self.mcp_change(&mut chain, env, rec)?;
-        } else {
-            for entry in rec.map(|r| r.managed.as_slice()).unwrap_or_default() {
+        for entry in rec.map(|r| r.managed.as_slice()).unwrap_or_default() {
+            if feature_of(&entry.target).is_some_and(|f| !want.wants(ID, f)) {
                 self.remove_entry(&mut chain, entry)?;
             }
         }
+        if want.wants(ID, Feature::Mcp) {
+            self.mcp_change(&mut chain, env, rec)?;
+        }
+        if want.wants(ID, Feature::ReadHook) {
+            match self.hook_entry(env.os()) {
+                Ok(value) => Self::hook_change(&mut chain, env, rec, &value)?,
+                Err(problem) => tracing::warn!("{problem}"),
+            }
+        }
         Ok(chain.into_changes())
+    }
+
+    /// The read hook when its command cannot be written.
+    fn feature_problems(&self, env: &Env, want: &Selection) -> Vec<AgentProblem> {
+        if !want.wants(ID, Feature::ReadHook) {
+            return Vec::new();
+        }
+        self.hook_entry(env.os()).err().into_iter().collect()
     }
 
     /// Starts exactly the command the snippet names (the same `command` and
@@ -295,8 +350,9 @@ impl Agent for Antigravity {
         Steps::start(env, AgentId::Antigravity, registration).finish(rec)
     }
 
-    /// Takes mmhmem's keys out of the server entry and an old snippet file
-    /// out; everything else in Antigravity's files stays as it was.
+    /// Takes mmhmem's keys out of the server entry, mmhmem's named hook and
+    /// an old snippet file out; everything else in Antigravity's files stays
+    /// as it was.
     fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {
         let mut chain = FileChain::new();
         for entry in &rec.managed {
@@ -329,3 +385,7 @@ fn version(env: &Env, program: &Path) -> Option<String> {
 #[cfg(test)]
 #[path = "antigravity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "antigravity_hook_tests.rs"]
+mod hook_tests;

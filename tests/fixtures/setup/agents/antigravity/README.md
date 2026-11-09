@@ -16,6 +16,9 @@ Captured 2026-11-09 on Windows 11 from `agy.exe` 1.5.3
   `"disabled": false`). `agy mcp remove mmhmem` left `{"mcpServers": {}}`.
 - `mcp_config-other-servers.json`: hand-written golden input for the setup
   plan tests (other servers, comments, odd formatting; not a capture).
+- `hooks-other-hooks.json`: hand-written golden input for the read-hook plan
+  tests (two other named hooks in `~/.gemini/config/hooks.json`, comments,
+  tabs, odd formatting; not a capture).
 
 The CLI and the IDE read the same global file. The older
 `~/.gemini/antigravity/mcp_config.json` is not read (a mmhmem entry there is

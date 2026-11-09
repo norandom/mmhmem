@@ -109,6 +109,12 @@ pub fn adopt(what: What, agent: &str, old_installer: bool, markers: bool) -> Str
     line
 }
 
+/// "Antigravity: the read hook cannot be installed because …." (a selected
+/// feature left out while the agent's other changes go ahead).
+pub fn left_out(agent: &str, reason: &str) -> String {
+    format!("{agent}: {}.", reason.trim_end_matches('.'))
+}
+
 /// "Claude Code is not installed".
 pub fn not_installed(agent: &str) -> String {
     format!("{agent} is not installed")

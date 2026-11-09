@@ -223,3 +223,35 @@ fn switching_a_tool_off_while_its_config_is_invalid_is_remembered() {
             .is_empty()
     );
 }
+
+/// Antigravity cannot start a program whose path has a space (Linux rules:
+/// no short form): the review says its read hook is left out, and its
+/// server entry is still planned (antigravity-native-setup task 3.3).
+#[test]
+fn a_feature_left_out_is_named_and_the_agent_is_not_skipped() {
+    let mut fx = crate::setup::ui::fixtures::fx();
+    fx.deps.binary = fx.home.home().join("my tools").join("mmhmem");
+    fx.home.install_program("agy");
+    let mut flow = fx.flow(Newest::Unknown);
+    assert_eq!(flow.begin(&HomeAction::Install), Next::Agents);
+    flow.make_plan();
+    let review = flow.review();
+    let home = fx.home.home().display().to_string();
+    let shown = fx.deps.binary.display().to_string().replace(&home, "~");
+    let line = format!(
+        "Antigravity: the read hook cannot be installed because Antigravity cannot run \
+         a program whose path contains spaces ({shown}); install mmhmem in a folder \
+         without spaces or turn the read hook off."
+    );
+    assert!(review.intro.contains(&line), "{:?}", review.intro);
+    assert!(review.problems.is_empty(), "{:?}", review.problems);
+    let files: Vec<&str> = review.groups.iter().map(|g| g.file.as_str()).collect();
+    assert!(
+        files.iter().any(|f| f.ends_with("mcp_config.json")),
+        "{files:?}"
+    );
+    assert!(
+        !files.iter().any(|f| f.ends_with("hooks.json")),
+        "{files:?}"
+    );
+}

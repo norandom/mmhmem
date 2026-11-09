@@ -1,0 +1,12 @@
+{
+	// Hooks the user added in Antigravity; setup must not touch them.
+	"lint-checker":{"enabled": true,
+		"PostToolUse": [ { "matcher": "^write_to_file$", "hooks": [{"type":"command","command":"npx eslint --fix","timeout": 30}] } ]
+	},
+	"audit-commands" : {
+		/* off for now */ "enabled": false,
+		"PreToolUse": [
+			{"matcher": "^run_command$", "hooks": [ { "type": "command", "command": "~/bin/audit.cmd" } ]}
+		]
+	}
+}

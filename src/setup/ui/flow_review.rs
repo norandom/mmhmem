@@ -3,9 +3,11 @@
 //!
 //! Every agent that is selected or recorded is planned with its own
 //! `plan()`; an agent that cannot be planned is listed with its problem and
-//! the others go on. The review lists every change grouped by file with its
-//! summary, and [`Flow::diff`] shows one change's diff (hidden diffs stay
-//! hidden: [`Change::diff`] decides).
+//! the others go on; a selected feature an agent leaves out while planning
+//! the rest (Antigravity's read hook when its command cannot be written) is
+//! named above the changes. The review lists every change grouped by file
+//! with its summary, and [`Flow::diff`] shows one change's diff (hidden diffs
+//! stay hidden: [`Change::diff`] decides).
 //!
 //! **Adoption first.** With no usable record and an earlier install found,
 //! the first plan only takes over what that install made
@@ -24,6 +26,9 @@ use crate::setup::plan::{Action, Change, Plan};
 pub(super) struct Planned {
     pub(super) plan: Plan,
     pub(super) problems: Vec<(AgentId, String)>,
+    /// One line per selected feature an agent leaves out while its other
+    /// changes go ahead ([`crate::setup::agents::Agent::feature_problems`]).
+    pub(super) left_out: Vec<String>,
     pub(super) adoption: bool,
     /// A removal (`flow_remove.rs`): confirmed and shown its own way.
     pub(super) removal: bool,
@@ -106,6 +111,7 @@ impl Flow {
             Some(scan) => Planned {
                 plan: adoption_plan(scan, None, (self.deps.now)()),
                 problems: Vec::new(),
+                left_out: Vec::new(),
                 adoption: true,
                 removal: false,
             },
@@ -132,6 +138,7 @@ impl Flow {
         if planned.adoption {
             intro.push(text::ADOPT_REVIEW.to_owned());
         }
+        intro.extend(planned.left_out.iter().cloned());
         let notes = if planned.plan.changes.is_empty() {
             vec![text::REVIEW_NOTHING.to_owned()]
         } else {
@@ -176,6 +183,7 @@ impl Flow {
         let record = self.loaded.record.as_ref();
         let mut plan = Plan::new((self.deps.now)());
         let mut problems = Vec::new();
+        let mut left_out = Vec::new();
         let any = !want.agents().is_empty() || record.is_some_and(|r| !r.agents.is_empty());
         if any {
             plan.changes.extend(self.install_changes());
@@ -187,13 +195,22 @@ impl Flow {
                 continue;
             }
             match agent.plan(&self.deps.env, want, rec) {
-                Ok(changes) => plan.changes.extend(changes),
+                Ok(changes) => {
+                    plan.changes.extend(changes);
+                    let lines = agent.feature_problems(&self.deps.env, want).into_iter();
+                    left_out.extend(
+                        lines.map(|p| {
+                            text::changes::left_out(id.label(), &self.tidy(&p.to_string()))
+                        }),
+                    );
+                }
                 Err(problem) => problems.push((id, problem.to_string())),
             }
         }
         Planned {
             plan,
             problems,
+            left_out,
             adoption: false,
             removal: false,
         }

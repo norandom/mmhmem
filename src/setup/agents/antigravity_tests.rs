@@ -28,7 +28,7 @@ const DATA_FOLDERS: [&str; 3] = ["antigravity-cli", "antigravity", "antigravity-
 
 const ID: AgentId = AgentId::Antigravity;
 
-fn setup() -> (TestHome, Antigravity) {
+pub(super) fn setup() -> (TestHome, Antigravity) {
     let home = TestHome::new(Os::Windows);
     let agent = Antigravity::new(home.bin().join("mmhmem.exe"));
     (home, agent)
@@ -46,7 +46,7 @@ fn want_mcp() -> Selection {
 }
 
 /// `~/.gemini/config/mcp_config.json`, spelled out.
-fn server_file(home: &TestHome) -> PathBuf {
+pub(super) fn server_file(home: &TestHome) -> PathBuf {
     home.home()
         .join(".gemini")
         .join("config")
@@ -57,7 +57,7 @@ fn seed(home: &TestHome, text: &str) -> PathBuf {
     home.write(&[".gemini", "config", "mcp_config.json"], text)
 }
 
-fn run_apply(home: &TestHome, changes: Vec<Change>, record: &mut InstallRecord) {
+pub(super) fn run_apply(home: &TestHome, changes: Vec<Change>, record: &mut InstallRecord) {
     let run = UtcTimestamp::try_from("2026-11-09T09:30:00Z".to_owned()).unwrap();
     let store = RecordStore::new(home.dir.path().join("state"));
     let report = plan::apply(&Plan { run, changes }, &store, record);
@@ -65,7 +65,7 @@ fn run_apply(home: &TestHome, changes: Vec<Change>, record: &mut InstallRecord) 
     assert!(outcome.contains("Applied"), "{outcome}");
 }
 
-fn drift_is_clean(record: &InstallRecord) {
+pub(super) fn drift_is_clean(record: &InstallRecord) {
     assert!(record.applying().is_empty());
     for report in detect_drift(record, &Probe::default()) {
         assert_eq!(report.drift, Drift::Unchanged, "{:?}", report.target);
@@ -80,16 +80,16 @@ fn install(home: &TestHome, agent: &Antigravity) -> InstallRecord {
     record
 }
 
-fn agent_record(record: &InstallRecord) -> AgentRecord {
+pub(super) fn agent_record(record: &InstallRecord) -> AgentRecord {
     record.agents.get(&ID).cloned().unwrap_or_default()
 }
 
 /// The value at `path` in a JSON or JSONC text.
-fn at(text: &str, path: &[&str]) -> Option<Value> {
+pub(super) fn at(text: &str, path: &[&str]) -> Option<Value> {
     crate::setup::edit::json::get(text, path).unwrap()
 }
 
-fn wanted_entry(agent: &Antigravity) -> Value {
+pub(super) fn wanted_entry(agent: &Antigravity) -> Value {
     json!({"command": agent.binary.to_string_lossy(), "args": ["stdio"]})
 }
 
