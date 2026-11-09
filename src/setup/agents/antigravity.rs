@@ -1,9 +1,10 @@
 //! Antigravity (reliable-installers task 3.5; Requirements 3.1 and 7.3):
-//! detect it and show the import snippet. Antigravity has no CLI or
-//! documented config file mmhmem can edit (research.md §8), so `plan`
-//! saves the import snippet as a file next to the installed binary
-//! (`antigravity-mcp.json`) for the user to paste into Antigravity's MCP
-//! settings, and records [`PendingUserStep::ImportAntigravitySnippet`].
+//! detect it and show the import snippet. Detection (antigravity-native-setup
+//! task 3.1) finds the `agy` CLI or Antigravity's own data folders under the
+//! Gemini home. Until the native setup lands, `plan` saves the import
+//! snippet as a file next to the installed binary (`antigravity-mcp.json`)
+//! for the user to paste into Antigravity's MCP settings, and records
+//! [`PendingUserStep::ImportAntigravitySnippet`].
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
-    PendingUserStep, Selection,
+    Invocation, PendingUserStep, Selection,
 };
 use crate::setup::check::Registration;
 use crate::setup::check::agent::Steps;
@@ -27,6 +28,12 @@ pub const REMOVE_INSTRUCTION: &str =
 pub const SNIPPET_FILE: &str = "antigravity-mcp.json";
 
 const SCOPE: Scope = Scope::Agent(AgentId::Antigravity);
+
+/// The Antigravity CLI program (`agy --version` prints `1.5.3`).
+const PROGRAM: &str = "agy";
+
+/// Antigravity's CLI, app and IDE data folders under the Gemini home.
+const DATA_FOLDERS: [&str; 3] = ["antigravity-cli", "antigravity", "antigravity-ide"];
 
 /// The Antigravity integration.
 #[derive(Debug, Clone)]
@@ -77,6 +84,17 @@ impl Antigravity {
     fn gemini_dir(env: &Env) -> PathBuf {
         env.home().join(".gemini")
     }
+
+    /// The data folders that exist, in [`DATA_FOLDERS`] order. The Gemini
+    /// home alone proves nothing: the Gemini CLI and other tools create it.
+    fn data_dirs(env: &Env) -> Vec<PathBuf> {
+        let gemini = Self::gemini_dir(env);
+        DATA_FOLDERS
+            .iter()
+            .map(|folder| gemini.join(folder))
+            .filter(|dir| dir.is_dir())
+            .collect()
+    }
 }
 
 impl Agent for Antigravity {
@@ -84,26 +102,24 @@ impl Agent for Antigravity {
         AgentId::Antigravity
     }
 
+    /// Found when `agy` is on PATH or a data folder exists; the program
+    /// comes first in `paths`, and only the program gives a version.
     fn detect(&self, env: &Env) -> Detection {
-        let mut paths: Vec<PathBuf> = env.find_program("antigravity").into_iter().collect();
-        let dir = Self::gemini_dir(env);
-        if dir.is_dir() {
-            paths.push(dir.clone());
-        }
+        let program = env.find_program(PROGRAM);
+        let mut paths: Vec<PathBuf> = program.iter().cloned().collect();
+        paths.extend(Self::data_dirs(env));
         if paths.is_empty() {
-            let dir: &Path = &dir;
             tracing::debug!(
-                "antigravity is not on PATH and {} does not exist",
-                dir.display()
+                "{PROGRAM} is not on PATH and none of {} exist in {}",
+                DATA_FOLDERS.join(", "),
+                Self::gemini_dir(env).display()
             );
             return Detection::NotFound {
                 reason: say::not_installed(AgentId::Antigravity.label()),
             };
         }
-        Detection::Found {
-            version: None,
-            paths,
-        }
+        let version = program.and_then(|p| version(env, &p));
+        Detection::Found { version, paths }
     }
 
     fn features(&self) -> &'static [Feature] {
@@ -201,6 +217,17 @@ impl Agent for Antigravity {
             Vec::new()
         }
     }
+}
+
+/// The first line of `agy --version` (`1.5.3`); `None` when the call fails
+/// or prints nothing.
+fn version(env: &Env, program: &Path) -> Option<String> {
+    let out = env.run(&Invocation::new(program, &["--version"])).ok()?;
+    if !out.success() {
+        return None;
+    }
+    let line = out.stdout.lines().next()?.trim();
+    (!line.is_empty()).then(|| line.to_owned())
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ CI-verified install counts as done.
   - _Requirements: 4.2_
 
 - [ ] 3. Setup agent for Antigravity
-- [ ] 3.1 Detection by program and data folders
+- [x] 3.1 Detection by program and data folders
   - Detect Antigravity when the `agy` program is on PATH or any of the CLI, app or IDE data folders under the Gemini home exist; the bare Gemini home no longer counts.
   - Show the first line of `agy --version` as the version when the program is found.
   - Done when tests show: program found with version; folders only without version; Gemini home with only `settings.json` not found.
