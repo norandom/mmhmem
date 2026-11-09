@@ -26,7 +26,7 @@ CI-verified install counts as done.
   - _Boundary: Antigravity hook adapter_
   - _Requirements: 2.2, 2.3, 2.4_
 
-- [ ] 2.2 (P) Antigravity hook sample for the functional check
+- [x] 2.2 (P) Antigravity hook sample for the functional check
   - Build the Antigravity-shaped sample read the check feeds the hook and expect the deny or pass form from task 2.1.
   - Done when the check-hook unit test runs the sample for the Antigravity harness and reports pass, and a hook that prints nothing within the timeout is reported as not run.
   - _Boundary: Hook sample_
@@ -112,3 +112,4 @@ CI-verified install counts as done.
 - 2026-11-09 (task 2.1): the build host is tight on memory; use `cargo nextest run --build-jobs 2`. `setup::running::tests::a_running_copy_is_seen_and_this_process_is_not` is flaky under parallel nextest (passes with `-j 1`) and is unrelated to this spec.
 - 2026-11-09 (task 2.1): the pre-commit gate fails when `git commit` is run from the Git Bash tool (the installer stub test cannot invoke pwsh with `-File`); commit from native PowerShell.
 - 2026-11-09 (task 2.1 review): the hook repeat-window key is the path as sent; Antigravity sends `Path` in both slash styles, so a repeat in the other style is redirected again instead of passing. Non-blocking; normalise separators in the key if it shows up in task 5.3.
+- 2026-11-09 (task 2.2): `Steps::hook` in `check_agent.rs` skips the hook sample when no worker model is configured. For Antigravity a broken hook blocks every `read_file`, so task 3.5 must run the sample even without a worker (expecting `{"decision":"ask"}`), either by calling `hook_sample` directly or by extending `Steps` with an opt-in. The sample uses the check's fresh session id (not a literal) so re-runs never hit the hook's 2-minute repeat window.

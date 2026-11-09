@@ -301,6 +301,8 @@ pub enum HookHarness {
     Codex,
     /// `hook opencode`.
     Opencode,
+    /// `hook antigravity` (antigravity-native-setup).
+    Antigravity,
 }
 
 impl HookHarness {
@@ -310,6 +312,7 @@ impl HookHarness {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Opencode => "opencode",
+            Self::Antigravity => "antigravity",
         }
     }
 }
