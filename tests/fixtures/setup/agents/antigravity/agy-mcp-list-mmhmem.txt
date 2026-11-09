@@ -1,0 +1,2 @@
+NAME    TYPE   STATUS   COMMAND/URL
+mmhmem  stdio  enabled  C:\Users\<user>\AppData\Local\Programs\mmhmem\mmhmem.exe stdio
