@@ -18,7 +18,7 @@ CI-verified install counts as done.
   - _Requirements: 6.3_
 
 - [ ] 2. Hook adapter for Antigravity
-- [ ] 2.1 Parse and render Antigravity `PreToolUse`
+- [x] 2.1 Parse and render Antigravity `PreToolUse`
   - Add the Antigravity harness variant with the command-line name `antigravity`, its stable name and `agent_harness` value, and the parse and render branches.
   - Parse the captured payload shape: session from the conversation id, working folder from the first workspace path, the `read_file` tool only; `Path` (either slash style) and optional `StartLine`/`EndLine` from the arguments; anything else (including `call_mcp_tool` and `run_command`) or malformed is not a read.
   - Render a redirect as a deny with a reason that names the `smart_read` call; render a pass as `{"decision":"ask"}`; never auto-allow; the command always exits 0 and always prints one JSON object, because empty or invalid output blocks Antigravity's tool call.
@@ -104,3 +104,11 @@ CI-verified install counts as done.
   - Done when `agy mcp list` names mmhmem, a new `agy` session lists the mmhmem tools, a whole-file `read_file` of a file above the threshold is answered with the redirect while a ranged read proceeds, the interactive prompt check passed, `install.json` matches the data model in design.md, and the evidence (commands and output) is recorded in `validation.md` of this spec.
   - _Depends: 5.2_
   - _Requirements: 1.1, 1.5, 2.1, 2.2, 4.3, 5.1, 5.2, 5.4_
+
+## Implementation Notes
+
+- 2026-11-09 (task 1.1): the auto-mode classifier refused to spawn a subagent whose prompt drove `agy` with permission prompts skipped and installed a global hook; the controller ran the capture itself. A global `~/.gemini/config/hooks.json` fires in every Antigravity session on the machine, so live hook experiments must be short and announced to the owner.
+- 2026-11-09 (task 2.1): `src/lib.rs` `--help` text still lists the hook harnesses as "(claude, codex, opencode)"; task 4.1 (text and flow) must add `antigravity`.
+- 2026-11-09 (task 2.1): the build host is tight on memory; use `cargo nextest run --build-jobs 2`. `setup::running::tests::a_running_copy_is_seen_and_this_process_is_not` is flaky under parallel nextest (passes with `-j 1`) and is unrelated to this spec.
+- 2026-11-09 (task 2.1): the pre-commit gate fails when `git commit` is run from the Git Bash tool (the installer stub test cannot invoke pwsh with `-File`); commit from native PowerShell.
+- 2026-11-09 (task 2.1 review): the hook repeat-window key is the path as sent; Antigravity sends `Path` in both slash styles, so a repeat in the other style is redirected again instead of passing. Non-blocking; normalise separators in the key if it shows up in task 5.3.

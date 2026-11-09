@@ -7,11 +7,10 @@
 //! argv array such as `["bash", "-lc", "cat x"]` is unwrapped to its script.
 //! Input is untrusted: anything missing or of the wrong type is not a read.
 
-use super::adapters::{Harness, ParsedCall, deny_output, load_input};
+use super::adapters::{Harness, ParsedCall, ascii_json, deny_output, load_input};
 use super::shell::{recognise, resolve, unwrap_invocation};
 use super::{Decision, ReadRequest};
 use serde_json::Value;
-use std::fmt::Write as _;
 use std::path::Path;
 
 /// Codex `PreToolUse` input: `tool_name`, `tool_input`, `cwd`, `session_id`.
@@ -91,24 +90,6 @@ pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String 
         path = path.display()
     );
     ascii_json(&deny_output(reason).to_string())
-}
-
-/// Escapes every non-ASCII character as `\uXXXX`: Codex runs the hook
-/// through the user's shell (PowerShell on Windows), which may re-encode
-/// non-ASCII stdout. Valid because JSON has non-ASCII only inside strings.
-fn ascii_json(json: &str) -> String {
-    let mut out = String::with_capacity(json.len());
-    for c in json.chars() {
-        if c.is_ascii() {
-            out.push(c);
-            continue;
-        }
-        let mut units = [0u16; 2];
-        for unit in c.encode_utf16(&mut units) {
-            let _ = write!(out, "\\u{unit:04x}");
-        }
-    }
-    out
 }
 
 #[cfg(test)]

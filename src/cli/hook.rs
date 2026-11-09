@@ -5,9 +5,11 @@
 //! One pre-tool event in on stdin, one decision out on stdout, exit 0 in
 //! every case. The command fails open: unknown harness, bad or oversized
 //! input, a configuration that cannot load, any error or panic means no
-//! output, so the tool call proceeds. It is synchronous (no runtime, no
-//! network, no MCP server) and initialises no logging, so stdout carries
-//! nothing but the harness decision.
+//! output, so the tool call proceeds. Antigravity denies the call on empty
+//! stdout, so for it the same cases print its pass answer `{"decision":"ask"}`
+//! (antigravity-native-setup design.md "Antigravity hook adapter", Req 2.3,
+//! 2.4). It is synchronous (no runtime, no network, no MCP server) and
+//! initialises no logging, so stdout carries nothing but the harness decision.
 
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -38,6 +40,11 @@ pub fn run_hook(harness: Option<&str>) -> ExitCode {
         );
     }));
     let output = guarded(|| respond(harness), || audit_internal_error(harness));
+    let output = if output.is_empty() {
+        no_decision_output(harness)
+    } else {
+        output
+    };
     if !output.is_empty() {
         let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(output.as_bytes());
@@ -58,12 +65,23 @@ fn guarded(answer: impl FnOnce() -> String, on_error: impl FnOnce()) -> String {
     }
 }
 
+/// Stdout when `respond` rendered nothing (an early pass or a panic): the
+/// harness's fail-open answer, empty except for Antigravity; an unsupported
+/// harness name prints nothing, as before.
+fn no_decision_output(harness: Option<&str>) -> String {
+    harness
+        .and_then(parse_harness)
+        .map_or("", adapters::fail_open_output)
+        .to_string()
+}
+
 /// Maps the CLI argument to a harness; `None` for anything unsupported.
 fn parse_harness(name: &str) -> Option<Harness> {
     match name {
         "claude" => Some(Harness::Claude),
         "codex" => Some(Harness::Codex),
         "opencode" => Some(Harness::OpenCode),
+        "antigravity" => Some(Harness::Antigravity),
         _ => None,
     }
 }
@@ -290,6 +308,9 @@ mod tests {
         assert_eq!(parse_harness("codex"), Some(Harness::Codex));
         assert_eq!(parse_harness("Codex"), None);
         assert_eq!(parse_harness("opencode"), Some(Harness::OpenCode));
+        assert_eq!(parse_harness("antigravity"), Some(Harness::Antigravity));
+        assert_eq!(parse_harness("Antigravity"), None);
+        assert_eq!(parse_harness("agy"), None);
         // The CLI argument stays (Req 4.8); audit records carry the
         // agent_harness each harness passes to smart_read (task 5.2 joins them).
         assert_eq!(Harness::Claude.agent_harness(), "claude-code");
@@ -300,6 +321,25 @@ mod tests {
             "security_critical"
         );
         assert_eq!(reason_name(PassReason::NoWorker), "no_worker");
+    }
+
+    #[test]
+    fn only_antigravity_prints_a_pass_when_no_decision_was_rendered() {
+        // antigravity-native-setup task 2.1: empty stdout denies Antigravity's
+        // tool call; every other harness (and an unknown name) keeps no output.
+        assert_eq!(
+            no_decision_output(Some("antigravity")),
+            r#"{"decision":"ask"}"#
+        );
+        for other in [
+            Some("claude"),
+            Some("codex"),
+            Some("opencode"),
+            Some("x"),
+            None,
+        ] {
+            assert_eq!(no_decision_output(other), "", "{other:?}");
+        }
     }
 
     #[test]

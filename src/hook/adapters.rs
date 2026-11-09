@@ -3,11 +3,13 @@
 //!
 //! Input is untrusted: unknown fields are ignored and anything missing or of
 //! the wrong type means "not a read", so the hook passes. Claude Code is mapped
-//! here, Codex in [`super::codex`]; another harness adds a [`Harness`] variant
-//! and a branch in [`parse`] and [`render`].
+//! here, Codex in [`super::codex`], OpenCode in [`super::opencode`] and
+//! Antigravity in [`super::antigravity`]; another harness adds a [`Harness`]
+//! variant and a branch in [`parse`] and [`render`].
 
 use super::{Decision, ReadRequest};
 use serde_json::{Value, json};
+use std::fmt::Write as _;
 use std::path::Path;
 
 /// Stdin larger than this is never parsed (treated as not a read).
@@ -19,6 +21,7 @@ pub enum Harness {
     Claude,
     Codex,
     OpenCode,
+    Antigravity,
 }
 
 impl Harness {
@@ -28,6 +31,7 @@ impl Harness {
             Harness::Claude => "claude",
             Harness::Codex => "codex",
             Harness::OpenCode => "opencode",
+            Harness::Antigravity => "antigravity",
         }
     }
 
@@ -39,6 +43,7 @@ impl Harness {
             Harness::Claude => "claude-code",
             Harness::Codex => "codex",
             Harness::OpenCode => "opencode",
+            Harness::Antigravity => "antigravity",
         }
     }
 }
@@ -61,15 +66,29 @@ pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
         Harness::Claude => parse_claude(input),
         Harness::Codex => super::codex::parse(input),
         Harness::OpenCode => super::opencode::parse(input),
+        Harness::Antigravity => super::antigravity::parse(input),
     }
 }
 
-/// Renders a decision as the harness's stdout; a pass is the empty string.
+/// Renders a decision as the harness's stdout; a pass is the empty string
+/// for Claude Code and Codex.
 pub fn render(harness: Harness, decision: &Decision, path: &Path, project: &str) -> String {
     match harness {
         Harness::Claude => render_claude(decision, path, project),
         Harness::Codex => super::codex::render(decision, path, project),
         Harness::OpenCode => super::opencode::render(decision, path, project),
+        Harness::Antigravity => super::antigravity::render(decision, path, project),
+    }
+}
+
+/// Stdout when the hook reaches no decision (not a read, input or
+/// configuration it cannot use, an internal error): nothing, except for
+/// Antigravity, where empty stdout denies the tool call
+/// (antigravity-native-setup research.md "Decision: Pass output").
+pub fn fail_open_output(harness: Harness) -> &'static str {
+    match harness {
+        Harness::Antigravity => super::antigravity::PASS_OUTPUT,
+        Harness::Claude | Harness::Codex | Harness::OpenCode => "",
     }
 }
 
@@ -88,6 +107,25 @@ pub(super) fn deny_output(reason: String) -> Value {
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }})
+}
+
+/// Escapes every non-ASCII character as `\uXXXX`: Codex and Antigravity
+/// run the hook through a shell (PowerShell or `cmd /c` on Windows), which
+/// may re-encode non-ASCII stdout. Valid because JSON has non-ASCII only
+/// inside strings.
+pub(super) fn ascii_json(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+            continue;
+        }
+        let mut units = [0u16; 2];
+        for unit in c.encode_utf16(&mut units) {
+            let _ = write!(out, "\\u{unit:04x}");
+        }
+    }
+    out
 }
 
 /// Claude Code `PreToolUse` input: `tool_name`, `tool_input`, `cwd`,

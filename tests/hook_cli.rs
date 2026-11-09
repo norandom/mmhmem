@@ -261,6 +261,135 @@ fn codex_shell_read_is_redirected_once_then_passes() {
     assert!(audit.iter().all(|r| r["agent_harness"] == "codex"));
 }
 
+/// A payload captured from agy 1.5.3 (`tests/fixtures/hook/antigravity/`)
+/// pointed at the temp project: `workspacePaths[0]` with forward slashes as
+/// captured, and `Path` (when present) in the fixture's slash style.
+fn antigravity_event(env: &Env, name: &str, path: &Path) -> Vec<u8> {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/hook/antigravity")
+        .join(format!("pretooluse-{name}.json"));
+    let bytes = std::fs::read(&file).expect("fixture");
+    let mut event: Value = serde_json::from_slice(&bytes).expect("fixture JSON");
+    let forward = |p: &Path| p.display().to_string().replace('\\', "/");
+    event["workspacePaths"] = json!([forward(&env.project)]);
+    let args = &mut event["toolCall"]["args"];
+    if let Some(raw) = args.get("Path").and_then(Value::as_str) {
+        let native = raw.contains('\\');
+        args["Path"] = json!(if native {
+            path.display().to_string()
+        } else {
+            forward(path)
+        });
+    }
+    event.to_string().into_bytes()
+}
+
+/// Antigravity's contract: exit 0 and exactly one JSON object on stdout,
+/// never `allow` (empty or invalid stdout blocks the tool call).
+fn antigravity_answer(out: &Output) -> Value {
+    assert!(out.status.success(), "exit: {:?}", out.status);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{text:?}: {e}"));
+    assert!(v.is_object(), "{text}");
+    assert_ne!(v["decision"], "allow", "{text}");
+    v
+}
+
+fn assert_ask(out: &Output) {
+    assert_eq!(antigravity_answer(out), json!({"decision": "ask"}));
+}
+
+/// Task 2.1 (antigravity-native-setup Req 2.2, 2.4): whole-file reads at
+/// the threshold are denied with the smart_read call, then pass on repeat.
+#[test]
+fn antigravity_whole_file_reads_at_the_threshold_are_denied() {
+    let env = Env::new();
+    let run = |name: &str, path: &Path| {
+        let event = antigravity_event(&env, name, path);
+        env.run_raw("antigravity", true, &event)
+    };
+    for (name, rel) in [
+        ("read_file-whole", "at.txt"),
+        ("read_file-whole-forward-slashes", "at-forward.txt"),
+    ] {
+        let path = env.file(rel, 150);
+        let out = run(name, &path);
+        let v = antigravity_answer(&out);
+        assert_eq!(v["decision"], "deny", "{name}: {v}");
+        let reason = v["reason"].as_str().expect("reason");
+        assert!(
+            reason.contains("call smart_read with project \"proj\""),
+            "{reason}"
+        );
+        assert!(reason.contains("agent_harness \"antigravity\""), "{reason}");
+        assert!(reason.contains(rel) && !reason.contains(MARKER), "{reason}");
+        assert!(out.stdout.is_ascii());
+        assert_no_secret(&out);
+    }
+    assert_ask(&run("read_file-whole", &env.project.join("at.txt")));
+    let audit = env.audit();
+    assert_eq!(audit.len(), 3, "{audit:?}");
+    assert!(audit.iter().all(|r| r["agent_harness"] == "antigravity"));
+    assert!(audit.iter().all(|r| r["details"]["tool"] == "read_file"));
+    assert_eq!(audit[2]["details"]["reason"], "repeat");
+}
+
+/// Task 2.1 (Req 2.2, 2.3): below the threshold, ranged, security-critical
+/// and no-worker reads answer `{"decision":"ask"}` and are recorded as passes.
+#[test]
+fn antigravity_short_ranged_security_and_no_worker_reads_ask() {
+    let env = Env::new();
+    let below = env.file("below.txt", 149);
+    let big = env.file("big.txt", 400);
+    let secret = env.file("auth.txt", 400);
+    let run = |worker: bool, name: &str, path: &Path| {
+        let event = antigravity_event(&env, name, path);
+        env.run_raw("antigravity", worker, &event)
+    };
+    assert_ask(&run(true, "read_file-whole", &below));
+    assert_ask(&run(true, "read_file-ranged", &big));
+    assert_ask(&run(true, "read_file-whole", &secret));
+    let no_worker = run(false, "read_file-whole-forward-slashes", &big);
+    assert_ask(&no_worker);
+    assert_no_secret(&no_worker);
+    let reasons: Vec<Value> = env
+        .audit()
+        .iter()
+        .map(|r| r["details"]["reason"].clone())
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            json!("short"),
+            json!("range"),
+            json!("security_critical"),
+            json!("no_worker")
+        ]
+    );
+}
+
+/// Task 2.1 (Req 2.3, 2.4): other tools, bad stdin and a configuration that
+/// cannot load still print the ask object and exit 0.
+#[test]
+fn antigravity_non_reads_and_bad_input_still_ask() {
+    let env = Env::new();
+    let big = env.file("big.txt", 400);
+    for name in ["run_command", "call_mcp_tool-smart_read"] {
+        let event = antigravity_event(&env, name, &big);
+        assert_ask(&env.run_raw("antigravity", true, &event));
+    }
+    assert!(env.audit().is_empty(), "{:?}", env.audit());
+    assert_ask(&env.run_raw("antigravity", true, b"\x00\xff not json {{{"));
+    assert_ask(&env.run_raw("antigravity", true, b""));
+    let mut event: Value =
+        serde_json::from_slice(&antigravity_event(&env, "read_file-whole", &big)).expect("json");
+    event["pad"] = json!("x".repeat(1024 * 1024 + 16));
+    assert_ask(&env.run_raw("antigravity", true, event.to_string().as_bytes()));
+    std::fs::write(env.project.join(".mmhmem.json"), "{ not json").expect("write");
+    let event = antigravity_event(&env, "read_file-whole", &big);
+    assert_ask(&env.run_raw("antigravity", true, &event));
+}
+
 #[test]
 fn non_read_tools_pass_without_an_audit_record() {
     let env = Env::new();
