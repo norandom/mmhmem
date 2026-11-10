@@ -1,10 +1,12 @@
 //! The installer's agent checks end to end (reliable-installers task 4.2;
-//! Requirements 3.5 and 6.1–6.6): real Claude Code, Codex and OpenCode
-//! configs written by `plan::apply` in a temporary home, pointing at the
-//! real `mmhmem` binary. The MCP step starts that binary from the bytes on
-//! disk and the hook sample runs the real `mmhmem hook <harness>`; only the
-//! agent CLIs (`claude`, `codex`, `opencode`) are doubles, answering from
-//! the files the plan wrote. A failed check restores every file.
+//! Requirements 3.5 and 6.1–6.6; Antigravity: antigravity-native-setup task
+//! 3.5, Requirements 4.1–4.4): real Claude Code, Codex, OpenCode and
+//! Antigravity configs written by `plan::apply` in a temporary home,
+//! pointing at the real `mmhmem` binary. The MCP step starts that binary
+//! from the bytes on disk and the hook sample runs the real `mmhmem hook
+//! <harness>`; only the agent CLIs (`claude`, `codex`, `opencode`, `agy`)
+//! are doubles, answering from the files the plan wrote or, for `agy`, with
+//! the captured listing. A failed check restores every file.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,6 +25,10 @@ use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_mmhmem");
 const SECRET: &str = "verify-test-secret-3f0a";
+/// `agy --version` and `agy mcp list` with mmhmem added, as captured.
+const AGY_VERSION: &str = include_str!("fixtures/setup/agents/antigravity/agy-version.txt");
+const AGY_MCP_LIST: &str =
+    include_str!("fixtures/setup/agents/antigravity/agy-mcp-list-mmhmem.txt");
 
 struct Home {
     dir: tempfile::TempDir,
@@ -102,6 +108,8 @@ impl CommandRunner for Clis {
             "claude" => self.claude(),
             "codex" => self.codex(),
             "opencode" => Self::ok("✓ mmhmem       connected\n".to_owned()),
+            "agy" if invocation.args == ["--version"] => Self::ok(AGY_VERSION.to_owned()),
+            "agy" => Self::ok(AGY_MCP_LIST.to_owned()),
             _ => {
                 let real = invocation
                     .clone()
@@ -116,6 +124,21 @@ impl CommandRunner for Clis {
     }
 }
 
+/// Puts an empty program called `name` into `bin`, the whole `PATH`.
+fn put_program(bin: &Path, name: &str) {
+    let file = bin.join(if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    });
+    std::fs::write(&file, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
 fn home(codex_loads: bool) -> Home {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
@@ -125,17 +148,7 @@ fn home(codex_loads: bool) -> Home {
         std::fs::create_dir_all(d).unwrap();
     }
     for name in ["claude", "codex", "opencode"] {
-        let file = bin.join(if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_owned()
-        });
-        std::fs::write(&file, b"").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        put_program(&bin, name);
     }
     let mut dirs = ScanEnv::new(Os::current(), &home);
     dirs.appdata = Some(home.join("AppData").join("Roaming"));
@@ -194,13 +207,13 @@ fn selection() -> Selection {
 fn install(
     home: &Home,
     registry: &Registry,
+    want: &Selection,
     record: &mut InstallRecord,
 ) -> mmhmem::setup::plan::ApplyReport {
-    let want = selection();
     let mut changes = Vec::new();
     for id in want.agents() {
         let agent = registry.get(id).unwrap();
-        changes.extend(agent.plan(&home.env, &want, None).unwrap());
+        changes.extend(agent.plan(&home.env, want, None).unwrap());
     }
     let run = UtcTimestamp::now();
     apply(&Plan { run, changes }, &home.store, record)
@@ -212,7 +225,7 @@ fn real_configs_and_the_real_server_pass_with_codex_approval_pending() {
     seed(&home);
     let registry = Registry::builtin(Path::new(BIN));
     let mut record = InstallRecord::new();
-    let mut applied = install(&home, &registry, &mut record);
+    let mut applied = install(&home, &registry, &selection(), &mut record);
     let checker = Checker {
         registry: &registry,
         env: &home.env,
@@ -266,7 +279,7 @@ fn a_failing_check_rolls_back_to_the_seeded_bytes() {
     let registry = Registry::builtin(Path::new(BIN));
     let mut record = InstallRecord::new();
     let before = record.clone();
-    let mut applied = install(&home, &registry, &mut record);
+    let mut applied = install(&home, &registry, &selection(), &mut record);
     // Claude Code's entry now names a program that does not exist: the MCP
     // step reads the file, not the plan.
     let claude_json = home.path(".claude.json");
@@ -317,4 +330,173 @@ fn a_failing_check_rolls_back_to_the_seeded_bytes() {
         [&AgentId::OpenCode]
     );
     assert_eq!(before.agents.len(), 0);
+}
+
+/// Antigravity's two global files as a user has them before setup: another
+/// server and mmhmem's old entry carrying the isolating environment in the
+/// server file, another named hook in the hook file. The files and their
+/// seed text.
+fn seed_antigravity(home: &Home) -> Vec<(PathBuf, String)> {
+    let servers = json!({"mcpServers": {
+        "other": {"command": "other-server", "args": []},
+        "mmhmem": {"command": "old-mmhmem", "args": ["stdio"], "env": isolation(&home.data())}
+    }});
+    let hooks = json!({"other-hook": {"PreToolUse": [{"matcher": "^run_command$",
+        "hooks": [{"type": "command", "command": "other-hook-program", "timeout": 5}]}]}});
+    [
+        (".gemini/config/mcp_config.json", servers),
+        (".gemini/config/hooks.json", hooks),
+    ]
+    .into_iter()
+    .map(|(rel, value)| {
+        let text = format!("{value:#}\n");
+        (home.write(rel, &text), text)
+    })
+    .collect()
+}
+
+fn antigravity() -> Selection {
+    let features = [Feature::Mcp, Feature::ReadHook];
+    Selection::new().with(AgentId::Antigravity, &features)
+}
+
+/// A home with Antigravity's files seeded and `agy` on `PATH` when `agy`.
+fn antigravity_home(agy: bool) -> (Home, Vec<(PathBuf, String)>) {
+    let home = home(true);
+    if agy {
+        put_program(&home.dir.path().join("bin"), "agy");
+    }
+    let seeds = seed_antigravity(&home);
+    (home, seeds)
+}
+
+fn outcome_of(verdict: &mmhmem::setup::verify::AgentVerdict, step: CheckStep) -> StepOutcome {
+    let detail = verdict.report.details.iter().find(|d| d.step == step);
+    detail.expect("every step is reported").outcome
+}
+
+/// The saved `last_check.details` of Antigravity name `agent_command` with
+/// `outcome`.
+fn saved_agent_command(home: &Home, outcome: &str) {
+    let saved = home.store.load().unwrap().unwrap();
+    let last = saved.agents[&AgentId::Antigravity].last_check.as_ref();
+    let details = serde_json::to_value(&last.unwrap().details).unwrap();
+    let step = json!({"step": "agent_command", "outcome": outcome});
+    assert!(details.as_array().unwrap().contains(&step), "{details}");
+}
+
+#[test]
+fn antigravity_passes_from_its_own_files_with_agy_listing_mmhmem() {
+    let (home, seeds) = antigravity_home(true);
+    let registry = Registry::builtin(Path::new(BIN));
+    let mut record = InstallRecord::new();
+    let mut applied = install(&home, &registry, &antigravity(), &mut record);
+    let checker = Checker {
+        registry: &registry,
+        env: &home.env,
+        store: &home.store,
+    };
+    let verdicts = checker.run(&antigravity(), &mut applied, &mut record);
+    let verdict = verdicts.agent(AgentId::Antigravity).unwrap();
+    assert_eq!(
+        verdict.lines(),
+        ["✔ Antigravity — mmhmem connected, 11 tools"],
+        "{verdicts:#?}"
+    );
+    assert_eq!(verdict.rollback, Rollback::NotNeeded);
+    for step in [
+        CheckStep::Registration,
+        CheckStep::Handshake,
+        CheckStep::StatusTool,
+        CheckStep::AgentCommand,
+        CheckStep::HookSample,
+    ] {
+        assert_eq!(outcome_of(verdict, step), StepOutcome::Pass, "{step:?}");
+    }
+    assert!(!format!("{verdict:?}").contains(SECRET));
+    saved_agent_command(&home, "pass");
+    // The other server and the other hook are still there.
+    let json_of = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+    let read = |file: &Path| json_of(&std::fs::read_to_string(file).unwrap());
+    let others = [["mcpServers", "other"], ["other-hook", "PreToolUse"]];
+    for ((file, seed), [outer, inner]) in seeds.iter().zip(others) {
+        let (now, seed) = (read(file), json_of(seed));
+        assert_eq!(now[outer][inner], seed[outer][inner], "{}", file.display());
+    }
+    let hooks = read(&home.path(".gemini/config/hooks.json"));
+    assert!(hooks["mmhmem-read-routing"].is_object(), "{hooks}");
+}
+
+#[test]
+fn antigravity_without_agy_skips_the_listing_and_says_why() {
+    let (home, _) = antigravity_home(false);
+    let registry = Registry::builtin(Path::new(BIN));
+    let mut record = InstallRecord::new();
+    let mut applied = install(&home, &registry, &antigravity(), &mut record);
+    let checker = Checker {
+        registry: &registry,
+        env: &home.env,
+        store: &home.store,
+    };
+    let verdicts = checker.run(&antigravity(), &mut applied, &mut record);
+    let verdict = verdicts.agent(AgentId::Antigravity).unwrap();
+    assert_eq!(
+        verdict.lines(),
+        [
+            "✔ Antigravity — mmhmem connected, 11 tools",
+            "● Antigravity — Antigravity CLI not found; checked the config file only",
+        ],
+        "{verdicts:#?}"
+    );
+    let skipped = outcome_of(verdict, CheckStep::AgentCommand);
+    assert_eq!(skipped, StepOutcome::Skipped);
+    assert_eq!(
+        outcome_of(verdict, CheckStep::HookSample),
+        StepOutcome::Pass
+    );
+    saved_agent_command(&home, "skipped");
+}
+
+#[test]
+fn a_wrong_antigravity_command_fails_the_registration_and_restores_both_files() {
+    let (home, seeds) = antigravity_home(true);
+    let registry = Registry::builtin(Path::new(BIN));
+    let mut record = InstallRecord::new();
+    let mut applied = install(&home, &registry, &antigravity(), &mut record);
+    // The server file now names a program that is not there: the check reads
+    // the file Antigravity loads, not the plan.
+    let servers = home.path(".gemini/config/mcp_config.json");
+    let text = std::fs::read_to_string(&servers).unwrap();
+    let gone = home.dir.path().join("gone").join("mmhmem");
+    let (bin, wrong) = (serde_json::to_string(BIN), serde_json::to_string(&gone));
+    let broken = text.replace(&bin.unwrap(), &wrong.unwrap());
+    assert_ne!(broken, text);
+    std::fs::write(&servers, broken).unwrap();
+    let checker = Checker {
+        registry: &registry,
+        env: &home.env,
+        store: &home.store,
+    };
+    let verdicts = checker.run(&antigravity(), &mut applied, &mut record);
+    let verdict = verdicts.agent(AgentId::Antigravity).unwrap();
+    let lines = verdict.lines();
+    let failed = "✘ Antigravity — mmhmem did not start: the program at ";
+    assert!(lines[0].starts_with(failed), "{lines:?}");
+    assert_eq!(
+        outcome_of(verdict, CheckStep::Registration),
+        StepOutcome::Fail
+    );
+    for step in [CheckStep::AgentCommand, CheckStep::HookSample] {
+        assert_eq!(outcome_of(verdict, step), StepOutcome::Skipped, "{step:?}");
+    }
+    let restored = "Restored your original Antigravity settings.".to_owned();
+    assert_eq!(verdict.rollback, Rollback::Restored);
+    assert_eq!(lines.last(), Some(&restored));
+    let report = applied.agent(Scope::Agent(AgentId::Antigravity)).unwrap();
+    assert_eq!(report.outcome, Outcome::RolledBack { reason: restored });
+    for (file, seed) in &seeds {
+        let now = std::fs::read_to_string(file).unwrap();
+        assert_eq!(&now, seed, "{}", file.display());
+    }
+    assert!(!record.agents.contains_key(&AgentId::Antigravity));
 }

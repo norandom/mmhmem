@@ -411,7 +411,6 @@ fn an_old_snippet_record_is_still_removed() {
     let removed = |c: &Change| c.file == file && c.action == Action::Remove;
     assert_eq!(changes.iter().filter(|c| removed(c)).count(), 1);
     assert!(changes.iter().any(|c| c.file == server_file(&home)));
-    assert!(Antigravity::removal_instruction().contains("Antigravity"));
 }
 
 /// A record entry saying the snippet file is managed and written.

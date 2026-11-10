@@ -221,7 +221,11 @@ fn desktop_passes_with_its_user_step_pending_and_antigravity_with_none() {
         ]
     );
     let gravity = antigravity::Antigravity::new(&fx.bin);
-    let report = fx.check(&gravity, &want(AgentId::Antigravity, &[Feature::Mcp]));
+    let gravity_mcp = want(AgentId::Antigravity, &[Feature::Mcp]);
+    // The check reads Antigravity's own server file (antigravity-native-setup
+    // Requirement 4.1), so the entry must be written first.
+    fx.install(&gravity, &gravity_mcp);
+    let report = fx.check(&gravity, &gravity_mcp);
     // No import step any more (antigravity-native-setup Requirement 5.4).
     assert_eq!(report.result, CheckResult::Pass, "{}", report.line);
     assert!(report.pending.is_empty(), "{:?}", report.pending);

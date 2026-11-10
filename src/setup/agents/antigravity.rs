@@ -30,8 +30,10 @@
 //!   program that is gone and so block every Antigravity tool. No pending
 //!   step is emitted; the snippet-era
 //!   [`PendingUserStep::ImportAntigravitySnippet`] still loads from old
-//!   records and is never saved again. The check uses the snippet until task
-//!   3.5 replaces it.
+//!   records and is never saved again.
+//! - **Check** (task 3.5; Requirements 2.6 and 4.1–4.3): from the server
+//!   file's bytes, `agy mcp list` when `agy` is on PATH, and the hook sample
+//!   whenever the hook is selected and recorded (`antigravity_check.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -41,8 +43,6 @@ use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
     Invocation, PendingUserStep, Selection,
 };
-use crate::setup::check::Registration;
-use crate::setup::check::agent::Steps;
 use crate::setup::edit::json as edit;
 use crate::setup::plan::{Action, Change};
 use crate::setup::record::{KeySegment, ManagedEntry, Scope, Target, key_path};
@@ -53,10 +53,6 @@ mod check;
 #[path = "antigravity_hook.rs"]
 mod hook;
 pub use hook::{HOOK_MATCHER, HOOK_NAME, HOOK_TIMEOUT, hook_command};
-
-/// What the user does to take mmhmem out again.
-pub const REMOVE_INSTRUCTION: &str =
-    "Remove the mmhmem server in Antigravity's settings (MCP servers).";
 
 /// The import snippet older installs saved next to the binary (removal only).
 pub const SNIPPET_FILE: &str = "antigravity-mcp.json";
@@ -92,7 +88,8 @@ impl Antigravity {
         }
     }
 
-    /// The JSON older installs had the user import in Antigravity.
+    /// The JSON older installs had the user import in Antigravity (still
+    /// shown by the results screen until task 4.1 removes it there).
     pub fn snippet_value(&self) -> Value {
         json!({"mcpServers": {"mmhmem": {
             "command": self.binary.to_string_lossy(),
@@ -111,11 +108,6 @@ impl Antigravity {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(SNIPPET_FILE)
-    }
-
-    /// What the user does to remove mmhmem again.
-    pub fn removal_instruction() -> &'static str {
-        REMOVE_INSTRUCTION
     }
 
     fn gemini_dir(env: &Env) -> PathBuf {
@@ -370,12 +362,11 @@ impl Agent for Antigravity {
         self.hook_entry(env.os()).err().into_iter().collect()
     }
 
-    /// Starts exactly the command the snippet names (the same `command` and
-    /// `args` as the server entry); task 3.5 reads the server file instead.
+    /// Starts exactly the command [`Antigravity::mcp_file`] names, confirms
+    /// with `agy mcp list` when `agy` is on PATH and runs the hook sample
+    /// when the hook is selected and recorded ([`check::check`]).
     fn check(&self, env: &Env, rec: &AgentRecord) -> CheckReport {
-        let snippet = self.snippet();
-        let registration = Registration::from_claude_json(snippet.as_bytes(), "mmhmem");
-        Steps::start(env, AgentId::Antigravity, registration).finish(rec)
+        check::check(self, env, rec)
     }
 
     /// Takes mmhmem's keys out of the server entry, mmhmem's named hook, an
@@ -419,3 +410,7 @@ mod hook_tests;
 #[cfg(test)]
 #[path = "antigravity_check_tests.rs"]
 mod check_tests;
+
+#[cfg(test)]
+#[path = "antigravity_functional_tests.rs"]
+mod functional_tests;

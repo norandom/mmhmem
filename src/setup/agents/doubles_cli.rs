@@ -1,9 +1,10 @@
 //! Doubles of the `claude`, `codex` and `opencode` CLIs (reliable-installers
-//! task 3.1). They replay the outputs captured in task 1.1
-//! (`tests/fixtures/setup/agents/`, research.md §8) and, for `mcp add` and
-//! `mcp remove`, edit the agent's file the way the confirmed real CLI does.
-//! The text a real `mcp add`/`mcp remove` prints was not captured, so those
-//! answer with empty output and exit 0.
+//! task 3.1) and of Antigravity's `agy` (antigravity-native-setup task 3.5).
+//! They replay the outputs captured in task 1.1 of each spec
+//! (`tests/fixtures/setup/agents/`, research.md §8 and "Antigravity CLI
+//! surface") and, for `mcp add` and `mcp remove`, edit the agent's file the
+//! way the confirmed real CLI does. The text a real `mcp add`/`mcp remove`
+//! prints was not captured, so those answer with empty output and exit 0.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,6 +38,16 @@ pub(crate) const OPENCODE_SERVICE_STOPPED: &str =
 /// `opencode service status` while the service runs (its address).
 pub(crate) const OPENCODE_SERVICE_RUNNING: &str =
     include_str!("../../../tests/fixtures/setup/agents/opencode/service-status-running.txt");
+
+/// `agy --version` (agy 1.5.3).
+pub(crate) const AGY_VERSION: &str =
+    include_str!("../../../tests/fixtures/setup/agents/antigravity/agy-version.txt");
+/// `agy mcp list` with mmhmem added (a space-aligned table).
+pub(crate) const AGY_MCP_LIST_MMHMEM: &str =
+    include_str!("../../../tests/fixtures/setup/agents/antigravity/agy-mcp-list-mmhmem.txt");
+/// `agy mcp list` with no server configured.
+pub(crate) const AGY_MCP_LIST_EMPTY: &str =
+    include_str!("../../../tests/fixtures/setup/agents/antigravity/agy-mcp-list-empty.txt");
 
 /// `name` and command of `… mcp add [flags] <name> -- <command…>`.
 fn added(inv: &Invocation) -> (String, Vec<String>) {
@@ -226,11 +237,20 @@ pub(crate) fn opencode(runner: &FakeRunner, env: &Env) {
     runner.on_with("opencode", &["mcp", "add"], vec![Reply::ok("")], add);
 }
 
-/// Scripts all three CLIs.
+/// Scripts `agy` (`--version`, and `mcp list` listing mmhmem). Setup never
+/// writes through `agy`, so `mcp add` and `mcp remove` are not scripted.
+pub(crate) fn agy(runner: &FakeRunner) {
+    runner.on("agy", &["--version"], vec![Reply::ok(AGY_VERSION)]);
+    let list = vec![Reply::ok(AGY_MCP_LIST_MMHMEM)];
+    runner.on("agy", &["mcp", "list"], list);
+}
+
+/// Scripts all four CLIs.
 pub(crate) fn all(runner: &FakeRunner, env: &Env) {
     claude(runner, env);
     codex(runner, env);
     opencode(runner, env);
+    agy(runner);
 }
 
 #[test]
@@ -242,6 +262,7 @@ fn every_double_reports_its_captured_version() {
         ("claude", "2.1.302"),
         ("codex", "codex-cli 0.166.0"),
         ("opencode", "2.2.5"),
+        ("agy", "1.5.3"),
     ];
     for (program, version) in versions {
         let out = home

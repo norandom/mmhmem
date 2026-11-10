@@ -65,7 +65,7 @@ CI-verified install counts as done.
   - _Depends: 3.2, 3.3_
   - _Requirements: 5.1, 5.2, 5.4_
 
-- [ ] 3.5 Functional check from Antigravity's own file
+- [x] 3.5 Functional check from Antigravity's own file
   - Read the registration back from the global server file bytes, run the standard steps with that command, run the hook sample when the hook feature is on, and confirm with the Antigravity CLI's server listing when the program is present (skipped with a reason otherwise).
   - Remove the plan-derived check and the snippet constants from the agent.
   - Keep the existing "hook installed but inactive until a worker model is set up" line for Antigravity when its hook feature is on and no worker is configured.
@@ -121,3 +121,4 @@ CI-verified install counts as done.
 - 2026-11-09 (task 3.3 review): 8.3 short forms contain `~` (e.g. `C:\Users\JOHNSM~1\...`); Antigravity expands `~` in the first token and the rule is unverified beyond a leading `~/`. Task 5.3 must include a live check with an 8.3 path as the first token, or document that the owner's path has no spaces and the case stays unverified.
 - 2026-11-09 (task 3.3): the Windows 8.3 short form is taken only for the existing prefix up to the last path component with whitespace; the tail keeps its long names, so the hook command is identical before and after the binary is copied. Intermittent, unrelated: `codex::tests::install_applies_with_no_drift_and_a_replan_has_zero_changes` failed once under parallel nextest and passed 3/3 on rerun.
 - 2026-11-10 (task 3.4): approved in round 3. The stale-location cleanup runs in every plan whatever is selected and on removal (Req 5.2). Lesson: a reviewer stopped mid-mutation (restart) left a re-gated file in the tree; after any interrupted review, diff the files against the implementer's description before trusting a green run, and `touch` restored files so cargo rebuilds. `record_tests.rs` is at 489/500 lines; `#[deprecated]` on the legacy pending step waits for 4.1.
+- 2026-11-10 (task 3.5 review): an entry with `"disabled": true`, or a `disabled` STATUS in `agy mcp list`, still passes the check (design prescribes the shared parser and a line containing `mmhmem`). Task 5.3: capture `agy mcp list` after `agy mcp disable mmhmem` and decide whether to fail it. `listed()` matches the word `mmhmem` in any column; matching the NAME column only would be stricter. The integration tests live in `tests/setup_verify.rs` (rollback flow), not `setup_check.rs`. During the implementer's RED run the old snippet check once started the real binary without the isolating environment; nothing on the owner's machine is known to have changed.

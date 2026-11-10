@@ -156,7 +156,6 @@ fn a_snippet_next_to_a_moved_binary_is_still_removed() {
     }
     let removes = moved.plan_remove(&home.env, &rec);
     assert_eq!(planned(&removes), [(snippet.clone(), Action::Remove)]);
-    assert!(Antigravity::removal_instruction().contains("Antigravity"));
 
     // A snippet already deleted by hand: nothing to remove.
     std::fs::remove_file(&snippet).unwrap();

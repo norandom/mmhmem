@@ -220,6 +220,20 @@ impl Steps {
         }
     }
 
+    /// Step 4 for an agent whose tools a hook that does not answer blocks
+    /// (Antigravity), instead of [`Steps::hook`]: the sample runs with or
+    /// without a worker model (without one the hook must answer its pass
+    /// form), and without one the report still says the hook stays
+    /// inactive.
+    pub fn hook_always(&mut self, env: &Env, binary: &Path, harness: HookHarness) {
+        if !self.ok() {
+            return;
+        }
+        let result = hook_sample(env, binary, harness);
+        self.set(CheckStep::HookSample, result);
+        self.hook_inactive = !env.worker_configured();
+    }
+
     /// Records the outcome of `step`; the first failure is kept for the
     /// result line.
     pub fn set(&mut self, step: CheckStep, result: StepResult) {
