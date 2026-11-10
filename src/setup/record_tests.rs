@@ -141,6 +141,32 @@ fn load_of_missing_record_is_none() {
     );
 }
 
+/// antigravity-native-setup Requirement 5.4: the snippet-era import step
+/// still loads from old records but is never written back.
+#[test]
+fn a_legacy_pending_step_loads_but_is_dropped_on_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = RecordStore::new(dir.path());
+    let mut record = sample_record(dir.path());
+    let codex = record.agents.get_mut(&AgentId::Codex).unwrap();
+    codex.pending_user_steps = vec![
+        PendingUserStep::ImportAntigravitySnippet,
+        PendingUserStep::ApproveHookInCodex,
+    ];
+    let old: PendingUserStep = serde_json::from_str("\"import_antigravity_snippet\"").unwrap();
+    assert_eq!(old, PendingUserStep::ImportAntigravitySnippet);
+    assert!(old.is_legacy());
+    assert!(!PendingUserStep::ApproveHookInCodex.is_legacy());
+    store.save(&record).unwrap();
+    let text = std::fs::read_to_string(store.record_path()).unwrap();
+    assert!(!text.contains("import_antigravity_snippet"), "{text}");
+    let loaded = store.load().unwrap().unwrap();
+    assert_eq!(
+        loaded.agents[&AgentId::Codex].pending_user_steps,
+        [PendingUserStep::ApproveHookInCodex]
+    );
+}
+
 #[test]
 fn opencode_agent_id_serializes_as_opencode() {
     let text = serde_json::to_string(&AgentId::OpenCode).unwrap();

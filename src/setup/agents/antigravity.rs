@@ -21,12 +21,17 @@
 //!   Removal takes out that one key.
 //! - **Per feature:** each recorded entry belongs to one feature; a feature
 //!   that is no longer selected loses only its own entries.
-//! - **Snippet era:** older installs saved an import snippet next to the
-//!   binary ([`SNIPPET_FILE`]) and recorded
-//!   [`PendingUserStep::ImportAntigravitySnippet`]. Nothing writes the
-//!   snippet any more; a recorded snippet file is still removed. The check
-//!   and the pending step use the snippet until tasks 3.4, 3.5 and 4.1
-//!   replace them.
+//! - **Earlier installs** (task 3.4; Requirements 2.3, 5.1, 5.2 and 5.4):
+//!   a recorded import snippet ([`SNIPPET_FILE`]) is removed in every plan,
+//!   and mmhmem's entry in the server file Antigravity no longer reads
+//!   ([`Antigravity::stale_file`]) is removed in every plan, whatever is
+//!   selected, and on removal (`antigravity_check.rs`). A recorded hook
+//!   whose command can no longer be written comes out too: it would start a
+//!   program that is gone and so block every Antigravity tool. No pending
+//!   step is emitted; the snippet-era
+//!   [`PendingUserStep::ImportAntigravitySnippet`] still loads from old
+//!   records and is never saved again. The check uses the snippet until task
+//!   3.5 replaces it.
 
 use std::path::{Path, PathBuf};
 
@@ -43,6 +48,8 @@ use crate::setup::plan::{Action, Change};
 use crate::setup::record::{KeySegment, ManagedEntry, Scope, Target, key_path};
 use crate::setup::ui::text::changes::{self as say, What};
 
+#[path = "antigravity_check.rs"]
+mod check;
 #[path = "antigravity_hook.rs"]
 mod hook;
 pub use hook::{HOOK_MATCHER, HOOK_NAME, HOOK_TIMEOUT, hook_command};
@@ -104,11 +111,6 @@ impl Antigravity {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(SNIPPET_FILE)
-    }
-
-    /// The step only the user can do after install.
-    pub fn pending_step() -> PendingUserStep {
-        PendingUserStep::ImportAntigravitySnippet
     }
 
     /// What the user does to remove mmhmem again.
@@ -197,15 +199,15 @@ impl Antigravity {
 
     /// Plans taking one recorded entry out: mmhmem's keys of the server
     /// entry (and the parents this install created), mmhmem's named hook or
-    /// an old snippet file. Nothing for a missing file or a target that is
-    /// not mmhmem's.
+    /// an old snippet file, wherever it is. Nothing for a missing file or a
+    /// target that is not mmhmem's.
     fn remove_entry(
         &self,
         chain: &mut FileChain,
         entry: &ManagedEntry,
     ) -> Result<(), AgentProblem> {
         let (file, after) = match &entry.target {
-            Target::File { file } if *file == self.snippet_file() => {
+            Target::File { file } if check::is_snippet(file) => {
                 if chain.bytes(file)?.is_none() {
                     return Ok(());
                 }
@@ -243,6 +245,14 @@ impl Antigravity {
         });
         Ok(())
     }
+
+    /// Plans the removal of mmhmem's entry in [`Antigravity::stale_file`]
+    /// when there is one ([`check::stale_entry`]).
+    fn stale_change(&self, chain: &mut FileChain, env: &Env) {
+        if let Some(change) = check::stale_entry(&Self::stale_file(env), &self.binary) {
+            chain.push(change);
+        }
+    }
 }
 
 /// mmhmem's server entry in `file`; only `command` and `args` are its own.
@@ -258,14 +268,26 @@ fn is_entry(pointer: &[KeySegment]) -> bool {
     pointer.iter().map(KeySegment::as_str).eq(ENTRY)
 }
 
-/// The feature a recorded entry belongs to (the snippet-era import file was
-/// the server registration); `None` for a target that is not mmhmem's.
+/// The feature a recorded JSON entry belongs to; `None` for a target that
+/// is neither of mmhmem's two entries.
 fn feature_of(target: &Target) -> Option<Feature> {
     match target {
-        Target::File { .. } => Some(Feature::Mcp),
         Target::JsonEntry { pointer, .. } if is_entry(pointer) => Some(Feature::Mcp),
         Target::JsonEntry { pointer, .. } if hook::is_hook(pointer) => Some(Feature::ReadHook),
         _ => None,
+    }
+}
+
+/// Whether a recorded entry comes out in a plan for `want`: an old snippet
+/// file always (Requirement 5.1), the server entry when its feature is no
+/// longer wanted, and the hook unless it is wanted and its command can be
+/// written (`hook_ok`; Requirement 2.3). Other targets are not mmhmem's.
+fn comes_out(target: &Target, want: &Selection, hook_ok: bool) -> bool {
+    match (target, feature_of(target)) {
+        (Target::File { file }, _) => check::is_snippet(file),
+        (_, Some(Feature::ReadHook)) => !hook_ok,
+        (_, Some(feature)) => !want.wants(ID, feature),
+        (_, None) => false,
     }
 }
 
@@ -306,10 +328,12 @@ impl Agent for Antigravity {
         &FEATURES
     }
 
-    /// The server entry in [`Antigravity::mcp_file`] and the named hook in
-    /// [`Antigravity::hooks_file`]; what the record lists for a feature no
-    /// longer wanted comes back out. A hook command that cannot be written
-    /// leaves only the hook out ([`Agent::feature_problems`]).
+    /// The server entry in [`Antigravity::mcp_file`], the removal of a stale
+    /// entry in [`Antigravity::stale_file`] whatever is selected, and the
+    /// named hook in [`Antigravity::hooks_file`]; recorded entries that come
+    /// out ([`comes_out`]) go first. A hook command that cannot be written
+    /// leaves only the hook out ([`Agent::feature_problems`]) and takes a
+    /// recorded hook out.
     fn plan(
         &self,
         env: &Env,
@@ -317,19 +341,23 @@ impl Agent for Antigravity {
         rec: Option<&AgentRecord>,
     ) -> Result<Vec<Change>, AgentProblem> {
         let mut chain = FileChain::new();
+        let hook = want
+            .wants(ID, Feature::ReadHook)
+            .then(|| self.hook_entry(env.os()));
+        let hook_ok = matches!(hook, Some(Ok(_)));
         for entry in rec.map(|r| r.managed.as_slice()).unwrap_or_default() {
-            if feature_of(&entry.target).is_some_and(|f| !want.wants(ID, f)) {
+            if comes_out(&entry.target, want, hook_ok) {
                 self.remove_entry(&mut chain, entry)?;
             }
         }
         if want.wants(ID, Feature::Mcp) {
             self.mcp_change(&mut chain, env, rec)?;
         }
-        if want.wants(ID, Feature::ReadHook) {
-            match self.hook_entry(env.os()) {
-                Ok(value) => Self::hook_change(&mut chain, env, rec, &value)?,
-                Err(problem) => tracing::warn!("{problem}"),
-            }
+        self.stale_change(&mut chain, env);
+        match hook {
+            Some(Ok(value)) => Self::hook_change(&mut chain, env, rec, &value)?,
+            Some(Err(problem)) => tracing::warn!("{problem}"),
+            None => {}
         }
         Ok(chain.into_changes())
     }
@@ -350,24 +378,22 @@ impl Agent for Antigravity {
         Steps::start(env, AgentId::Antigravity, registration).finish(rec)
     }
 
-    /// Takes mmhmem's keys out of the server entry, mmhmem's named hook and
-    /// an old snippet file out; everything else in Antigravity's files stays
-    /// as it was.
-    fn plan_remove(&self, _env: &Env, rec: &AgentRecord) -> Vec<Change> {
+    /// Takes mmhmem's keys out of the server entry, mmhmem's named hook, an
+    /// old snippet file and a stale entry out; everything else in
+    /// Antigravity's files stays as it was.
+    fn plan_remove(&self, env: &Env, rec: &AgentRecord) -> Vec<Change> {
         let mut chain = FileChain::new();
         for entry in &rec.managed {
             let _ = self.remove_entry(&mut chain, entry);
         }
+        self.stale_change(&mut chain, env);
         chain.into_changes()
     }
 
-    /// The user imports [`Antigravity::snippet`] themselves (until task 4.1).
-    fn pending_steps(&self, want: &Selection) -> Vec<PendingUserStep> {
-        if want.wants(AgentId::Antigravity, Feature::Mcp) {
-            vec![Self::pending_step()]
-        } else {
-            Vec::new()
-        }
+    /// None: a new Antigravity session is the generic next step, and the
+    /// snippet-era import step is not emitted again (Requirement 5.4).
+    fn pending_steps(&self, _want: &Selection) -> Vec<PendingUserStep> {
+        Vec::new()
     }
 }
 
@@ -389,3 +415,7 @@ mod tests;
 #[cfg(test)]
 #[path = "antigravity_hook_tests.rs"]
 mod hook_tests;
+
+#[cfg(test)]
+#[path = "antigravity_check_tests.rs"]
+mod check_tests;

@@ -57,7 +57,7 @@ CI-verified install counts as done.
   - _Depends: 2.1_
   - _Requirements: 2.1, 2.5_
 
-- [ ] 3.4 Migration from the snippet-era install and stale-location cleanup
+- [x] 3.4 Migration from the snippet-era install and stale-location cleanup
   - When the record manages the old snippet file next to the binary, plan its removal; stop emitting the import step and drop it from records on save while still reading old records.
   - When the no-longer-read Antigravity data-folder server file holds a mmhmem entry whose command is the mmhmem program, plan the removal of only that entry with the one-line explanation; ignore a missing, unreadable or foreign entry.
   - Done when tests show: a snippet-era record yields the two new entries plus the snippet removal; an old record with the import step saves without it; a stale file with a mmhmem entry yields exactly one removal change and other servers in it are untouched; a stale file whose `mmhmem` entry points elsewhere yields nothing.
@@ -120,3 +120,4 @@ CI-verified install counts as done.
 - 2026-11-09 (task 3.3 review): when ReadHook is wanted, a hook is recorded and the new command cannot be written, plan removal of the recorded hook (a hook pointing at a gone binary blocks every Antigravity tool). Owner: task 3.4. Task 3.5: run the hook sample only when a hook entry is recorded.
 - 2026-11-09 (task 3.3 review): 8.3 short forms contain `~` (e.g. `C:\Users\JOHNSM~1\...`); Antigravity expands `~` in the first token and the rule is unverified beyond a leading `~/`. Task 5.3 must include a live check with an 8.3 path as the first token, or document that the owner's path has no spaces and the case stays unverified.
 - 2026-11-09 (task 3.3): the Windows 8.3 short form is taken only for the existing prefix up to the last path component with whitespace; the tail keeps its long names, so the hook command is identical before and after the binary is copied. Intermittent, unrelated: `codex::tests::install_applies_with_no_drift_and_a_replan_has_zero_changes` failed once under parallel nextest and passed 3/3 on rerun.
+- 2026-11-10 (task 3.4): approved in round 3. The stale-location cleanup runs in every plan whatever is selected and on removal (Req 5.2). Lesson: a reviewer stopped mid-mutation (restart) left a re-gated file in the tree; after any interrupted review, diff the files against the implementer's description before trusting a green run, and `touch` restored files so cargo rebuilds. `record_tests.rs` is at 489/500 lines; `#[deprecated]` on the legacy pending step waits for 4.1.

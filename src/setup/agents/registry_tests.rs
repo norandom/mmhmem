@@ -47,10 +47,6 @@ fn pending_steps_are_collected_per_selected_agent() {
                 vec![PendingUserStep::RestartClaudeDesktop]
             ),
             (AgentId::Codex, vec![PendingUserStep::ApproveHookInCodex]),
-            (
-                AgentId::Antigravity,
-                vec![PendingUserStep::ImportAntigravitySnippet]
-            ),
         ]
     );
     let codex_mcp = Selection::new().with(AgentId::Codex, &[Feature::Mcp]);

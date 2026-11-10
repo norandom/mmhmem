@@ -405,15 +405,12 @@ fn an_old_snippet_record_is_still_removed() {
     assert_eq!(removes[0].action, Action::Remove);
     assert_eq!(removes[0].after, None);
 
-    // An install over the old record plans the server entry, not the snippet.
+    // An install over the old record plans the server entry and takes the
+    // snippet out (task 3.4; more in `antigravity_check_tests.rs`).
     let changes = agent.plan(&home.env, &want_mcp(), Some(&rec)).unwrap();
-    assert!(changes.iter().all(|c| c.file != file));
+    let removed = |c: &Change| c.file == file && c.action == Action::Remove;
+    assert_eq!(changes.iter().filter(|c| removed(c)).count(), 1);
     assert!(changes.iter().any(|c| c.file == server_file(&home)));
-
-    assert_eq!(
-        Antigravity::pending_step(),
-        PendingUserStep::ImportAntigravitySnippet
-    );
     assert!(Antigravity::removal_instruction().contains("Antigravity"));
 }
 

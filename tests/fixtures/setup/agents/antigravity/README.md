@@ -19,6 +19,9 @@ Captured 2026-11-09 on Windows 11 from `agy.exe` 1.5.3
 - `hooks-other-hooks.json`: hand-written golden input for the read-hook plan
   tests (two other named hooks in `~/.gemini/config/hooks.json`, comments,
   tabs, odd formatting; not a capture).
+- `stale-mcp_config.json`: hand-written in the shape of the owner's
+  `~/.gemini/antigravity/mcp_config.json` (the pasted snippet-era mmhmem
+  entry between two other servers) for the stale-location cleanup tests.
 
 The CLI and the IDE read the same global file. The older
 `~/.gemini/antigravity/mcp_config.json` is not read (a mmhmem entry there is

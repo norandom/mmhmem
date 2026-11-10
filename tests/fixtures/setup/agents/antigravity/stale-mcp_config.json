@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "files": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/work"]},
+    "mmhmem": {
+      "command": "C:\\Users\\<user>\\AppData\\Local\\Programs\\mmhmem\\mmhmem.exe",
+      "args": [
+        "stdio"
+      ]
+    },
+    "notes": {"command": "uvx", "args": ["notes-mcp"], "disabled": true}
+  }
+}

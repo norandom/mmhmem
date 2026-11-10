@@ -144,8 +144,27 @@ pub enum PendingUserStep {
     ApproveHookInCodex,
     /// Restart Claude Desktop.
     RestartClaudeDesktop,
-    /// Paste the import snippet into Antigravity.
+    /// Paste the import snippet into Antigravity. Legacy: the snippet-era
+    /// integration before antigravity-native-setup; read from old records
+    /// only (see [`PendingUserStep::is_legacy`]).
     ImportAntigravitySnippet,
+}
+
+impl PendingUserStep {
+    /// Whether the step is from an earlier integration: it still loads from
+    /// old records, is never emitted again and is dropped when the record is
+    /// saved (antigravity-native-setup Requirement 5.4).
+    pub fn is_legacy(self) -> bool {
+        matches!(self, Self::ImportAntigravitySnippet)
+    }
+}
+
+/// Serializes the pending steps without the legacy ones.
+fn current_steps<S: serde::Serializer>(
+    steps: &[PendingUserStep],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(steps.iter().filter(|step| !step.is_legacy()))
 }
 
 /// Everything recorded for one agent.
@@ -157,8 +176,8 @@ pub struct AgentRecord {
     /// Files and entries mmhmem manages for this agent.
     #[serde(default)]
     pub managed: Vec<ManagedEntry>,
-    /// Steps only the user can do.
-    #[serde(default)]
+    /// Steps only the user can do; legacy steps are never saved.
+    #[serde(default, serialize_with = "current_steps")]
     pub pending_user_steps: Vec<PendingUserStep>,
     /// The last functional check.
     #[serde(default)]

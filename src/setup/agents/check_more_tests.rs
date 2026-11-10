@@ -198,7 +198,7 @@ fn a_server_that_fails_skips_the_agent_steps() {
 }
 
 #[test]
-fn desktop_and_antigravity_pass_with_their_user_steps_pending() {
+fn desktop_passes_with_its_user_step_pending_and_antigravity_with_none() {
     let mut fx = fx();
     let config = fx.home.home().join(".config").join("Claude");
     std::fs::create_dir_all(&config).unwrap();
@@ -222,8 +222,9 @@ fn desktop_and_antigravity_pass_with_their_user_steps_pending() {
     );
     let gravity = antigravity::Antigravity::new(&fx.bin);
     let report = fx.check(&gravity, &want(AgentId::Antigravity, &[Feature::Mcp]));
-    assert_eq!(report.result, CheckResult::UserStepsPending);
-    assert!(report.pending[0].starts_with("● Antigravity — add mmhmem in Antigravity"));
+    // No import step any more (antigravity-native-setup Requirement 5.4).
+    assert_eq!(report.result, CheckResult::Pass, "{}", report.line);
+    assert!(report.pending.is_empty(), "{:?}", report.pending);
     let seen = fx.home.probe.seen();
     assert_eq!(seen.len(), 2);
     assert!(
