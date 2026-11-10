@@ -378,7 +378,7 @@ try {
             last_check=[ordered]@{at='2026-11-10T10:00:00Z';result='pass';details=$details}}
         ([ordered]@{schema=1;agents=[ordered]@{antigravity=$agent}} | ConvertTo-Json -Depth 10) | ConvertFrom-Json
     }
-    $connected=[string][char]0x2714+' Antigravity '+[char]0x2014+' mmhmem connected, 11 tools'
+    $connected=[string][char]0x2714+' Antigravity '+[char]0x2014+' mmhmem connected, 10 tools'
     $agOutput="$connected`n`nDone. Next steps:`nAntigravity: start a new session.`n"
     Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() '') $program $agOutput) 0 'a complete Antigravity install passes'
     Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() 'agent_command') $program $agOutput) 1 'agy not listing mmhmem fails' 'agent_command'

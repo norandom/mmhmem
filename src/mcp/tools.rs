@@ -9,7 +9,7 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 use super::params::{
     BoilerplateParams, BreadcrumbSearchParams, MemGetParams, MemRecordParams, MemSearchParams,
-    PruneParams, ResumeParams, SmartReadParams, StatusParams, WarmupParams,
+    PruneParams, ResumeParams, SmartReadParams, StatusParams,
 };
 use super::server::McpServer;
 
@@ -40,7 +40,6 @@ use crate::services::memory::{RecordRequest, SearchRequest};
 use crate::services::prune::render_report as render_prune;
 use crate::services::session_bus::ClientUsage;
 use crate::services::shunt_types::{CallCtx, ReadRequest as ShuntReadRequest};
-use crate::services::warmup::{render_report as render_warmup, run_warmup};
 
 use super::tool_support::{err, ok_text, render_read, with_span};
 
@@ -281,48 +280,6 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Warm selected corpus files only when prebuilding summaries is intended; for ordinary inspection use smart_read. Processes at most 25 paths per batch through cached/worker summary reads, potentially updating cache and stats. Threshold/security files are skipped; missing, denied and failed paths are counted. Requires worker access for uncached summaries; does not guarantee measured frontier savings.",
-        annotations(
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = false,
-            open_world_hint = true
-        )
-    )]
-    async fn shunt_warmup(
-        &self,
-        Parameters(p): Parameters<WarmupParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let state = self.state.clone();
-        with_span(
-            &state,
-            "shunt_warmup",
-            &p.agent_harness,
-            &p.project,
-            || async {
-                let ctx = CallCtx {
-                    project: &p.project,
-                    harness: &p.agent_harness,
-                    task: None,
-                };
-                match run_warmup(
-                    &state.services.shunt,
-                    &state.audit,
-                    &p.paths,
-                    &p.question,
-                    ctx,
-                )
-                .await
-                {
-                    Ok(report) => ok_text(render_warmup(&report)),
-                    Err(e) => Err(err(e)),
-                }
-            },
-        )
-        .await
-    }
-
-    #[tool(
         description = "Remove stale cache rows whose files are missing or content hashes changed, only when cache cleanup is intended. Use dry_run to preview grouped counts; fresh rows remain. Deletes cache entries, not source files or durable observations; use smart_read for inspection.",
         annotations(
             read_only_hint = false,
@@ -478,9 +435,9 @@ impl McpServer {
         if self.state.worker_configured {
             String::new()
         } else {
-            "\n\nNo worker model configured — smart_read shunting and \
-             shunt_warmup stay off. Set worker_model in .mmhmem.json \
-             (or the WORKER_MODEL variable) to enable them."
+            "\n\nNo worker model configured — smart_read shunting stays \
+             off. Set worker_model in .mmhmem.json (or the WORKER_MODEL \
+             variable) to enable it."
                 .to_string()
         }
     }

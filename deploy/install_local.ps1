@@ -152,7 +152,7 @@ if ($ProjectDir -and -not (Test-Path -LiteralPath $ProjectDir -PathType Containe
 
 # --- worker settings (.mmhmem.json; corpus-warmup-prune Req 7.6) ----------------
 # worker_model is the activation switch: without it the worker stays off and
-# shunting/warmup is disabled; the URL defaults to local Ollama, so an Ollama
+# shunting is disabled; the URL defaults to local Ollama, so an Ollama
 # user only needs the model name here. Settings are stored in .mmhmem.json -
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
@@ -678,22 +678,12 @@ if ($Remove) {
     Info ("harnesses: " + ($Registered -join ' '))
     Info "binary: $Bin"
     if ($WorkerModel) {
-        Info "worker model: $WorkerModel (shunting and warmup active; stored in $WorkerConfigFile)"
+        Info "worker model: $WorkerModel (summaries active; stored in $WorkerConfigFile)"
     } else {
-        Info "worker settings unchanged; summaries and warmup require worker_model in $WorkerConfigFile or WORKER_MODEL in the environment"
+        Info "worker settings unchanged; summaries require worker_model in $WorkerConfigFile or WORKER_MODEL in the environment"
     }
     Info "store: per-user default (%APPDATA%\mmhmem); created on first use"
     Info "check your savings any time: $Bin stats"
 }
 if ($DryRun) { Info 'dry run - nothing was written; re-run without -DryRun to apply' }
 if ($HookProblem) { exit 1 }
-if (-not $Remove -and $Interactive) {
-    Write-Host "`n  Optional: explore and prebuild your project cache"
-    $warmup = Read-Host '  Show the prompt to run in your agent? [y/N]'
-    if ($warmup -match '^(?i)y(es)?$') {
-        Write-Host "  Open the project in your agent.`n  Restart its mmhmem connection to load new settings."
-        Write-Host "  A reachable worker model is required.`n  Remote providers may charge for summaries."
-        Write-Host "`n  Paste this prompt into your agent:`n"
-        Write-Host "  Explore this repository and identify its key source files.`n  Use mmhmem shunt_warmup to prebuild their summary cache`n  in batches of up to 25 files.`n  Report what was cached or skipped."
-    }
-}

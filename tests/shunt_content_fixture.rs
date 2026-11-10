@@ -30,8 +30,7 @@ const STUB_SUMMARY: &str = "- exports [L1-L160]";
 const FIXTURE_REL: &str = "tests/fixtures/shunt_content_wire_results.json";
 /// Lines of the benign corpus the fixture was recorded with (no secret
 /// pattern matches). The fixture pins its bytes, so the rig runs with the
-/// threshold at exactly this size instead of the shipped default
-/// (shunt-cache-efficiency task 4 raised it above the corpus).
+/// threshold at exactly this size, independent of the shipped default.
 const CORPUS_LINES: usize = 160;
 const SHORT_LINE: &str = "one short line of output\n";
 const SECRET_PEM: &str =

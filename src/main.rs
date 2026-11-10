@@ -36,8 +36,6 @@ fn main() -> ExitCode {
         Some("prune") => {
             mmhmem::cli::run_prune(std::env::args().nth(2).as_deref() == Some("--dry-run"))
         }
-        // Repository warm-up of the summary cache (shunt-cache-efficiency Req 6).
-        Some("warmup") => run_warmup(),
         // Read-routing pre-tool hook; always exits 0 (read-routing-hooks Req 3).
         Some("hook") => mmhmem::cli::run_hook(std::env::args().nth(2).as_deref()),
         Some("setup") => run_setup(),
@@ -83,20 +81,6 @@ fn run_stats() -> ExitCode {
         Err(arg) => {
             eprintln!("unknown argument: {arg}");
             eprintln!("{}", mmhmem::cli::STATS_USAGE);
-            ExitCode::from(2)
-        }
-    }
-}
-
-/// `warmup [<root>] [--root <dir>] [--dry-run] [--max-files <n>]`; a bad
-/// argument prints the problem and the usage line on stderr and exits 2.
-fn run_warmup() -> ExitCode {
-    let rest: Vec<String> = std::env::args().skip(2).collect();
-    match mmhmem::cli::WarmupArgs::parse(&rest) {
-        Ok(args) => mmhmem::cli::run_warmup(args),
-        Err(problem) => {
-            eprintln!("{problem}");
-            eprintln!("{}", mmhmem::cli::WARMUP_USAGE);
             ExitCode::from(2)
         }
     }

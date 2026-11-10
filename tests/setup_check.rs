@@ -116,8 +116,9 @@ fn real_server_passes_and_lists_exactly_this_releases_tools() {
     );
     assert_eq!(
         check.line(AgentId::Codex),
-        // shunt-content-tool Req 6.1: eleven tools with shunt_content.
-        "✔ Codex — mmhmem connected, 11 tools"
+        // Ten tools: shunt-content-tool Req 6.1 added shunt_content; the
+        // 2026-11-10 restore removed the batch summary tool.
+        "✔ Codex — mmhmem connected, 10 tools"
     );
     // A leading `v` (a release tag) is accepted as well.
     let tagged = check_mcp(

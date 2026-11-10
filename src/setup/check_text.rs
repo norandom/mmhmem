@@ -15,7 +15,7 @@ use crate::setup::record::{CheckStep, PendingUserStep};
 
 const AGAIN: &str = "run the installer again";
 
-/// What the user sees for a check that passed: `mmhmem connected, 11 tools`.
+/// What the user sees for a check that passed: `mmhmem connected, 10 tools`.
 pub(super) fn passed(tools: usize) -> String {
     format!("mmhmem connected, {tools} tools")
 }

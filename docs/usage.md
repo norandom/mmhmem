@@ -34,8 +34,6 @@ mmhmem stats
 mmhmem stats --json
 mmhmem prune --dry-run
 mmhmem prune
-mmhmem warmup --dry-run
-mmhmem warmup
 ```
 
 Statistics are grouped by day, project and agent. Estimated savings and
@@ -45,12 +43,7 @@ cache and the hook work: `hit rate` (cache hits of all summary requests) and
 within 10 minutes); `--json` carries the counts behind them. Pruning removes stale
 cache rows for missing or changed files; preview with `--dry-run` first.
 It never touches the separate, size-bounded content cache behind
-`shunt_content`. Ask your agent to call `shunt_warmup` for key project files, up to 25 per batch,
-to prepare summaries before the first read, or run `mmhmem warmup` in a
-repository (or pass its folder) to summarise every large text file once,
-skipping ignored and security-critical files. `--dry-run` lists the files and
-the worker calls, `--max-files` (default 200) caps a run, and a second run only
-hits the cache.
+`shunt_content`.
 
 After a context clear, `/mmhmem-recap` retrieves the latest checkpoint without
 a service restart or worker model. `mmhmem setup` installs recap guidance for
@@ -80,7 +73,6 @@ there is no store migration or new service configuration.
 | `mem_search` | Search the compact memory index |
 | `mem_get_observations` | Fetch selected observation details |
 | `mem_record_observation` | Store a project observation |
-| `shunt_warmup` | Prepare summaries in a batch |
 | `shunt_prune` | Remove stale cache entries |
 | `mem_search_breadcrumbs` | Search project action history |
 | `status` | Report version and store health (used by the installer's check) |

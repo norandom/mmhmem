@@ -366,7 +366,7 @@ fn a_clean_install_writes_both_entries_passes_the_check_and_records_both() {
     // The check read them back, `agy mcp list` named mmhmem and the hook
     // answered the sample read (Requirements 4.1–4.3).
     assert!(
-        output.contains("✔ Antigravity — mmhmem connected, 11 tools"),
+        output.contains("✔ Antigravity — mmhmem connected, 10 tools"),
         "{output}"
     );
     assert!(output.contains("Antigravity: start a new session."));
@@ -472,7 +472,7 @@ fn assert_files_forward(
     ] {
         assert!(output.contains(change), "{name}: {change}: {output}");
     }
-    assert!(output.contains("✔ Antigravity — mmhmem connected, 11 tools"));
+    assert!(output.contains("✔ Antigravity — mmhmem connected, 10 tools"));
     assert!(output.contains("Antigravity: start a new session."));
     let servers = jsonc(&home.read(SERVER_FILE));
     let entry = &servers["mcpServers"]["mmhmem"];

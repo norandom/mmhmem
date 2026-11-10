@@ -117,17 +117,6 @@ pub fn decide(req: &ReadRequest, settings: &HookSettings, project: &Path) -> Dec
     }
 }
 
-/// Line count of a text file, counted only up to `threshold` (the capped
-/// scan [`decide`] uses, so "at least `threshold`" reads as `threshold`);
-/// `None` when the file is not text. `mmhmem warmup` selects its candidates
-/// with it (shunt-cache-efficiency Req 6.1).
-pub fn text_lines_capped(path: &Path, threshold: u64) -> std::io::Result<Option<u64>> {
-    Ok(match scan(path, threshold)? {
-        Scan::NotText => None,
-        Scan::Lines(n) => Some(n),
-    })
-}
-
 /// Outcome of one streaming pass over a file.
 enum Scan {
     NotText,

@@ -174,7 +174,7 @@ fn write_lines_file(path: &Path, lines: usize, marker: &str) {
 }
 
 #[tokio::test]
-async fn stdio_handshake_lists_all_eleven_tools() {
+async fn stdio_handshake_lists_all_ten_tools() {
     let data = tempfile::tempdir().unwrap();
     let mut mcp = StdioMcp::new(data.path()).await;
     mcp.handshake().await;
@@ -194,7 +194,6 @@ async fn stdio_handshake_lists_all_eleven_tools() {
         "mem_search",
         "mem_get_observations",
         "mem_record_observation",
-        "shunt_warmup",
         "shunt_prune",
         "mem_search_breadcrumbs",
         "status",
@@ -207,8 +206,8 @@ async fn stdio_handshake_lists_all_eleven_tools() {
     }
     assert_eq!(
         names.len(),
-        11,
-        "exactly eleven tools (shunt-content-tool Req 1.1 adds shunt_content; corpus-warmup-prune Req 5.3, reliable-installers Req 6.1)"
+        10,
+        "exactly ten tools (shunt-content-tool Req 1.1 adds shunt_content; reliable-installers Req 6.1 adds status; the 2026-11-10 restore removed the batch summary tool)"
     );
 
     let (ok, _stderr) = mcp.shutdown().await;
@@ -298,7 +297,7 @@ async fn stdio_survives_malformed_input_lines() {
         "valid request after garbage must be answered: {list}"
     );
     let names = list["result"]["tools"].as_array().unwrap().len();
-    assert_eq!(names, 11, "all eleven tools still listed after garbage");
+    assert_eq!(names, 10, "all ten tools still listed after garbage");
 
     let (ok, _stderr) = mcp.shutdown().await;
     assert!(ok);

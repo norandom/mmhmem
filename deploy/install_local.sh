@@ -241,7 +241,7 @@ fi
 
 # --- worker settings (.mmhmem.json; corpus-warmup-prune Req 7.6) ------------
 # worker_model is the activation switch: without it the worker stays off and
-# shunting/warmup is disabled; the URL defaults to local Ollama, so an Ollama
+# shunting is disabled; the URL defaults to local Ollama, so an Ollama
 # user only needs the model name here. Settings are stored in .mmhmem.json -
 # the global one for user scope, the project one for project scope - and the
 # binary reads them at startup; the harness registrations carry no worker env.
@@ -918,12 +918,12 @@ else
   info "binary: $BIN"
   if [ -n "$WORKER_MODEL" ]; then
     if [ "$WORKER_CONFIG_WRITTEN" -eq 1 ]; then
-      info "worker model: $WORKER_MODEL (shunting and warmup active; stored in $WORKER_CONFIG_FILE)"
+      info "worker model: $WORKER_MODEL (summaries active; stored in $WORKER_CONFIG_FILE)"
     else
       info "worker model: $WORKER_MODEL (store it in $WORKER_CONFIG_FILE by hand — the automatic merge failed as printed above)"
     fi
   else
-    info "worker settings unchanged; summaries and warmup require worker_model in $WORKER_CONFIG_FILE or WORKER_MODEL in the environment"
+    info "worker settings unchanged; summaries require worker_model in $WORKER_CONFIG_FILE or WORKER_MODEL in the environment"
   fi
   info "store: per-user default (~/.local/share/mmhmem or ~/Library/Application Support/mmhmem); created on first use"
   info "check your savings any time: $BIN stats"
@@ -932,18 +932,3 @@ if [ "$DRY_RUN" -eq 1 ]; then
   info "dry run — nothing was written; re-run without --dry-run to apply"
 fi
 [ "$HOOK_PROBLEM" -eq 0 ] || exit 1
-if [ "$REMOVE" -eq 0 ] && [ -t 0 ]; then
-  printf '\n  Optional: explore and prebuild your project cache\n'
-  printf '  Show the prompt to run in your agent? [y/N]: '
-  read -r warmup || die 'no answer given'
-  case "$warmup" in
-    y|Y|yes|YES)
-      printf '  Open the project in your agent.\n  Restart its mmhmem connection to load new settings.\n'
-      printf '  A reachable worker model is required.\n  Remote providers may charge for summaries.\n'
-      printf '\n  Paste this prompt into your agent:\n\n'
-      printf '  Explore this repository and identify its key source files.\n'
-      printf '  Use mmhmem shunt_warmup to prebuild their summary cache\n'
-      printf '  in batches of up to 25 files.\n  Report what was cached or skipped.\n'
-      ;;
-  esac
-fi

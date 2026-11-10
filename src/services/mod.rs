@@ -20,5 +20,4 @@ pub mod shunt_types;
 pub mod stats;
 pub mod status;
 pub mod update_check;
-pub mod warmup;
 pub mod worker;

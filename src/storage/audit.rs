@@ -99,7 +99,6 @@ pub enum AuditEventType {
     WorkerError,
     AuthFailure,
     Error,
-    Warmup,
     Prune,
     MemSearchBreadcrumbs,
     HookRedirect,
@@ -111,7 +110,7 @@ pub enum AuditEventType {
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 23] = [
+    pub const ALL: [AuditEventType; 22] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -127,7 +126,6 @@ impl AuditEventType {
         AuditEventType::WorkerError,
         AuditEventType::AuthFailure,
         AuditEventType::Error,
-        AuditEventType::Warmup,
         AuditEventType::Prune,
         AuditEventType::MemSearchBreadcrumbs,
         AuditEventType::HookRedirect,
@@ -139,7 +137,7 @@ impl AuditEventType {
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 23] = [
+        const NAMES: [&str; 22] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -155,7 +153,6 @@ impl AuditEventType {
             "WORKER_ERROR",
             "AUTH_FAILURE",
             "ERROR",
-            "WARMUP",
             "PRUNE",
             "MEM_SEARCH_BREADCRUMBS",
             "HOOK_REDIRECT",
@@ -374,8 +371,9 @@ mod tests {
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookRedirect));
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookPass));
         // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3);
-        // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2).
-        assert_eq!(AuditEventType::ALL.len(), 23);
+        // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2); the
+        // 2026-11-10 restore removed the batch summary event.
+        assert_eq!(AuditEventType::ALL.len(), 22);
         assert_eq!(AuditEventType::CacheMigrated.as_str(), "CACHE_MIGRATED");
         assert_eq!(AuditEventType::StatusCheck.as_str(), "STATUS_CHECK");
     }

@@ -233,14 +233,15 @@ fn real_configs_and_the_real_server_pass_with_codex_approval_pending() {
     };
     let verdicts = checker.run(&selection(), &mut applied, &mut record);
     let lines = verdicts.lines();
-    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
+    // Ten tools: shunt-content-tool Req 6.1 added shunt_content; the
+    // 2026-11-10 restore removed the batch summary tool.
     assert_eq!(
         lines,
         [
-            "✔ Claude Code — mmhmem connected, 11 tools",
-            "✔ Codex — mmhmem connected, 11 tools",
+            "✔ Claude Code — mmhmem connected, 10 tools",
+            "✔ Codex — mmhmem connected, 10 tools",
             "● Codex — approve the mmhmem hook if you have not yet: open Codex, type /hooks, approve \"mmhmem read routing\"",
-            "✔ OpenCode — mmhmem connected, 11 tools",
+            "✔ OpenCode — mmhmem connected, 10 tools",
         ],
         "{verdicts:#?}"
     );
@@ -400,7 +401,7 @@ fn antigravity_passes_from_its_own_files_with_agy_listing_mmhmem() {
     let verdict = verdicts.agent(AgentId::Antigravity).unwrap();
     assert_eq!(
         verdict.lines(),
-        ["✔ Antigravity — mmhmem connected, 11 tools"],
+        ["✔ Antigravity — mmhmem connected, 10 tools"],
         "{verdicts:#?}"
     );
     assert_eq!(verdict.rollback, Rollback::NotNeeded);
@@ -443,7 +444,7 @@ fn antigravity_without_agy_skips_the_listing_and_says_why() {
     assert_eq!(
         verdict.lines(),
         [
-            "✔ Antigravity — mmhmem connected, 11 tools",
+            "✔ Antigravity — mmhmem connected, 10 tools",
             "● Antigravity — Antigravity CLI not found; checked the config file only",
         ],
         "{verdicts:#?}"

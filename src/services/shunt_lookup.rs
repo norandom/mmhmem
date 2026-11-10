@@ -226,7 +226,6 @@ impl ShuntEngine {
             summary,
             latency_ms,
             avoided_input_tokens_est: est,
-            usage,
             note: target.choice.note(),
         })
     }

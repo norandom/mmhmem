@@ -1,9 +1,10 @@
 pub fn assert_metadata(tools: &serde_json::Value) {
     let tools = tools.as_array().expect("tools array");
-    // shunt-content-tool Req 1.1/6.1: the content-based tool makes the
+    // shunt-content-tool Req 1.1/6.1: the content-based tool made the
     // count eleven (the spec's "nine → ten" wording predates the status
-    // tool, reliable-installers Req 6.1, which made it ten).
-    assert_eq!(tools.len(), 11);
+    // tool, reliable-installers Req 6.1); the 2026-11-10 restore removed
+    // the batch summary tool, leaving ten.
+    assert_eq!(tools.len(), 10);
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
         if name == "status" {
@@ -15,7 +16,6 @@ pub fn assert_metadata(tools: &serde_json::Value) {
             "session_resume_or_handoff"
                 | "smart_read"
                 | "boilerplate_write"
-                | "shunt_warmup"
                 | "shunt_prune"
                 | "shunt_content"
         );

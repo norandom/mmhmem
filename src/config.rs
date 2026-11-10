@@ -73,9 +73,12 @@ pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8443;
 /// Default MCP Streamable HTTP path (Req 1.1).
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
-/// Default shunt threshold in lines (Req 3.9; 300 since shunt-cache-efficiency
-/// Req 4.1, where summaries pay off).
-pub const DEFAULT_SHUNT_MIN_LINES: u32 = 300;
+/// Default shunt threshold in lines (Req 3.9). Back to 150 on 2026-11-10,
+/// the day a move to 300 was reverted: the concept's research (the
+/// ThakiCloud replay cited in `docs/concept.md`) puts the median file read
+/// at 158 lines, and worker tokens cost far less than the frontier tokens a
+/// summary avoids.
+pub const DEFAULT_SHUNT_MIN_LINES: u32 = 150;
 /// Default content cache cap in rows (shunt-content-tool Req 4.3).
 pub const DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS: u32 = 5000;
 /// Default store busy-lock wait (Req 6.2: 5 seconds).

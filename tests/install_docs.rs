@@ -318,12 +318,13 @@ fn antigravity_guidance_says_setup_configures_it_and_only_a_new_session_is_left(
     assert!(entry["command"].is_string(), "{example}");
 }
 
-/// shunt-cache-efficiency task 4 (Req 4.1, 4.2): the default threshold is
-/// 300 lines, and every place that states it says the same number.
+/// shunt-cache-efficiency task 4 (Req 4.1, 4.2), restored 2026-11-10: the
+/// default threshold is 150 lines, and every place that states it says the
+/// same number.
 #[test]
-fn the_documented_shunt_threshold_is_the_default_of_300_lines() {
+fn the_documented_shunt_threshold_is_the_default_of_150_lines() {
     let default = mmhmem::config::DEFAULT_SHUNT_MIN_LINES;
-    assert_eq!(default, 300);
+    assert_eq!(default, 150);
     let row = format!("| `SHUNT_MIN_LINES` | `{default}` |");
     for doc in ["docs/configuration.md", "docs/server.md"] {
         assert!(read(doc).contains(&row), "{doc} states {row}");

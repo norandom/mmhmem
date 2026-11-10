@@ -154,21 +154,6 @@ pub struct MemRecordParams {
     pub files: Option<String>,
 }
 
-/// `shunt_warmup` arguments (corpus-warmup-prune Req 1.1).
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct WarmupParams {
-    /// Project name.
-    pub project: String,
-    /// Calling harness.
-    pub agent_harness: String,
-    /// Key files to summarize (max 25 per batch, Req 1.6).
-    pub paths: Vec<String>,
-    /// The question summaries answer; defaults to the canonical
-    /// summarization question so warmup rows align with later reads.
-    #[serde(default = "default_question")]
-    pub question: String,
-}
-
 /// `shunt_prune` arguments (corpus-warmup-prune Req 4.1).
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PruneParams {

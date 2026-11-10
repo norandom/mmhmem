@@ -136,3 +136,7 @@
 ## Implementation Notes
 
 - 2026-11-02, task 6.1 fixture repair: static-release musl validation exposed `/tmp/.tmpAMZ0rq/big.rs` matching the existing case-insensitive `pam` security bypass. Non-sensitive warmup fixture roots now use unique numeric directory names, with a regression against the actual predicate. Full canonical GNU tests and independent formatting/review passed; dependent static-release validation must rerun. Production security behavior is unchanged.
+
+## Note 2026-11-10
+
+The `shunt_warmup` tool (Requirement 1) and its playbook line (Requirement 2) were removed by owner decision on 2026-11-10 (see `.kiro/specs/shunt-cache-efficiency/tasks.md`, Implementation Notes): the concept is lazy, and an eager pass over a repository costs minutes of worker time for summaries nobody asked for. `mmhmem prune` and `shunt_prune` (Requirements 3-4) stay.

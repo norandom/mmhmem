@@ -53,7 +53,7 @@ it off, set `MMHMEM_NO_UPDATE_CHECK=1` or add `"update_check": false` to
 | `AGENT_MEM_BUSY_TIMEOUT_MS` | `5000` | Shared-store lock wait in milliseconds |
 | `AGENT_MEM_AUDIT_MAX_BYTES` | `10485760` | Local audit rotation threshold |
 | `AGENT_MEM_AUDIT_ROTATE_KEEP` | `5` | Rotated audit files to retain |
-| `SHUNT_MIN_LINES` | `300` | Minimum file length for worker summarization and for the read hook's redirect (whole files and line ranges) |
+| `SHUNT_MIN_LINES` | `150` | Minimum file length for worker summarization and for the read hook's redirect (whole files and line ranges) |
 | `SHUNT_CONTENT_CACHE_MAX_ROWS` | `5000` | Row cap for the `shunt_content` cache (`.mmhmem.json` key `shunt_content_cache_max_rows`); oldest-hit rows are evicted beyond it |
 | `WORKER_API_URL`, `WORKER_MODEL`, `WORKER_API_KEY` | Unset | Override worker-file settings |
 | `MMHMEM_NO_UPDATE_CHECK` | Unset | `1` turns off the update notice and its release lookup |

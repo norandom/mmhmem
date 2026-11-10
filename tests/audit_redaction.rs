@@ -351,12 +351,13 @@ fn parent_directories_are_created_at_first_write() {
 #[test]
 fn every_event_type_is_unique_screaming_snake_case_and_written_verbatim() {
     let names: Vec<&'static str> = AuditEventType::ALL.iter().map(|e| e.as_str()).collect();
-    // 21: corpus-warmup-prune added the WARMUP (Req 1.8), PRUNE
-    // (Req 3.5), and MEM_SEARCH_BREADCRUMBS (Req 10); read-routing-hooks added HOOK_REDIRECT, HOOK_PASS;
+    // corpus-warmup-prune added PRUNE (Req 3.5) and MEM_SEARCH_BREADCRUMBS
+    // (Req 10); read-routing-hooks added HOOK_REDIRECT, HOOK_PASS;
     // reliable-installers added STATUS_CHECK (Req 6.1);
-    // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3) → 22;
-    // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2) → 23.
-    assert_eq!(names.len(), 23);
+    // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3);
+    // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2); the
+    // 2026-11-10 restore removed the batch summary event → 22.
+    assert_eq!(names.len(), 22);
     let unique: std::collections::BTreeSet<_> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "event type names must be unique");
     for name in &names {

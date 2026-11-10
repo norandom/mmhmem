@@ -19,5 +19,5 @@
     }
   },
   "ready_for_implementation": true,
-  "notes": "Follow-up to read-routing-hooks and corpus-warmup-prune from the 2026-11-10 audit-log analysis (144 summaries, 13 cache hits, 105 distinct question texts; 273 of 404 hook redirects sidestepped by ranged reads). Owner chose the scope from a menu on 2026-11-10: content-only cache key, close the ranged-read escape, cache and redirect visibility, per-project warm-up, threshold raised to 300 lines. Owner approved all phases on 2026-11-10 (\"implement the spec\"); implementation in three batches with controller inline review."
+  "notes": "Follow-up to read-routing-hooks and corpus-warmup-prune from the 2026-11-10 audit-log analysis (144 summaries, 13 cache hits, 105 distinct question texts; 273 of 404 hook redirects sidestepped by ranged reads). Owner chose the scope from a menu on 2026-11-10: content-only cache key, close the ranged-read escape, cache and redirect visibility, per-project warm-up, threshold raised to 300 lines. Owner approved all phases on 2026-11-10; implemented in three batches with controller inline review and released as v0.5.4. Same evening the owner reverted two parts: the warm-up (6.x) is removed and the threshold (4) returns to 150; see tasks.md Implementation Notes."
 }

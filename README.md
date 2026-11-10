@@ -52,7 +52,7 @@ left for you to do:
   read-routing hook in `~/.gemini/config/hooks.json`, the files its CLI and
   IDE read.
 
-The read-routing hook sends reads of 300 lines or more (whole files, or line
+The read-routing hook sends reads of 150 lines or more (whole files, or line
 ranges that large) to `smart_read`. It needs a worker model; without one it stays inactive and setup says so.
 See [worker settings](docs/configuration.md#worker-settings).
 

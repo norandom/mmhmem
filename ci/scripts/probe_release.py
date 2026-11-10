@@ -18,7 +18,7 @@ import time
 from release_support import ProbeWorkspace, TARGET, run, validate_identity
 
 TOOLS = {"session_resume_or_handoff", "smart_read", "boilerplate_write", "mem_search",
-         "mem_get_observations", "mem_record_observation", "shunt_warmup", "shunt_prune",
+         "mem_get_observations", "mem_record_observation", "shunt_prune",
          "mem_search_breadcrumbs"}
 # The probe's public client_usage report; `mmhmem stats --json` must echo it.
 CLIENT_USAGE = {"prompt_tokens": 1234, "completion_tokens": 56, "source": "static-probe"}

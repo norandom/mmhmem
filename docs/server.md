@@ -39,7 +39,7 @@ if either is absent or invalid.
 | `AGENT_MEM_DATA_DIR` | `/var/lib/agent-memory` | Durable state |
 | `AGENT_MEM_LOG_FILE` | `/var/log/agent-memory/audit.jsonl` | Audit output |
 | `WORKER_API_URL`, `WORKER_MODEL`, `WORKER_API_KEY` | Unset | Optional worker endpoint |
-| `SHUNT_MIN_LINES` | `300` | Summarization threshold |
+| `SHUNT_MIN_LINES` | `150` | Summarization threshold |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Unset | Optional Docker-image OTel export |
 
 See [`.env.example`](../.env.example) for the full annotated configuration.

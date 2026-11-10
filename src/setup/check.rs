@@ -47,15 +47,15 @@ pub use registration::{Registration, RegistrationError};
 /// The tools this release offers over MCP (compared with the real server's
 /// `tools/list` in `tests/setup_check.rs`). shunt-content-tool Req 1.1/6.1
 /// adds `shunt_content` (the spec's "nine → ten" wording predates the
-/// status tool, which made the count ten).
-pub const EXPECTED_TOOLS: [&str; 11] = [
+/// status tool, which made the count ten); the 2026-11-10 restore removed
+/// the batch summary tool, leaving ten.
+pub const EXPECTED_TOOLS: [&str; 10] = [
     "session_resume_or_handoff",
     "smart_read",
     "boilerplate_write",
     "mem_search",
     "mem_get_observations",
     "mem_record_observation",
-    "shunt_warmup",
     "shunt_prune",
     "status",
     "mem_search_breadcrumbs",
@@ -265,7 +265,7 @@ impl McpCheck {
             .map(|f| text::what_you_can_do(f, &self.program))
     }
 
-    /// `mmhmem connected, 11 tools`, or `mmhmem did not start: <reason>.
+    /// `mmhmem connected, 10 tools`, or `mmhmem did not start: <reason>.
     /// What you can do: <step>.`
     pub fn summary(&self) -> String {
         match &self.failure {

@@ -148,8 +148,9 @@ fn claude_code_passes_with_user_scope_connected_and_the_installed_program() {
         .on("claude", &["mcp", "get", "mmhmem"], vec![Reply::ok(&get)]);
     let report = fx.check(&agent, &want(AgentId::ClaudeCode, &[Feature::Mcp]));
     assert_eq!(report.result, CheckResult::Pass);
-    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
-    assert_eq!(report.line, "✔ Claude Code — mmhmem connected, 11 tools");
+    // Ten tools: shunt-content-tool Req 6.1 added shunt_content; the
+    // 2026-11-10 restore removed the batch summary tool.
+    assert_eq!(report.line, "✔ Claude Code — mmhmem connected, 10 tools");
     assert!(report.pending.is_empty());
     assert_eq!(outcome(&report, CheckStep::AgentCommand), StepOutcome::Pass);
     assert_eq!(outcome(&report, CheckStep::ConfigLoad), StepOutcome::Pass);
@@ -312,8 +313,9 @@ fn codex_passes_and_its_env_values_never_appear() {
     codex_lists(&fx, Reply::ok(&codex_list(&fx, |_| {})));
     let report = fx.check(&agent, &want(AgentId::Codex, &[Feature::Mcp]));
     assert_eq!(report.result, CheckResult::Pass);
-    // shunt-content-tool Req 6.1: eleven tools with shunt_content.
-    assert_eq!(report.line, "✔ Codex — mmhmem connected, 11 tools");
+    // Ten tools: shunt-content-tool Req 6.1 added shunt_content; the
+    // 2026-11-10 restore removed the batch summary tool.
+    assert_eq!(report.line, "✔ Codex — mmhmem connected, 10 tools");
     assert_eq!(outcome(&report, CheckStep::ConfigLoad), StepOutcome::Pass);
     let disabled = codex_list(&fx, |l| l[0]["enabled"] = json!(false));
     let other = codex_list(&fx, |l| l[0]["transport"]["args"] = json!(["serve"]));
@@ -368,7 +370,7 @@ fn codex_hook_passes_with_its_approval_pending_and_a_wrong_answer_fails() {
     assert_eq!(
         report.lines(),
         [
-            "✔ Codex — mmhmem connected, 11 tools",
+            "✔ Codex — mmhmem connected, 10 tools",
             "● Codex — approve the mmhmem hook if you have not yet: open Codex, type /hooks, approve \"mmhmem read routing\"",
         ]
     );

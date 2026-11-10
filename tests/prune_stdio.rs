@@ -1,78 +1,48 @@
-//! Warmup + prune tool integration through a real stdio child
-//! (corpus-warmup-prune tasks 6.1/6.2; Req 1.2-1.8, 3.1-3.6, 4.1-4.3).
-//! The worker is an in-test HTTP stub (the tests/shunt.rs pattern): a real
-//! delegation must produce real cache rows, real stats rows, and honest
-//! worker token totals.
+//! Prune and breadcrumb-search tool integration through a real stdio child
+//! (corpus-warmup-prune tasks 6.2/10.3; Req 3.1-3.6, 4.1-4.3, 10.1-10.5;
+//! shunt-content-tool Req 4.4). No worker: pruning and breadcrumb search
+//! never call one.
 
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 
-use mmhmem::config::{Config, DEFAULT_SHUNT_MIN_LINES, ENV_ALLOWED_ROOTS, ENV_TOKEN};
-use mmhmem::services::shunt::ShuntEngine;
 use mmhmem::services::shunt_cache::{
     ContentCacheRow, SummaryRow, content_cache_lookup, content_cache_store_and_evict,
-    query_fingerprint, summary_lookup, summary_store_and_evict,
+    summary_lookup, summary_store_and_evict,
 };
-use mmhmem::storage::audit::AuditWriter;
 use mmhmem::storage::audit::sha256_hex;
 use mmhmem::storage::db::Db;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// A canned chat-completions response with real usage numbers.
-const SUMMARY_CHAT: &str = r#"{"choices":[{"message":{"content":"- foo [L1-L9]\n- bar [L10-L20]"}}],"usage":{"prompt_tokens":500,"completion_tokens":30}}"#;
-
-/// The question every warmup call in this file passes explicitly, so the
-/// seeded cache rows can use the same fingerprint.
-const QUESTION: &str = "summarize the warmup corpus";
-/// A file length above the shipped threshold, so warm-up summarises it.
-const BIG: usize = DEFAULT_SHUNT_MIN_LINES as usize + 50;
 
 // ---------- stdio child plumbing (tests/local_stdio.rs pattern) ----------
 
 const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#;
 const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
 
-/// Spawns `mmhmem stdio` with the data dir, optional confinement roots,
-/// and an optional worker.
-fn spawn_cmd(data_dir: &Path, roots: Option<&str>, worker: Option<(&str, &str)>) -> Command {
+/// Spawns `mmhmem stdio` with the data dir, no confinement roots and no
+/// worker.
+fn spawn_cmd(data_dir: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mmhmem"));
     cmd.arg("stdio")
         .env("AGENT_MEM_DATA_DIR", data_dir)
         .env("MMHMEM_NO_UPDATE_CHECK", "1")
         .env_remove("AGENT_MEM_LOG_FILE")
-        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT");
-    match roots {
-        Some(roots) => {
-            cmd.env("AGENT_MEM_ALLOWED_ROOTS", roots);
-        }
-        None => {
-            cmd.env_remove("AGENT_MEM_ALLOWED_ROOTS");
-        }
-    }
-    match worker {
-        Some((url, model)) => {
-            cmd.env("WORKER_API_URL", url).env("WORKER_MODEL", model);
-        }
-        None => {
-            // Blank — not removed: a removed var falls back to the machine's
-            // global .mmhmem.json (worker armed on dev hosts during
-            // dogfooding), which silently turns "worker unconfigured" tests
-            // into configured ones — one test even hit the real worker.
-            // Blank wins over the file lookup and is treated as missing.
-            cmd.env("WORKER_API_URL", "")
-                .env("WORKER_MODEL", "")
-                .env("WORKER_API_KEY", "");
-        }
-    }
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .env_remove("AGENT_MEM_ALLOWED_ROOTS")
+        // Blank — not removed: a removed var falls back to the machine's
+        // global .mmhmem.json (worker armed on dev hosts during
+        // dogfooding), which silently turns "worker unconfigured" tests
+        // into configured ones — one test even hit the real worker.
+        // Blank wins over the file lookup and is treated as missing.
+        .env("WORKER_API_URL", "")
+        .env("WORKER_MODEL", "")
+        .env("WORKER_API_KEY", "");
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -167,104 +137,7 @@ impl StdioMcp {
     }
 }
 
-// ---------- worker stub (tests/shunt.rs pattern) ----------
-
-fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).position(|w| w == needle)
-}
-
-/// Single-shot HTTP stub: serves `response` to up to `max` connections,
-/// counting requests. Returns (url, request_count).
-async fn spawn_stub(response: &'static str, max: usize) -> (String, Arc<AtomicUsize>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let count = Arc::new(AtomicUsize::new(0));
-    let c_count = Arc::clone(&count);
-    tokio::spawn(async move {
-        for _ in 0..max {
-            let (mut sock, _) = match listener.accept().await {
-                Ok(x) => x,
-                Err(_) => break,
-            };
-            c_count.fetch_add(1, Ordering::SeqCst);
-            let mut buf: Vec<u8> = Vec::new();
-            let mut tmp = [0u8; 8192];
-            let header_end = loop {
-                let r = sock.read(&mut tmp).await.unwrap();
-                if r == 0 {
-                    break buf.len();
-                }
-                buf.extend_from_slice(&tmp[..r]);
-                if let Some(pos) = find_subslice(&buf, b"\r\n\r\n") {
-                    break pos + 4;
-                }
-            };
-            let head = String::from_utf8_lossy(&buf[..header_end]).to_lowercase();
-            let need: usize = head
-                .lines()
-                .find_map(|l| l.strip_prefix("content-length:"))
-                .and_then(|v| v.trim().parse().ok())
-                .unwrap_or(0);
-            let mut body = buf[header_end..].to_vec();
-            while body.len() < need {
-                let r = sock.read(&mut tmp).await.unwrap();
-                if r == 0 {
-                    break;
-                }
-                body.extend_from_slice(&tmp[..r]);
-            }
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response}",
-                response.len()
-            );
-            let _ = sock.write_all(resp.as_bytes()).await;
-        }
-    });
-    (format!("http://{addr}/v1/chat/completions"), count)
-}
-
 // ---------- helpers ----------
-
-fn fixture_engine(root: &Path) -> ShuntEngine {
-    let config = Config::from_env(&|key| match key {
-        ENV_TOKEN => Some("fixture".to_string()),
-        ENV_ALLOWED_ROOTS => Some(root.display().to_string()),
-        _ => None,
-    })
-    .expect("fixture config");
-    ShuntEngine::new(
-        Db::open(&root.join("store")).expect("fixture store"),
-        AuditWriter::new(root.join("audit.jsonl")),
-        config,
-        None,
-        None,
-    )
-}
-
-fn warmup_files() -> tempfile::TempDir {
-    // Random alphabetic suffixes can accidentally contain security keywords
-    // (for example `.tmpAM` contains `pam`). Numeric names cannot do that.
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_nanos();
-    let prefix = format!(
-        "{}-{timestamp}-{}-",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-    let files = tempfile::Builder::new()
-        .prefix(&prefix)
-        .rand_bytes(0)
-        .tempdir()
-        .expect("unique numeric fixture directory");
-    assert!(
-        !fixture_engine(files.path()).is_security_critical(&files.path().canonicalize().unwrap()),
-        "the full fixture root must be non-security-sensitive"
-    );
-    files
-}
 
 fn write_lines(dir: &Path, name: &str, lines: usize) -> String {
     let path = dir.join(name);
@@ -297,178 +170,6 @@ async fn seed_file_row(db: &Db, path: &Path, sha: &str, fp: &str, summary: &str)
         .expect("seed file row");
 }
 
-async fn delegated_stats_rows(db: &Db) -> i64 {
-    db.with_conn(|c| {
-        c.query_row(
-            "SELECT COUNT(*) FROM token_stats WHERE kind = 'shunt_delegated'",
-            [],
-            |r| r.get(0),
-        )
-    })
-    .await
-    .expect("count stats rows")
-}
-
-// ---------- 6.1: warmup end to end ----------
-
-#[test]
-fn warmup_fixture_paths_cannot_trigger_security_bypass() {
-    // Req 1.2/1.3: fixture allocation must not randomly turn delegation
-    // and cache-hit checks into security-critical skips.
-    let files = warmup_files();
-    let engine = fixture_engine(files.path());
-    assert!(engine.is_security_critical(Path::new("/tmp/.tmpAMZ0rq/big.rs")));
-    assert!(!engine.is_security_critical(&files.path().canonicalize().unwrap().join("big.rs")));
-    assert!(
-        files
-            .path()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .chars()
-            .all(|character| character.is_ascii_digit() || character == '-')
-    );
-}
-
-#[tokio::test]
-async fn warmup_delegates_for_real_then_serves_cached() {
-    // Req 1.2: a real delegation through the tool lands real cache rows
-    // and real stats rows with honest worker token totals; the repeat
-    // batch is a pure cache hit (Req 1.3).
-    let data = tempfile::tempdir().unwrap();
-    let files = warmup_files();
-    let big = write_lines(files.path(), "big.rs", BIG);
-    let (url, calls) = spawn_stub(SUMMARY_CHAT, 4).await;
-
-    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, Some((&url, "stub-model")))).await;
-    mcp.handshake().await;
-
-    let resp = mcp
-        .call(
-            "shunt_warmup",
-            json!({"project": "p", "agent_harness": "opencode",
-                   "paths": [big], "question": QUESTION}),
-        )
-        .await;
-    let text = StdioMcp::text_of(&resp);
-    assert!(text.contains("1 delegated"), "delegated count: {text}");
-    assert!(
-        text.contains("Worker tokens: 500 prompt + 30 completion"),
-        "honest worker token totals: {text}"
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "one real worker call");
-
-    let db = open_store(data.path());
-    assert_eq!(
-        delegated_stats_rows(&db).await,
-        1,
-        "a real shunt_delegated stats row exists"
-    );
-
-    let resp = mcp
-        .call(
-            "shunt_warmup",
-            json!({"project": "p", "agent_harness": "opencode",
-                   "paths": [big], "question": QUESTION}),
-        )
-        .await;
-    let text = StdioMcp::text_of(&resp);
-    assert!(text.contains("1 cached"), "repeat batch is cached: {text}");
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "cache hit must not call the worker"
-    );
-
-    mcp.shutdown().await;
-}
-
-#[tokio::test]
-async fn warmup_mixed_batch_counts_every_outcome() {
-    // Req 1.4/1.5: cached, below-threshold, security, missing, and denied
-    // files are all counted in one response; nothing aborts.
-    let data = tempfile::tempdir().unwrap();
-    let files = warmup_files();
-    let outside = tempfile::tempdir().unwrap();
-
-    // Seed a cache row for the big file so it comes back "cached" without
-    // a worker (the canonical path is the engine's lookup key).
-    let cached_file = write_lines(files.path(), "cached.rs", BIG);
-    {
-        let db = open_store(data.path());
-        let body = std::fs::read(&cached_file).expect("read");
-        let sha = sha256_hex(&body);
-        let canonical = std::fs::canonicalize(&cached_file).expect("canonicalize");
-        let fp = query_fingerprint(QUESTION);
-        seed_file_row(&db, &canonical, &sha, &fp, "seeded").await;
-    }
-    let small = write_lines(files.path(), "small.rs", 10);
-    let secure = write_lines(files.path(), "auth_util.rs", BIG);
-    let outside_file = write_lines(outside.path(), "outside.rs", BIG);
-
-    let mut mcp = StdioMcp::new(spawn_cmd(
-        data.path(),
-        Some(files.path().to_str().unwrap()),
-        None,
-    ))
-    .await;
-    mcp.handshake().await;
-
-    let resp = mcp
-        .call(
-            "shunt_warmup",
-            json!({"project": "p", "agent_harness": "opencode",
-                   "paths": [cached_file, small, secure, "missing.rs", outside_file],
-                   "question": QUESTION}),
-        )
-        .await;
-    let text = StdioMcp::text_of(&resp);
-    assert!(text.contains("1 cached"), "cached: {text}");
-    assert!(text.contains("1 below threshold"), "threshold: {text}");
-    assert!(text.contains("1 security-skipped"), "security: {text}");
-    assert!(text.contains("1 missing"), "missing: {text}");
-    assert!(text.contains("1 denied"), "denied: {text}");
-    assert!(text.contains("0 delegated"), "no worker configured: {text}");
-
-    mcp.shutdown().await;
-}
-
-#[tokio::test]
-async fn warmup_worker_unconfigured_error_matches_smart_read() {
-    // Req 1.7: the batch aborts with the engine's own actionable error —
-    // byte-identical to smart_read's wording.
-    let data = tempfile::tempdir().unwrap();
-    let files = warmup_files();
-    let big = write_lines(files.path(), "big.rs", BIG);
-
-    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
-    mcp.handshake().await;
-
-    let read = mcp
-        .call(
-            "smart_read",
-            json!({"project": "p", "agent_harness": "opencode",
-                   "file_path": big, "question": "q"}),
-        )
-        .await;
-    let read_msg = StdioMcp::text_of(&read);
-    let warm = mcp
-        .call(
-            "shunt_warmup",
-            json!({"project": "p", "agent_harness": "opencode",
-                   "paths": [big], "question": "q"}),
-        )
-        .await;
-    let warm_msg = StdioMcp::text_of(&warm);
-    assert_eq!(
-        warm_msg, read_msg,
-        "worker-unconfigured error must match smart_read's parity"
-    );
-
-    mcp.shutdown().await;
-}
-
 // ---------- 6.2: prune tool end to end ----------
 
 #[tokio::test]
@@ -499,7 +200,7 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
         seed_file_row(&db, Path::new(&missing_key), &missing_sha, "fp", "stale").await;
     }
 
-    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
+    let mut mcp = StdioMcp::new(spawn_cmd(data.path())).await;
     mcp.handshake().await;
 
     let preview = mcp
@@ -591,7 +292,7 @@ async fn prune_tool_leaves_content_rows_untouched_and_counts_only_file_rows() {
         }
     }
 
-    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
+    let mut mcp = StdioMcp::new(spawn_cmd(data.path())).await;
     mcp.handshake().await;
 
     for (args, labels) in [
@@ -636,7 +337,7 @@ async fn breadcrumb_search_finds_real_crumbs_end_to_end() {
     let files = tempfile::tempdir().unwrap();
     let small = write_lines(files.path(), "small.rs", 10);
 
-    let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
+    let mut mcp = StdioMcp::new(spawn_cmd(data.path())).await;
     mcp.handshake().await;
 
     // Two harnesses make real crumbs: a checkpoint and a smart_read.

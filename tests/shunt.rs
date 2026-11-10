@@ -508,17 +508,19 @@ async fn row_touch(db: &Db, sha: &str) -> (i64, i64) {
     .unwrap()
 }
 
-/// shunt-cache-efficiency task 4 (Req 4.3): raising the threshold keeps the
-/// summaries cached below it. At the default, a file under the threshold is
-/// read directly (exact content, no worker call, the row untouched); with
-/// the old threshold set again, the same read is served from the kept row.
+/// shunt-cache-efficiency task 4 (Req 4.3): raising `SHUNT_MIN_LINES` keeps
+/// the summaries cached below it. At the raised threshold, a file under it
+/// is read directly (exact content, no worker call, the row untouched); with
+/// the lower threshold set again, the same read is served from the kept row.
 #[tokio::test]
-async fn summaries_cached_below_the_raised_threshold_are_kept_and_servable() {
+async fn summaries_cached_below_a_raised_threshold_are_kept_and_servable() {
     use mmhmem::services::shunt_cache::summary_store_and_evict;
     use mmhmem::services::shunt_cache::{SummaryRow, canonical_fingerprint};
     use mmhmem::storage::audit::sha256_hex;
-    /// The default before task 4, set through `SHUNT_MIN_LINES`.
-    const OLD_THRESHOLD: u32 = 150;
+    /// The threshold the row was cached under.
+    const LOWER: u32 = 150;
+    /// A raised threshold, set through `SHUNT_MIN_LINES` like a user would.
+    const RAISED: u32 = 300;
     let root = tempfile::tempdir().unwrap();
     let (url, calls, _b) = spawn_stub_multi(200, SUMMARY_CHAT, 4).await;
     let data = tempfile::tempdir().unwrap();
@@ -547,7 +549,7 @@ async fn summaries_cached_below_the_raised_threshold_are_kept_and_servable() {
         let path = path.clone();
         async move { eng.smart_read(&req(&path, "", None, None)).await.unwrap() }
     };
-    match read(THRESHOLD).await {
+    match read(RAISED).await {
         ReadOutcome::Direct {
             reason,
             total_lines,
@@ -556,16 +558,16 @@ async fn summaries_cached_below_the_raised_threshold_are_kept_and_servable() {
             assert_eq!((reason, total_lines), (BypassReason::BelowThreshold, 200));
             assert!(text.starts_with("L1: line 1") && text.contains("L200: line 200"));
         }
-        other => panic!("at {THRESHOLD}: expected a direct read, got {other:?}"),
+        other => panic!("at {RAISED}: expected a direct read, got {other:?}"),
     }
     let log = std::fs::read_to_string(logs.path().join("audit.jsonl")).unwrap();
     assert!(log.contains("IO_DIRECT_READ"), "{log}");
     assert!(log.contains("below_line_threshold"), "{log}");
     assert!(!log.contains("IO_SHUNT_CACHE_HIT"), "{log}");
     assert_eq!(row_touch(&db, &sha).await, stored, "the row is untouched");
-    match read(OLD_THRESHOLD).await {
+    match read(LOWER).await {
         ReadOutcome::Cached { summary, .. } => assert_eq!(summary, "- cached at 150 [L1-L200]"),
-        other => panic!("at {OLD_THRESHOLD}: expected the kept summary, got {other:?}"),
+        other => panic!("at {LOWER}: expected the kept summary, got {other:?}"),
     }
     assert_eq!(
         row_touch(&db, &sha).await.0,

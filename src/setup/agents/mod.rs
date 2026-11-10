@@ -208,7 +208,7 @@ pub struct CheckReport {
     pub result: CheckResult,
     /// Per-step outcomes.
     pub details: Vec<CheckDetail>,
-    /// The result line, e.g. `✔ Codex — mmhmem connected, 11 tools`.
+    /// The result line, e.g. `✔ Codex — mmhmem connected, 10 tools`.
     pub line: String,
     /// One `● Codex — <step>` line per step only the user can do (only
     /// when everything else passed).
