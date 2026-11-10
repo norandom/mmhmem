@@ -14,7 +14,9 @@ if [ -z "$scratch" ]; then
 fi
 one_liner='curl -fsSL https://github.com/norandom/mmhmem/releases/latest/download/install.sh | sh'
 # README.md may have CRLF endings in a Windows working tree (copied into local Dagger runs).
-tr -d '\015' < "$root/README.md" | grep -qxF "$one_liner" || { echo 'README.md lacks the one-liner the stub prints' >&2; exit 1; }
+# grep reads the whole pipe: with `pipefail`, `grep -q` exiting at the match left `tr`
+# with SIGPIPE on its second 4 KB write (status 141) once README.md passed 4 KB.
+tr -d '\015' < "$root/README.md" | grep -xF "$one_liner" > /dev/null || { echo 'README.md lacks the one-liner the stub prints' >&2; exit 1; }
 # No network or file-writing command apart from the printed one-liner itself.
 if grep -vF "$one_liner" "$stub" | grep -v '^#' | grep -E '(^|[^A-Za-z-])(curl|wget|fetch|nc|python3?|tee|mkdir|cp|mv|rm|touch|chmod|ln)([^A-Za-z-]|$)|>[^&]' > /dev/null; then
   echo 'install.sh stub runs a download or write command' >&2; exit 1
