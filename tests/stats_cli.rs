@@ -436,6 +436,71 @@ fn stats_never_modifies_the_audit_files() {
     );
 }
 
+/// An audit line for `path`: hook records carry `file_path`, smart_read
+/// records `file` (shunt-cache-efficiency Req 5.4).
+fn path_line(kind: &str, ms: i64, harness: &str, path: &str) -> String {
+    let field = if kind == "HOOK_REDIRECT" {
+        "file_path"
+    } else {
+        "file"
+    };
+    let details = serde_json::json!({ field: path });
+    format!(
+        "{{\"epoch_ms\":{ms},\"event_type\":\"{kind}\",\"agent_harness\":\"{harness}\",\
+         \"project\":\"rates\",\"details\":{details}}}\n"
+    )
+}
+
+#[test]
+fn stats_shows_the_hit_rate_and_the_redirect_follow_through() {
+    // Seeded audit only (no store): one summary and three cache hits; four
+    // redirects, of which a.rs (cache hit after 2 min) and b.rs (slice
+    // after 9 min) are followed, c.rs only after 11 min and d.rs never.
+    let dir = tempfile::tempdir().unwrap();
+    let min = 60_000;
+    let t = DAY1 + 30 * min;
+    let lines = [
+        path_line("HOOK_REDIRECT", t, "codex", "/w/a.rs"),
+        path_line("HOOK_REDIRECT", t, "codex", "/w/b.rs"),
+        path_line("HOOK_REDIRECT", t, "codex", "/w/c.rs"),
+        path_line("HOOK_REDIRECT", t, "codex", "/w/d.rs"),
+        path_line("IO_SHUNT_DELEGATED", t - min, "codex", "/w/d.rs"),
+        path_line("IO_SHUNT_CACHE_HIT", t + 2 * min, "codex", "/w/a.rs"),
+        path_line("IO_TARGETED_READ", t + 9 * min, "codex", "/w/b.rs"),
+        path_line("IO_SHUNT_CACHE_HIT", t + 11 * min, "codex", "/w/c.rs"),
+        path_line("IO_SHUNT_CACHE_HIT", t + 12 * min, "codex", "/w/e.rs"),
+    ];
+    std::fs::write(dir.path().join("audit.jsonl"), lines.concat()).unwrap();
+    let v = json_report(dir.path());
+    let day = &v["days"][0];
+    assert_eq!(
+        (
+            day["hook_redirects"].as_u64(),
+            day["followed_redirects"].as_u64()
+        ),
+        (Some(4), Some(2))
+    );
+    assert_eq!(v["totals"]["followed_redirects"], 2);
+    assert!(
+        day.get("hit_rate").is_none(),
+        "--json carries counts, not rates: {day}"
+    );
+    let table = String::from_utf8(run_stats(dir.path(), false).stdout).unwrap();
+    let header = table.lines().nth(2).unwrap();
+    let row = table.lines().find(|l| l.contains("rates")).unwrap();
+    let cells = |l: &str| -> Vec<String> {
+        l.split(['│', '┆'])
+            .skip(1)
+            .map(|c| c.trim().to_string())
+            .collect()
+    };
+    let cell: std::collections::HashMap<String, String> =
+        cells(header).into_iter().zip(cells(row)).collect();
+    // 3 hits / (3 hits + 1 summary); 2 of 4 redirects followed.
+    assert_eq!(cell["hit rate (rate)"], "75%", "{table}");
+    assert_eq!(cell["follow-through (rate, 10 min)"], "50%", "{table}");
+}
+
 #[tokio::test]
 async fn default_table_falls_back_to_the_most_recent_day() {
     let (dir, logs) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

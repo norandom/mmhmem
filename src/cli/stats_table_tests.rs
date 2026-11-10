@@ -18,7 +18,8 @@ fn opts(width: Option<usize>, all: bool) -> TableOptions {
     }
 }
 
-/// (day, project, harness, avoided, client in/out, worker in/out, reads).
+/// (day, project, harness, avoided, client in/out, worker in/out, reads:
+/// summaries, cache hits, slices, direct, redirects, followed redirects).
 type Seed = (
     &'static str,
     &'static str,
@@ -26,7 +27,7 @@ type Seed = (
     i64,
     (i64, i64),
     (i64, i64),
-    [u64; 5],
+    [u64; 6],
 );
 
 fn agg(s: Seed) -> DayAggregate {
@@ -47,12 +48,15 @@ fn agg(s: Seed) -> DayAggregate {
             slice_reads: reads[2],
             direct_reads: reads[3],
             hook_redirects: reads[4],
+            followed_redirects: reads[5],
         },
     }
 }
 
 /// Day DESC, as `aggregate` returns them. Three rows fall in the window;
-/// `slices` is non-zero only in an older row.
+/// `slices` is non-zero only in an older row. Rates: QOpenBB 2 hits of 6
+/// (33%), 1 of 1 redirect followed (100%); mmhmem 0 of 3 (0%), 1 of 2
+/// (50%); the long project has neither (`-`).
 fn fixture() -> Vec<DayAggregate> {
     [
         (
@@ -62,7 +66,7 @@ fn fixture() -> Vec<DayAggregate> {
             8_574,
             (0, 0),
             (1_200, 300),
-            [4, 2, 0, 0, 1],
+            [4, 2, 0, 0, 1, 1],
         ),
         (
             "2026-11-05",
@@ -71,7 +75,7 @@ fn fixture() -> Vec<DayAggregate> {
             30_101,
             (120_000, 4_500),
             (2_000, 500),
-            [3, 0, 0, 1, 2],
+            [3, 0, 0, 1, 2, 1],
         ),
         (
             "2026-10-31",
@@ -80,7 +84,7 @@ fn fixture() -> Vec<DayAggregate> {
             12_000,
             (0, 0),
             (900, 100),
-            [0, 0, 0, 5, 0],
+            [0, 0, 0, 5, 0, 0],
         ),
         (
             "2026-10-30",
@@ -89,7 +93,7 @@ fn fixture() -> Vec<DayAggregate> {
             1_000,
             (0, 0),
             (0, 0),
-            [0, 0, 7, 0, 0],
+            [0, 0, 7, 0, 0, 0],
         ),
         (
             "2026-09-01",
@@ -98,7 +102,7 @@ fn fixture() -> Vec<DayAggregate> {
             2_000,
             (10, 1),
             (0, 0),
-            [0, 0, 0, 0, 0],
+            [0; 6],
         ),
     ]
     .into_iter()
@@ -170,7 +174,7 @@ fn rows_without_savings_are_hidden_by_default() {
             0,
             (0, 0),
             (0, 0),
-            [0, 0, 9, 0, 0],
+            [0, 0, 9, 0, 0, 0],
         )),
     );
     rows.insert(
@@ -182,7 +186,7 @@ fn rows_without_savings_are_hidden_by_default() {
             0,
             (5, 1),
             (0, 0),
-            [0; 5],
+            [0; 6],
         )),
     );
     let table = render_table(&rows, &opts(None, false));
@@ -218,7 +222,7 @@ fn without_any_savings_every_row_is_shown() {
             0,
             (0, 0),
             (0, 0),
-            [0, 0, 3, 0, 0],
+            [0, 0, 3, 0, 0, 0],
         )),
         agg((
             "2026-11-05",
@@ -227,7 +231,7 @@ fn without_any_savings_every_row_is_shown() {
             0,
             (0, 0),
             (0, 0),
-            [0, 0, 0, 1, 0],
+            [0, 0, 0, 1, 0, 0],
         )),
     ];
     let table = render_table(&rows, &opts(None, false));
@@ -265,7 +269,7 @@ fn all_zero_columns_are_hidden_by_default() {
 
 #[test]
 fn every_column_zero_still_shows_the_estimate() {
-    let rows = vec![agg(("2026-11-06", "p", "h", 0, (0, 0), (0, 0), [0; 5]))];
+    let rows = vec![agg(("2026-11-06", "p", "h", 0, (0, 0), (0, 0), [0; 6]))];
     let table = render_table(&rows, &opts(None, false));
     assert!(header(&table).contains("avoided (est.)"), "{table}");
     assert!(table.starts_with("shape: (1, 4)"), "{table}");
@@ -287,14 +291,31 @@ fn a_narrow_table_cuts_the_project_and_drops_columns_by_priority() {
     assert!(head.contains(" … "), "ellipsis column: {head}");
     assert!(!head.contains("redirects"), "read counts go first: {head}");
     assert!(
-        table.contains("8 columns hidden (slices, frontier in (client), …)."),
+        !head.contains("(rate"),
+        "rates go with the read counts: {head}"
+    );
+    assert!(
+        table.contains("10 columns hidden (slices, frontier in (client), …)."),
         "{table}"
     );
 }
 
 #[test]
+fn the_rates_are_dropped_first_when_the_table_is_too_wide() {
+    let table = render_table(&fixture(), &opts(Some(200), false));
+    let head = header(&table);
+    assert!(head.chars().count() <= 200, "{head}");
+    assert!(
+        !head.contains("follow-through"),
+        "rightmost rate first: {head}"
+    );
+    assert!(head.contains("avoided (est.)") && head.contains("worker in"));
+    assert!(table.contains("columns hidden (slices, "), "{table}");
+}
+
+#[test]
 fn a_wide_terminal_needs_no_fitting() {
-    let wide = render_table(&fixture(), &opts(Some(200), false));
+    let wide = render_table(&fixture(), &opts(Some(260), false));
     let free = render_table(&fixture(), &opts(None, false));
     assert_eq!(wide, free);
     assert!(wide.contains("a-really-long-client-project-name"));
@@ -305,7 +326,7 @@ fn all_ignores_the_width_limit() {
     let table = render_table(&fixture(), &opts(Some(40), true));
     assert!(header(&table).chars().count() > 40);
     assert!(table.contains("a-really-long-client-project-name"));
-    assert!(table.starts_with("shape: (5, 13)"), "{table}");
+    assert!(table.starts_with("shape: (5, 15)"), "{table}");
     assert!(!table.contains(ALL_HINT), "nothing hidden, no footer");
 }
 
@@ -324,10 +345,105 @@ fn headers_keep_the_labeling_discipline() {
         "slices",
         "direct",
         "redirects",
+        "hit rate (rate)",
+        "follow-through (rate, 10 min)",
     ] {
         assert!(head.contains(label), "missing {label}: {head}");
     }
     assert!(!head.contains("avoided (client)") && !head.contains("measured"));
+}
+
+/// Cells of one table line, by header.
+fn cells_by_header(table: &str, line: &str) -> std::collections::HashMap<String, String> {
+    let cells = |l: &str| -> Vec<String> {
+        l.split(['│', '┆'])
+            .skip(1)
+            .map(|c| c.trim().to_string())
+            .collect()
+    };
+    cells(header(table)).into_iter().zip(cells(line)).collect()
+}
+
+fn row_line<'a>(table: &'a str, project: &str) -> &'a str {
+    table.lines().find(|l| l.contains(project)).unwrap()
+}
+
+#[test]
+fn rates_render_as_percentages_or_a_dash_without_a_denominator() {
+    let table = render_table(&fixture(), &opts(None, false));
+    let (hit, follow) = ("hit rate (rate)", "follow-through (rate, 10 min)");
+    for (project, want_hit, want_follow) in [
+        ("QOpenBB", "33%", "100%"),
+        ("mmhmem", "0%", "50%"),
+        ("a-really-long-client-project-name", "-", "-"),
+    ] {
+        let cells = cells_by_header(&table, row_line(&table, project));
+        assert_eq!(cells[hit], want_hit, "{project}: {table}");
+        assert_eq!(cells[follow], want_follow, "{project}: {table}");
+    }
+    let rates = cells_by_header(&table, row_line(&table, "QOpenBB"));
+    assert_eq!(rates["cache hits"], "2", "the counts stay: {table}");
+}
+
+#[test]
+fn rate_totals_are_recomputed_from_the_summed_counts() {
+    let table = render_table(&fixture(), &opts(None, false));
+    let total = cells_by_header(&table, total_line(&table));
+    // 2 hits of 9 requests and 2 of 3 redirects followed — not the mean of
+    // the row rates (17% and 75%).
+    assert_eq!(total["hit rate (rate)"], "22%", "{table}");
+    assert_eq!(total["follow-through (rate, 10 min)"], "67%", "{table}");
+}
+
+#[test]
+fn rates_without_any_denominator_are_hidden_like_all_zero_columns() {
+    let rows = vec![agg((
+        "2026-11-06",
+        "p",
+        "h",
+        10,
+        (0, 0),
+        (0, 0),
+        [0, 0, 3, 0, 0, 0],
+    ))];
+    let table = render_table(&rows, &opts(None, false));
+    assert!(!header(&table).contains("(rate"), "{table}");
+    assert!(
+        table.contains("10 columns hidden"),
+        "counted in the footer: {table}"
+    );
+    let all = render_table(&rows, &opts(None, true));
+    let cells = cells_by_header(&all, row_line(&all, "│ 2026-11-06"));
+    assert_eq!(cells["hit rate (rate)"], "-", "{all}");
+    assert_eq!(cells["follow-through (rate, 10 min)"], "-", "{all}");
+}
+
+#[test]
+fn a_zero_rate_is_shown_not_hidden() {
+    let rows = vec![agg((
+        "2026-11-06",
+        "p",
+        "h",
+        10,
+        (0, 0),
+        (0, 0),
+        [5, 0, 0, 0, 4, 0],
+    ))];
+    let table = render_table(&rows, &opts(None, false));
+    let cells = cells_by_header(&table, total_line(&table));
+    assert_eq!(cells["hit rate (rate)"], "0%", "{table}");
+    assert_eq!(cells["follow-through (rate, 10 min)"], "0%", "{table}");
+}
+
+#[test]
+fn rate_rounds_to_whole_percent() {
+    assert_eq!(rate(0, 0), "-");
+    assert_eq!(rate(0, 7), "0%");
+    assert_eq!(rate(1, 3), "33%");
+    assert_eq!(rate(2, 3), "67%");
+    assert_eq!(rate(1, 200), "1%");
+    assert_eq!(rate(5, 5), "100%");
+    assert_eq!(rate(u64::MAX, u64::MAX), "100%");
 }
 
 #[test]

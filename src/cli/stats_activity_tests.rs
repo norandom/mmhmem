@@ -17,6 +17,29 @@ fn event(kind: &str, ms: i64, project: &str, harness: &str) -> String {
     )
 }
 
+/// An audit line with `details` (the follow-through tests need paths).
+fn event_with(kind: &str, ms: i64, project: &str, harness: &str, details: &str) -> String {
+    format!(
+        "{{\"ts\":\"x\",\"epoch_ms\":{ms},\"event_type\":\"{kind}\",\
+         \"agent_harness\":\"{harness}\",\"project\":\"{project}\",\
+         \"details\":{details},\"record_sha256\":\"0\"}}\n"
+    )
+}
+
+/// A hook redirect of `path` (the hook records `file_path`).
+fn redirect(ms: i64, harness: &str, path: &str) -> String {
+    let details = serde_json::json!({"decision": "redirect", "file_path": path});
+    event_with("HOOK_REDIRECT", ms, "p", harness, &details.to_string())
+}
+
+/// A smart_read record of `path` (the shunt engine records `file`).
+fn read(kind: &str, ms: i64, harness: &str, path: &str) -> String {
+    let details = serde_json::json!({"source": "file", "file": path});
+    event_with(kind, ms, "p", harness, &details.to_string())
+}
+
+const MINUTE: i64 = 60_000;
+
 fn write_log(path: &PathBuf, lines: &[String]) {
     fs::write(path, lines.concat()).unwrap();
 }
@@ -32,6 +55,15 @@ fn counts(s: u64, c: u64, sl: u64, d: u64, h: u64) -> ActivityCounts {
         slice_reads: sl,
         direct_reads: d,
         hook_redirects: h,
+        followed_redirects: 0,
+    }
+}
+
+/// [`counts`] plus the followed redirects.
+fn followed(c: ActivityCounts, f: u64) -> ActivityCounts {
+    ActivityCounts {
+        followed_redirects: f,
+        ..c
     }
 }
 
@@ -218,6 +250,7 @@ fn json_exposes_stable_activity_fields_and_keeps_savings_fields() {
         "slice_reads",
         "direct_reads",
         "hook_redirects",
+        "followed_redirects",
     ];
     let savings_fields = [
         "avoided_input_tokens_est",
@@ -243,7 +276,10 @@ fn json_exposes_stable_activity_fields_and_keeps_savings_fields() {
     for f in activity_fields.into_iter().chain(savings_fields) {
         assert!(totals.contains_key(f), "totals lacks {f}");
     }
-    assert_eq!(totals.len(), 10);
+    assert_eq!(totals.len(), 11);
+    // Counts only: the rates are derived at render time (Req 5.6).
+    assert!(!day.keys().any(|k| k.contains("rate")), "{day:?}");
+    assert_eq!(totals["followed_redirects"], 0);
     assert_eq!(totals["summary_reads"], 11);
     assert_eq!(totals["slice_reads"], 33);
     assert_eq!(totals["avoided_input_tokens_est"], 800);
@@ -273,10 +309,146 @@ fn table_keeps_savings_columns_and_adds_activity_columns() {
         assert!(header.contains(label), "missing {label}: {header}");
     }
     let total = table.lines().find(|l| l.starts_with("│ total")).unwrap();
-    let cells: Vec<&str> = total
-        .split(['│', '┆'])
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
-        .collect();
-    assert_eq!(&cells[cells.len() - 5..], ["11", "22", "33", "44", "55"]);
+    let cells = |line: &str| -> Vec<String> {
+        line.split(['│', '┆'])
+            .skip(1)
+            .map(|c| c.trim().to_string())
+            .collect()
+    };
+    let by_header: std::collections::HashMap<String, String> =
+        cells(header).into_iter().zip(cells(total)).collect();
+    for (label, want) in [
+        ("summaries", "11"),
+        ("cache hits", "22"),
+        ("slices", "33"),
+        ("direct", "44"),
+        ("redirects", "55"),
+        // 22 / (22 + 11), recomputed from the sums; nothing followed.
+        ("hit rate (rate)", "67%"),
+        ("follow-through (rate, 10 min)", "0%"),
+    ] {
+        assert_eq!(by_header[label], want, "{label}: {total}");
+    }
+}
+
+#[test]
+fn a_redirect_followed_within_ten_minutes_by_any_smart_read_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("audit.jsonl");
+    let t = DAY1 + 60 * MINUTE;
+    write_log(
+        &log,
+        &[
+            // Followed by a cache hit five minutes later.
+            redirect(t, "claude-code", "/work/src/a.rs"),
+            read(
+                "IO_SHUNT_CACHE_HIT",
+                t + 5 * MINUTE,
+                "claude-code",
+                "/work/src/a.rs",
+            ),
+            // A slice eleven minutes later is outside the window.
+            redirect(t, "claude-code", "/work/src/b.rs"),
+            read(
+                "IO_TARGETED_READ",
+                t + 11 * MINUTE,
+                "claude-code",
+                "/work/src/b.rs",
+            ),
+            // A read before the redirect does not follow it.
+            redirect(t, "claude-code", "/work/src/c.rs"),
+            read(
+                "IO_SHUNT_DELEGATED",
+                t - MINUTE,
+                "claude-code",
+                "/work/src/c.rs",
+            ),
+            // Exactly at the window's end, by another harness: followed.
+            redirect(t, "codex", "/work/src/d.rs"),
+            read(
+                "IO_DIRECT_READ",
+                t + 10 * MINUTE,
+                "opencode",
+                "/work/src/d.rs",
+            ),
+            // Content without a file (shunt_content) never follows.
+            redirect(t, "codex", "/work/src/e.rs"),
+            event_with(
+                "IO_SHUNT_DELEGATED",
+                t + 1,
+                "p",
+                "codex",
+                r#"{"source":"content"}"#,
+            ),
+        ],
+    );
+    let got = collect(&log, 5).unwrap();
+    let day = "2025-01-01";
+    assert_eq!(
+        got[&key(day, "p", "claude-code")],
+        followed(counts(1, 1, 1, 0, 3), 1)
+    );
+    assert_eq!(
+        got[&key(day, "p", "codex")],
+        followed(counts(1, 0, 0, 0, 2), 1)
+    );
+    assert_eq!(got[&key(day, "p", "opencode")], counts(0, 0, 0, 1, 0));
+}
+
+#[test]
+fn paths_match_after_normalisation_and_across_rotated_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("audit.jsonl");
+    let t = DAY1 + MINUTE;
+    // The hook records the cwd-joined path; the engine the canonical one.
+    write_log(
+        &dir.path().join("audit.jsonl.1"),
+        &[redirect(t, "codex", r"C:\Work\proj\.\src\..\src\Main.rs")],
+    );
+    write_log(
+        &log,
+        &[read(
+            "IO_SHUNT_DELEGATED",
+            t + MINUTE,
+            "codex",
+            r"\\?\C:\work\proj\src\main.rs",
+        )],
+    );
+    let got = collect(&log, 5).unwrap();
+    assert_eq!(
+        got[&key("2025-01-01", "p", "codex")],
+        followed(counts(1, 0, 0, 0, 1), 1)
+    );
+}
+
+#[test]
+fn one_read_can_follow_several_redirects_but_never_more_than_were_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("audit.jsonl");
+    let t = DAY1 + MINUTE;
+    write_log(
+        &log,
+        &[
+            redirect(t, "h", "/w/a.rs"),
+            redirect(t + MINUTE, "h", "/w/a.rs"),
+            read("IO_SHUNT_CACHE_HIT", t + 2 * MINUTE, "h", "/w/a.rs"),
+            read("IO_SHUNT_CACHE_HIT", t + 3 * MINUTE, "h", "/w/a.rs"),
+        ],
+    );
+    let got = collect(&log, 5).unwrap();
+    assert_eq!(
+        got[&key("2025-01-01", "p", "h")],
+        followed(counts(0, 2, 0, 0, 2), 2)
+    );
+}
+
+#[test]
+fn normalised_paths_drop_the_verbatim_prefix_separators_dots_and_case() {
+    assert_eq!(normalise_path(r"\\?\D:\Src\a.rs"), "d:/src/a.rs");
+    assert_eq!(normalise_path(r"D:/src/./x/../a.rs"), "d:/src/a.rs");
+    assert_eq!(normalise_path("/home/u/./p/a.rs"), "/home/u/p/a.rs");
+    assert_eq!(
+        normalise_path(r"\\?\UNC\srv\share\a.rs"),
+        normalise_path(r"\\srv\share\a.rs")
+    );
 }

@@ -36,6 +36,7 @@ pub fn help_text() -> String {
          \x20   {NAME} stdio\n\
          \x20   {NAME} stats [--all] [--json]\n\
          \x20   {NAME} prune [--dry-run]\n\
+         \x20   {NAME} warmup [<root>] [--dry-run] [--max-files <n>]\n\
          \x20   {NAME} setup\n\
          \x20   {NAME} update\n\
          \x20   {NAME} hook <harness>\n\
@@ -59,6 +60,13 @@ pub fn help_text() -> String {
          \x20   prune [--dry-run]  Remove stale cache rows (missing file or changed\n\
          \x20                    content) from the local per-user store; --dry-run\n\
          \x20                    previews the grouped counts\n\
+         \x20   warmup [<root>] [--root <dir>] [--dry-run] [--max-files <n>]\n\
+         \x20                    Summarise every large text file of a repository\n\
+         \x20                    (default: the current folder) into the shared\n\
+         \x20                    cache, skipping ignored and security-critical\n\
+         \x20                    files; cached files cost no worker call;\n\
+         \x20                    --dry-run lists the files and the worker calls;\n\
+         \x20                    at most --max-files files per run (default 200)\n\
          \x20   setup            Install or update mmhmem for your AI tools\n\
          \x20   update           Update mmhmem to the newest release, keeping your\n\
          \x20                    tools and choices as they are\n\
@@ -112,5 +120,18 @@ mod tests {
         assert!(help.contains("--version"));
         assert!(help.contains(VERSION));
         assert!(help.contains(NAME));
+    }
+
+    #[test]
+    fn help_names_the_warmup_command_and_its_flags() {
+        let help = help_text();
+        for needle in [
+            "warmup [<root>]",
+            "--dry-run",
+            "--max-files <n>",
+            "--root <dir>",
+        ] {
+            assert!(help.contains(needle), "{needle}");
+        }
     }
 }

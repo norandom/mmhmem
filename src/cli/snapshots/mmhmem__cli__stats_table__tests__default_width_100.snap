@@ -2,7 +2,7 @@
 source: src/cli/stats_table_tests.rs
 expression: table
 ---
-shape: (3, 12)
+shape: (3, 14)
 ┌────────────┬──────────────────────────┬─────────────┬────────────────┬───┬───────────┐
 │ day        ┆ project                  ┆ harness     ┆ avoided (est.) ┆ … ┆ worker in │
 ╞════════════╪══════════════════════════╪═════════════╪════════════════╪═══╪═══════════╡
@@ -12,5 +12,5 @@ shape: (3, 12)
 ╞════════════╪══════════════════════════╪═════════════╪════════════════╪═══╪═══════════╡
 │ total      ┆                          ┆             ┆         50,675 ┆ … ┆     4,100 │
 └────────────┴──────────────────────────┴─────────────┴────────────────┴───┴───────────┘
-2 older rows hidden (showing since 2026-10-31); 8 columns hidden (slices, frontier in (client), …).
+2 older rows hidden (showing since 2026-10-31); 10 columns hidden (slices, frontier in (client), …).
 The total covers the shown rows only. Run "mmhmem stats --all" for everything.

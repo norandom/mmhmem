@@ -15,6 +15,13 @@
 //! every header (Req 8.3): estimates say `(est.)`, client-reported values
 //! say `(client)`, and nothing computed is presented as measured.
 //!
+//! Two rates sit beside their counts (shunt-cache-efficiency Req 5.3-5.5):
+//! `hit rate` = cache hits / (cache hits + summaries) and `follow-through`
+//! = followed redirects / redirects, derived here from the counts — the
+//! total row's from the summed counts — shown as `NN%`, or `-` without a
+//! denominator. A rate column is all-zero (hidden) when no shown row has a
+//! denominator; a `0%` rate is information and stays.
+//!
 //! Pure by contract: width, today and `all` come in through
 //! [`TableOptions`]; terminal detection lives in [`super::stats_args`].
 
@@ -23,6 +30,7 @@ use std::cmp::Reverse;
 use time::Date;
 
 use super::stats::{DayAggregate, totals};
+use super::stats_activity::ActivityCounts;
 
 /// Inputs that make the rendering deterministic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,12 +56,43 @@ pub const ALL_HINT: &str = "Run \"mmhmem stats --all\" for everything.";
 /// longest; ties drop the rightmost first).
 struct Column {
     header: &'static str,
-    value: fn(&DayAggregate) -> i64,
+    value: Value,
     priority: u8,
 }
 
-/// Numeric columns in display order (Req 8.3 labels).
-const COLUMNS: [Column; 10] = [
+/// Where a numeric cell comes from.
+#[derive(Clone, Copy)]
+enum Value {
+    /// A token or read count, shown with thousands separators.
+    Count(fn(&DayAggregate) -> i64),
+    /// A rate derived from the read counts: (numerator, denominator).
+    Rate(fn(&ActivityCounts) -> (u64, u64)),
+}
+
+impl Column {
+    /// Whether the row gives this column something to show: a non-zero
+    /// count, or a rate with a denominator.
+    fn has_value(&self, r: &DayAggregate) -> bool {
+        match self.value {
+            Value::Count(value) => value(r) != 0,
+            Value::Rate(parts) => parts(&r.activity).1 != 0,
+        }
+    }
+
+    fn cell(&self, r: &DayAggregate) -> String {
+        match self.value {
+            Value::Count(value) => thousands(value(r)),
+            Value::Rate(parts) => {
+                let (num, den) = parts(&r.activity);
+                rate(num, den)
+            }
+        }
+    }
+}
+
+/// Numeric columns in display order (Req 8.3 labels); each rate follows
+/// the counts it is made of.
+const COLUMNS: [Column; 12] = [
     col("avoided (est.)", 0, |r| r.avoided_est),
     col("frontier in (client)", 2, |r| r.client_prompt),
     col("frontier out (client)", 2, |r| r.client_completion),
@@ -61,9 +100,15 @@ const COLUMNS: [Column; 10] = [
     col("worker out", 1, |r| r.worker_completion),
     col("summaries", 3, |r| count(r.activity.summary_reads)),
     col("cache hits", 3, |r| count(r.activity.cache_hits)),
+    rate_col("hit rate (rate)", |a| {
+        (a.cache_hits, a.cache_hits + a.summary_reads)
+    }),
     col("slices", 3, |r| count(r.activity.slice_reads)),
     col("direct", 3, |r| count(r.activity.direct_reads)),
     col("redirects", 3, |r| count(r.activity.hook_redirects)),
+    rate_col("follow-through (rate, 10 min)", |a| {
+        (a.followed_redirects, a.hook_redirects)
+    }),
 ];
 
 /// Always-shown text columns.
@@ -72,9 +117,27 @@ const TEXT_HEADERS: [&str; 3] = ["day", "project", "harness"];
 const fn col(header: &'static str, priority: u8, value: fn(&DayAggregate) -> i64) -> Column {
     Column {
         header,
-        value,
+        value: Value::Count(value),
         priority,
     }
+}
+
+/// A rate column: fit priority 3, like the read counts (Req 5.5).
+const fn rate_col(header: &'static str, parts: fn(&ActivityCounts) -> (u64, u64)) -> Column {
+    Column {
+        header,
+        value: Value::Rate(parts),
+        priority: 3,
+    }
+}
+
+/// `num / den` as a whole percentage (half up), or `-` when `den` is 0.
+pub fn rate(num: u64, den: u64) -> String {
+    if den == 0 {
+        return "-".to_string();
+    }
+    let (num, den) = (u128::from(num), u128::from(den));
+    format!("{}%", (num * 100 + den / 2) / den)
 }
 
 fn count(n: u64) -> i64 {
@@ -197,7 +260,7 @@ fn total_row(rows: &[DayAggregate]) -> DayAggregate {
 /// table still says something.
 fn numeric_columns(body: &[DayAggregate], all: bool) -> Vec<usize> {
     let keep: Vec<usize> = (0..COLUMNS.len())
-        .filter(|&i| all || body.iter().any(|r| (COLUMNS[i].value)(r) != 0))
+        .filter(|&i| all || body.iter().any(|r| COLUMNS[i].has_value(r)))
         .collect();
     if keep.is_empty() { vec![0] } else { keep }
 }
@@ -219,7 +282,7 @@ fn numeric_column(c: &Column, body: &[DayAggregate]) -> Shown {
     Shown {
         header: c.header.to_string(),
         right: true,
-        cells: body.iter().map(|r| thousands((c.value)(r))).collect(),
+        cells: body.iter().map(|r| c.cell(r)).collect(),
     }
 }
 

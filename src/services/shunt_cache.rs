@@ -72,6 +72,25 @@ pub async fn summary_lookup(
     lookup_and_touch(db, sha, fp, FILE_READ_KIND, path).await
 }
 
+/// Whether a file-read row exists for (sha, fingerprint), WITHOUT touching
+/// it: no hit counted, no LRU clock moved (the `mmhmem warmup` dry run and
+/// its worker check; shunt-cache-efficiency Req 6.4, 6.6).
+pub async fn summary_cached(db: &Db, sha: &str, fp: &str) -> Result<bool, ShuntError> {
+    let (sha, fp) = (sha.to_string(), fp.to_string());
+    db.with_conn(move |c| {
+        c.query_row(
+            "SELECT 1 FROM shunt_content_cache \
+              WHERE content_sha256 = ?1 AND query_fingerprint = ?2 AND kind = ?3",
+            rusqlite::params![sha, fp, FILE_READ_KIND],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+    })
+    .await
+    .map_err(|e| ShuntError::Io(e.to_string()))
+}
+
 /// File-read summary store through the content cache's store-and-evict
 /// (same cap, same LRU order); sets `last_path` and returns the evicted
 /// count for the caller's `CONTENT_CACHE_EVICT` audit (Req 1.2, 5.2).

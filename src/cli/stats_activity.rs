@@ -7,8 +7,14 @@
 //! JSONL log only (the active file plus its rotated siblings), opened
 //! read-only; no store, no network. Counts are plain event counts, never
 //! token estimates, and they exist for days with no savings row at all.
+//!
+//! A redirect counts as followed (shunt-cache-efficiency Req 5.4) when any
+//! `smart_read` record for the same normalised file path — summary, cache
+//! hit, slice or direct read, by any agent — comes within
+//! [`FOLLOW_WINDOW_MS`] after it. The rates themselves are derived at render
+//! time ([`super::stats_table`]); only counts are collected.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::path::Path;
@@ -40,7 +46,14 @@ pub struct ActivityCounts {
     pub direct_reads: u64,
     /// Native reads the hook redirected to `smart_read` (`HOOK_REDIRECT`).
     pub hook_redirects: u64,
+    /// Redirects followed within [`FOLLOW_WINDOW_MS`] by a `smart_read`
+    /// record for the same file (shunt-cache-efficiency Req 5.4).
+    pub followed_redirects: u64,
 }
+
+/// How long after a redirect a `smart_read` of the same file still counts
+/// as following it: 10 minutes (design.md "Stats rates").
+pub const FOLLOW_WINDOW_MS: i64 = 10 * 60 * 1000;
 
 impl ActivityCounts {
     /// Adds another set of counts to this one.
@@ -50,6 +63,7 @@ impl ActivityCounts {
         self.slice_reads += other.slice_reads;
         self.direct_reads += other.direct_reads;
         self.hook_redirects += other.hook_redirects;
+        self.followed_redirects += other.followed_redirects;
     }
 
     /// Sum of two sets of counts.
@@ -74,16 +88,66 @@ impl ActivityCounts {
 /// (`.1` ... `.<keep>`) and counts the read events. Missing files are
 /// skipped; unparsable lines are ignored.
 pub fn collect(log_file: &Path, keep: u32) -> anyhow::Result<ActivityMap> {
-    let mut map = ActivityMap::new();
-    scan_file(log_file, &mut map)?;
+    let mut collector = Collector::default();
+    scan_file(log_file, &mut collector)?;
     for n in 1..=keep as usize {
-        scan_file(&rotated_path(log_file, n), &mut map)?;
+        scan_file(&rotated_path(log_file, n), &mut collector)?;
     }
-    Ok(map)
+    Ok(collector.finish())
+}
+
+/// Counts plus what the follow-through needs: every redirect with its key,
+/// time and path, and the times of the `smart_read` records per path. A
+/// redirect and its read may sit in different (rotated) files, so the
+/// matching waits until every file is read.
+#[derive(Default)]
+struct Collector {
+    map: ActivityMap,
+    redirects: Vec<(ActivityKey, i64, String)>,
+    reads: HashMap<String, Vec<i64>>,
+}
+
+impl Collector {
+    fn add(&mut self, event: Event) {
+        let Event {
+            key,
+            route,
+            epoch_ms,
+            file,
+        } = event;
+        if let Some(file) = file {
+            match route {
+                Route::Redirect => self.redirects.push((key.clone(), epoch_ms, file)),
+                _ => self.reads.entry(file).or_default().push(epoch_ms),
+            }
+        }
+        self.map.entry(key).or_default().bump(route);
+    }
+
+    /// The counts with each redirect's follow-through matched.
+    fn finish(mut self) -> ActivityMap {
+        for times in self.reads.values_mut() {
+            times.sort_unstable();
+        }
+        for (key, at, file) in self.redirects {
+            if self.reads.get(&file).is_some_and(|t| read_within(t, at)) {
+                self.map.entry(key).or_default().followed_redirects += 1;
+            }
+        }
+        self.map
+    }
+}
+
+/// Whether a read in the sorted `times` falls in `[at, at + window]`.
+fn read_within(times: &[i64], at: i64) -> bool {
+    let first = times.partition_point(|&t| t < at);
+    times
+        .get(first)
+        .is_some_and(|&t| t <= at.saturating_add(FOLLOW_WINDOW_MS))
 }
 
 /// Counts one file, opened read-only; a missing file contributes nothing.
-fn scan_file(path: &Path, map: &mut ActivityMap) -> anyhow::Result<()> {
+fn scan_file(path: &Path, collector: &mut Collector) -> anyhow::Result<()> {
     let file = match File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
@@ -91,8 +155,8 @@ fn scan_file(path: &Path, map: &mut ActivityMap) -> anyhow::Result<()> {
     };
     for line in BufReader::new(file).split(b'\n') {
         let line = line.with_context(|| read_failure(path))?;
-        if let Some((key, route)) = parse_line(&line) {
-            map.entry(key).or_default().bump(route);
+        if let Some(event) = parse_line(&line) {
+            collector.add(event);
         }
     }
     Ok(())
@@ -123,15 +187,69 @@ fn route_of(event_type: &str) -> Option<Route> {
     }
 }
 
-/// Key and route of one audit line; `None` for other events and for lines
-/// that are blank, garbled or lack a day, project or harness.
-fn parse_line(line: &[u8]) -> Option<(ActivityKey, Route)> {
+/// One read event of the audit log.
+struct Event {
+    key: ActivityKey,
+    route: Route,
+    epoch_ms: i64,
+    /// Normalised file path: the hook's `file_path`, the engine's `file`
+    /// (absent for content the caller passed in, `shunt_content`).
+    file: Option<String>,
+}
+
+/// The event of one audit line; `None` for other events and for lines that
+/// are blank, garbled or lack a day, project or harness.
+fn parse_line(line: &[u8]) -> Option<Event> {
     let record: Value = serde_json::from_slice(line).ok()?;
     let route = route_of(record.get("event_type")?.as_str()?)?;
-    let day = utc_day(record.get("epoch_ms")?.as_i64()?)?;
+    let epoch_ms = record.get("epoch_ms")?.as_i64()?;
+    let day = utc_day(epoch_ms)?;
     let project = record.get("project")?.as_str()?.to_string();
     let harness = record.get("agent_harness")?.as_str()?.to_string();
-    Some(((day, project, harness), route))
+    let field = match route {
+        Route::Redirect => "file_path",
+        _ => "file",
+    };
+    let file = record
+        .get("details")
+        .and_then(|d| d.get(field))
+        .and_then(Value::as_str)
+        .map(normalise_path);
+    Some(Event {
+        key: (day, project, harness),
+        route,
+        epoch_ms,
+        file,
+    })
+}
+
+/// The key a redirect and a later read of the same file share: the hook
+/// records the working-folder-joined path, the engine the canonical one
+/// (`\\?\` on Windows). The verbatim prefix goes, separators become `/`,
+/// `.` and `..` resolve lexically, and case folds (Windows and macOS
+/// ignore it; a rare false match elsewhere only nudges a heuristic rate).
+fn normalise_path(raw: &str) -> String {
+    let plain = match raw.strip_prefix(r"\\?\UNC\") {
+        Some(unc) => format!("//{unc}"),
+        None => raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string(),
+    };
+    let slashed = plain.replace('\\', "/").to_lowercase();
+    let mut parts: Vec<&str> = Vec::new();
+    for part in slashed.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            name => parts.push(name),
+        }
+    }
+    let joined = parts.join("/");
+    if slashed.starts_with('/') {
+        format!("/{joined}")
+    } else {
+        joined
+    }
 }
 
 /// `YYYY-MM-DD` (UTC) of an epoch-millisecond timestamp: the same day the

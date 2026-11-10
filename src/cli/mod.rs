@@ -14,6 +14,8 @@ pub mod stats_activity;
 pub mod stats_args;
 pub mod stats_client;
 pub mod stats_table;
+pub mod warmup;
+pub mod warmup_select;
 
 use std::process::ExitCode;
 
@@ -29,6 +31,7 @@ pub const NO_STATS_MESSAGE: &str = "No token-savings statistics recorded yet. Us
 
 pub use hook::run_hook;
 pub use prune::run_prune;
+pub use warmup::{WARMUP_USAGE, WarmupArgs, run_warmup};
 
 pub use stats_args::{STATS_USAGE, StatsArgs};
 

@@ -68,6 +68,15 @@ impl ShuntEngine {
         }
     }
 
+    /// Adds a project folder for the security rule: `mmhmem warmup` of a
+    /// repository other than the working folder judges its files by the
+    /// part of the path inside that repository, as an agent started there
+    /// would (shunt-cache-efficiency Req 6.2).
+    pub fn with_project(mut self, project: PathBuf) -> Self {
+        self.projects.push(project);
+        self
+    }
+
     /// The configured shunt threshold in lines (Req 3.9, default
     /// [`crate::config::DEFAULT_SHUNT_MIN_LINES`]).
     pub fn shunt_min_lines(&self) -> u32 {

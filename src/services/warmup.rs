@@ -39,6 +39,23 @@ pub struct WarmupReport {
     pub notes: Vec<String>,
 }
 
+impl WarmupReport {
+    /// Adds another batch's outcome (`mmhmem warmup` runs many batches and
+    /// reports once; shunt-cache-efficiency Req 6.5).
+    pub fn absorb(&mut self, other: WarmupReport) {
+        self.delegated += other.delegated;
+        self.cached += other.cached;
+        self.skipped_below_threshold += other.skipped_below_threshold;
+        self.skipped_security += other.skipped_security;
+        self.missing += other.missing;
+        self.denied += other.denied;
+        self.failed += other.failed;
+        self.worker_prompt_tokens += other.worker_prompt_tokens;
+        self.worker_completion_tokens += other.worker_completion_tokens;
+        self.notes.extend(other.notes);
+    }
+}
+
 /// Maximum number of paths in one warmup batch (Req 1.6).
 pub const MAX_WARMUP_PATHS: usize = 25;
 

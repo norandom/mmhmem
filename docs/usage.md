@@ -34,14 +34,23 @@ mmhmem stats
 mmhmem stats --json
 mmhmem prune --dry-run
 mmhmem prune
+mmhmem warmup --dry-run
+mmhmem warmup
 ```
 
 Statistics are grouped by day, project and agent. Estimated savings and
-client-reported values remain separately labelled. Pruning removes stale
+client-reported values remain separately labelled. Two rates show whether the
+cache and the hook work: `hit rate` (cache hits of all summary requests) and
+`follow-through` (hook redirects followed by a `smart_read` of the same file
+within 10 minutes); `--json` carries the counts behind them. Pruning removes stale
 cache rows for missing or changed files; preview with `--dry-run` first.
 It never touches the separate, size-bounded content cache behind
 `shunt_content`. Ask your agent to call `shunt_warmup` for key project files, up to 25 per batch,
-to prepare summaries before the first read.
+to prepare summaries before the first read, or run `mmhmem warmup` in a
+repository (or pass its folder) to summarise every large text file once,
+skipping ignored and security-critical files. `--dry-run` lists the files and
+the worker calls, `--max-files` (default 200) caps a run, and a second run only
+hits the cache.
 
 After a context clear, `/mmhmem-recap` retrieves the latest checkpoint without
 a service restart or worker model. `mmhmem setup` installs recap guidance for

@@ -12,5 +12,6 @@ Explicit user tool preferences prevail. Keep native search, build, test, and edi
 workflows, and follow existing checkpoint instructions.
 
 Do not claim savings from a connection or an attempted read; report only recorded
-results. Cache reuse depends on matching content and cache identity, including the
-question. This guidance does not guarantee model compliance.
+results. Identical content hits the shared summary for every agent; a custom
+question only changes the result with `answer_question: true`. This guidance does
+not guarantee model compliance.
