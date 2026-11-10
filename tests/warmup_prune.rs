@@ -18,8 +18,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN};
 use mmhmem::services::shunt::ShuntEngine;
 use mmhmem::services::shunt_cache::{
-    ContentCacheRow, cache_lookup, cache_store, content_cache_lookup,
-    content_cache_store_and_evict, query_fingerprint,
+    ContentCacheRow, SummaryRow, content_cache_lookup, content_cache_store_and_evict,
+    query_fingerprint, summary_lookup, summary_store_and_evict,
 };
 use mmhmem::storage::audit::AuditWriter;
 use mmhmem::storage::audit::sha256_hex;
@@ -280,6 +280,21 @@ fn open_store(data_dir: &Path) -> Db {
     Db::open(data_dir).expect("open store")
 }
 
+/// Seeds one file-read summary row (kind `file_read`, `last_path` set)
+/// exactly as a `smart_read` delegation would.
+async fn seed_file_row(db: &Db, path: &Path, sha: &str, fp: &str, summary: &str) {
+    let row = SummaryRow {
+        sha,
+        fingerprint: fp,
+        summary,
+        line_count: 20,
+        path,
+    };
+    summary_store_and_evict(db, row, 5000)
+        .await
+        .expect("seed file row");
+}
+
 async fn delegated_stats_rows(db: &Db) -> i64 {
     db.with_conn(|c| {
         c.query_row(
@@ -383,16 +398,8 @@ async fn warmup_mixed_batch_counts_every_outcome() {
         let body = std::fs::read(&cached_file).expect("read");
         let sha = sha256_hex(&body);
         let canonical = std::fs::canonicalize(&cached_file).expect("canonicalize");
-        cache_store(
-            &db,
-            &canonical,
-            &sha,
-            &query_fingerprint(QUESTION),
-            "seeded",
-            200,
-        )
-        .await
-        .expect("seed");
+        let fp = query_fingerprint(QUESTION);
+        seed_file_row(&db, &canonical, &sha, &fp, "seeded").await;
     }
     let small = write_lines(files.path(), "small.rs", 10);
     let secure = write_lines(files.path(), "auth_util.rs", 200);
@@ -479,26 +486,15 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
     let missing_sha = sha256_hex(b"gone content\n");
     {
         let db = open_store(data.path());
-        cache_store(
+        seed_file_row(
             &db,
             Path::new(&fresh_key),
             &fresh_sha,
             "fp",
             "fresh summary",
-            20,
         )
-        .await
-        .expect("seed fresh");
-        cache_store(
-            &db,
-            Path::new(&missing_key),
-            &missing_sha,
-            "fp",
-            "stale summary",
-            20,
-        )
-        .await
-        .expect("seed missing");
+        .await;
+        seed_file_row(&db, Path::new(&missing_key), &missing_sha, "fp", "stale").await;
     }
 
     let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
@@ -517,7 +513,7 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
     {
         let db = open_store(data.path());
         assert!(
-            cache_lookup(&db, Path::new(&missing_key), &missing_sha, "fp")
+            summary_lookup(&db, &missing_sha, "fp", Path::new(&missing_key))
                 .await
                 .expect("lookup")
                 .is_some(),
@@ -537,14 +533,14 @@ async fn prune_tool_dry_run_previews_then_real_run_removes() {
     {
         let db = open_store(data.path());
         assert!(
-            cache_lookup(&db, Path::new(&missing_key), &missing_sha, "fp")
+            summary_lookup(&db, &missing_sha, "fp", Path::new(&missing_key))
                 .await
                 .expect("lookup")
                 .is_none(),
             "real run removes the stale row"
         );
         assert!(
-            cache_lookup(&db, Path::new(&fresh_key), &fresh_sha, "fp")
+            summary_lookup(&db, &fresh_sha, "fp", Path::new(&fresh_key))
                 .await
                 .expect("lookup")
                 .is_some(),
@@ -577,19 +573,8 @@ async fn prune_tool_leaves_content_rows_untouched_and_counts_only_file_rows() {
     );
     {
         let db = open_store(data.path());
-        cache_store(&db, Path::new(&fresh_key), &fresh_sha, "fp", "fresh", 20)
-            .await
-            .expect("seed fresh");
-        cache_store(
-            &db,
-            Path::new(&missing_key),
-            &missing_sha,
-            "fp",
-            "stale",
-            20,
-        )
-        .await
-        .expect("seed missing");
+        seed_file_row(&db, Path::new(&fresh_key), &fresh_sha, "fp", "fresh").await;
+        seed_file_row(&db, Path::new(&missing_key), &missing_sha, "fp", "stale").await;
         for (sha, summary) in [(&content_one, "one"), (&content_two, "two")] {
             let row = ContentCacheRow {
                 content_sha256: sha,

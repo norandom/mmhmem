@@ -1,12 +1,19 @@
-//! Stale-cache pruning (corpus-warmup-prune Req 3, 4): a cache row is
-//! stale exactly when its file is missing or its content hash changed;
-//! only those rows are ever removed. `scan_stale` counts without deleting
-//! (preview); `delete_stale` removes exactly the stale rows and records
-//! one `PRUNE` audit summary. Identical logic serves the CLI and the
-//! tool, so both transports behave the same by construction.
+//! Stale-cache pruning (corpus-warmup-prune Req 3, 4; shunt-cache-efficiency
+//! Req 7): the file-read summaries in `shunt_content_cache` (kind
+//! `file_read`) are checked at their `last_path`; a row is stale exactly
+//! when that file is missing or its content hash differs from the row's;
+//! only those rows are ever removed. Rows without a `last_path` (written by
+//! `shunt_content`, which has no file) and rows of other kinds are neither
+//! counted nor touched (shunt-content-tool Req 4.4). `scan_stale` counts
+//! without deleting (preview); `delete_stale` removes exactly the stale
+//! rows and records one `PRUNE` audit summary. Identical logic serves the
+//! CLI and the tool, so both transports behave the same by construction.
+
+use std::collections::HashMap;
 
 use serde::Serialize;
 
+use super::shunt_cache::FILE_READ_KIND;
 use super::shunt_types::CallCtx;
 use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
@@ -29,11 +36,11 @@ impl PruneReport {
     }
 }
 
-/// One stale cache row, keyed by (file_path, content_sha256) — every
-/// fingerprint variant of a stale file goes together.
+/// One stale cache row, by its key within kind `file_read`: every question
+/// variant of a stale content is its own row and goes on its own merits.
 struct StaleRow {
-    path: String,
     sha: String,
+    fp: String,
 }
 
 /// Preview pass (Req 3.2, 4.2): counts only — nothing is deleted.
@@ -54,23 +61,16 @@ pub async fn delete_stale(
     if report.removed_total() == 0 {
         return Ok(report); // nothing removed → no summary event
     }
-    // Distinct (path, sha) pairs: every fingerprint row under a stale pair
-    // goes together, and each pair is deleted exactly once.
-    let stale: Vec<(String, String)> = missing
-        .into_iter()
-        .chain(changed)
-        .map(|row| (row.path, row.sha))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
+    // Each stale row by its key; the key is unique, so each goes once.
+    let stale: Vec<StaleRow> = missing.into_iter().chain(changed).collect();
     let removed = db
         .with_conn(move |c| {
             let mut removed = 0usize;
-            for (path, sha) in &stale {
+            for row in &stale {
                 removed += c.execute(
-                    "DELETE FROM shunt_file_cache \
-                     WHERE file_path = ?1 AND content_sha256 = ?2",
-                    rusqlite::params![path, sha],
+                    "DELETE FROM shunt_content_cache \
+                     WHERE content_sha256 = ?1 AND query_fingerprint = ?2 AND kind = ?3",
+                    rusqlite::params![row.sha, row.fp, FILE_READ_KIND],
                 )?;
             }
             Ok(removed)
@@ -90,31 +90,33 @@ pub async fn delete_stale(
     Ok(report)
 }
 
-/// Counts every cache row: stale-missing, stale-changed, or fresh
-/// (Req 3.1). Unreadable files count as stale-missing — the row can
-/// never be served again, so pruning it is the honest outcome.
+/// Counts every file-read row with a known last path: stale-missing,
+/// stale-changed, or fresh (Req 3.1, 7.1, 7.2). Unreadable files count as
+/// stale-missing — the row can never be served from there again, so
+/// pruning it is the honest outcome. Each path is hashed once.
 async fn classify(db: &Db) -> anyhow::Result<(Vec<StaleRow>, Vec<StaleRow>, u32)> {
-    let rows: Vec<(String, String)> = db
+    let rows: Vec<(String, String, String)> = db
         .with_conn(|c| {
-            let mut stmt = c.prepare("SELECT file_path, content_sha256 FROM shunt_file_cache")?;
+            let mut stmt = c.prepare(
+                "SELECT content_sha256, query_fingerprint, last_path FROM shunt_content_cache \
+                  WHERE kind = ?1 AND last_path IS NOT NULL",
+            )?;
             let mapped =
-                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                stmt.query_map([FILE_READ_KIND], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
             mapped.collect::<Result<Vec<_>, _>>()
         })
         .await?;
-    let mut missing = Vec::new();
-    let mut changed = Vec::new();
-    let mut fresh = 0u32;
-    for (path, sha) in rows {
-        match tokio::fs::read(&path).await {
-            Err(_) => missing.push(StaleRow { path, sha }),
-            Ok(bytes) => {
-                if sha256_hex(&bytes) == sha {
-                    fresh += 1;
-                } else {
-                    changed.push(StaleRow { path, sha });
-                }
-            }
+    let mut current: HashMap<String, Option<String>> = HashMap::new();
+    let (mut missing, mut changed, mut fresh) = (Vec::new(), Vec::new(), 0u32);
+    for (sha, fp, path) in rows {
+        if !current.contains_key(&path) {
+            let hash = tokio::fs::read(&path).await.ok().map(|b| sha256_hex(&b));
+            current.insert(path.clone(), hash);
+        }
+        match current.get(&path).and_then(Option::as_deref) {
+            None => missing.push(StaleRow { sha, fp }),
+            Some(now) if now == sha => fresh += 1,
+            Some(_) => changed.push(StaleRow { sha, fp }),
         }
     }
     Ok((missing, changed, fresh))
@@ -176,7 +178,12 @@ impl PruneService {
 mod tests {
     use super::*;
 
-    use crate::services::shunt_cache::{cache_lookup, cache_store};
+    use std::path::Path;
+
+    use crate::services::shunt_cache::{
+        ContentCacheRow, SummaryRow, content_cache_store_and_evict, summary_lookup,
+        summary_store_and_evict,
+    };
     use crate::storage::db::Db;
 
     const FP: &str = "fp0001";
@@ -212,40 +219,62 @@ mod tests {
         }
     }
 
-    async fn seed(fx: &Fixture, name: &str, sha: &str) -> String {
+    /// Seeds a file-read row under `fp` whose `last_path` is `name` in the
+    /// fixture directory (the file may or may not exist).
+    async fn seed_fp(fx: &Fixture, name: &str, sha: &str, fp: &str) -> String {
         let path = fx._data.path().join(name).display().to_string();
-        cache_store(&fx.db, std::path::Path::new(&path), sha, FP, "summary", 10)
+        let row = SummaryRow {
+            sha,
+            fingerprint: fp,
+            summary: "summary",
+            line_count: 10,
+            path: Path::new(&path),
+        };
+        summary_store_and_evict(&fx.db, row, 5000)
             .await
             .expect("seed");
         path
     }
 
+    async fn seed(fx: &Fixture, name: &str, sha: &str) -> String {
+        seed_fp(fx, name, sha, FP).await
+    }
+
+    /// (fresh, changed, missing) rows with their paths; the changed and
+    /// missing rows cache different contents (the key has no path).
     async fn seeded_fixture() -> (Fixture, String, String, String) {
         let fx = open();
         let dir = fx._data.path();
         // Fresh: file present, hash matches the stored one.
         std::fs::write(dir.join("fresh.rs"), "current content\n").expect("write");
-        let fresh_sha = sha256_hex(b"current content\n");
-        let fresh = seed(&fx, "fresh.rs", &fresh_sha).await;
+        let fresh = seed(&fx, "fresh.rs", &sha256_hex(b"current content\n")).await;
         // Changed: file present, hash differs from the stored one.
         std::fs::write(dir.join("changed.rs"), "new content\n").expect("write");
-        let old_sha = sha256_hex(b"old content\n");
-        let changed = seed(&fx, "changed.rs", &old_sha).await;
-        // Missing: no file at all.
-        let missing = seed(&fx, "missing.rs", &old_sha).await;
+        let changed = seed(&fx, "changed.rs", &sha256_hex(b"old content\n")).await;
+        // Missing: no file at the last path.
+        let missing = seed(&fx, "missing.rs", &sha256_hex(b"gone content\n")).await;
         (fx, fresh, changed, missing)
     }
 
     async fn lookup(fx: &Fixture, path: &str, sha: &str) -> Option<String> {
-        cache_lookup(&fx.db, std::path::Path::new(path), sha, FP)
+        summary_lookup(&fx.db, sha, FP, Path::new(path))
             .await
             .expect("lookup")
+    }
+
+    async fn row_count(fx: &Fixture) -> i64 {
+        fx.db
+            .with_conn(|c| {
+                c.query_row("SELECT COUNT(*) FROM shunt_content_cache", [], |r| r.get(0))
+            })
+            .await
+            .expect("count")
     }
 
     #[tokio::test]
     async fn scan_counts_three_kinds_without_deleting() {
         // Req 3.2: the preview counts and touches nothing.
-        let (fx, fresh, changed, missing) = seeded_fixture().await;
+        let (fx, _fresh, _changed, _missing) = seeded_fixture().await;
         let report = scan_stale(&fx.db).await.expect("scan");
         assert_eq!(
             report,
@@ -255,28 +284,13 @@ mod tests {
                 kept_fresh: 1,
             }
         );
-        assert!(
-            lookup(&fx, &fresh, &sha256_hex(b"current content\n"))
-                .await
-                .is_some()
-        );
-        assert!(
-            lookup(&fx, &changed, &sha256_hex(b"old content\n"))
-                .await
-                .is_some()
-        );
-        assert!(
-            lookup(&fx, &missing, &sha256_hex(b"old content\n"))
-                .await
-                .is_some()
-        );
+        assert_eq!(row_count(&fx).await, 3, "the preview deletes nothing");
     }
 
     #[tokio::test]
     async fn delete_removes_exactly_the_stale_rows() {
-        // Req 3.1, 4.3: stale rows go, fresh rows stay.
+        // Req 3.1, 4.3; shunt-cache-efficiency 7.1: stale rows go, fresh stay.
         let (fx, fresh, changed, missing) = seeded_fixture().await;
-        let old_sha = sha256_hex(b"old content\n");
         let report = delete_stale(&fx.db, &fx.audit, ctx())
             .await
             .expect("delete");
@@ -289,12 +303,73 @@ mod tests {
                 .is_some()
         );
         assert!(
-            lookup(&fx, &changed, &old_sha).await.is_none(),
+            lookup(&fx, &changed, &sha256_hex(b"old content\n"))
+                .await
+                .is_none(),
             "changed row must be gone"
         );
         assert!(
-            lookup(&fx, &missing, &old_sha).await.is_none(),
+            lookup(&fx, &missing, &sha256_hex(b"gone content\n"))
+                .await
+                .is_none(),
             "missing row must be gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_row_last_read_at_a_path_that_still_holds_its_content_is_kept() {
+        // shunt-cache-efficiency 7.2: the content moved; the last read at
+        // the new path updated `last_path`, so the row is fresh.
+        let fx = open();
+        let sha = sha256_hex(b"moved content\n");
+        let old = seed(&fx, "old_place.rs", &sha).await;
+        let new_path = fx._data.path().join("new_place.rs");
+        std::fs::write(&new_path, "moved content\n").expect("write");
+        assert!(!Path::new(&old).exists());
+        let hit = summary_lookup(&fx.db, &sha, FP, &new_path).await;
+        assert!(hit.expect("lookup").is_some());
+        let report = delete_stale(&fx.db, &fx.audit, ctx())
+            .await
+            .expect("delete");
+        assert_eq!(report, report_of(0, 0, 1));
+        assert_eq!(row_count(&fx).await, 1);
+    }
+
+    #[tokio::test]
+    async fn rows_without_a_last_path_and_rows_of_other_kinds_are_untouched() {
+        // shunt-content-tool Req 4.4: content rows have no file to check,
+        // so prune neither counts nor deletes them; other kinds likewise.
+        let fx = open();
+        let row = ContentCacheRow {
+            content_sha256: &sha256_hex(b"tool output\n"),
+            query_fingerprint: FP,
+            kind: "file_read",
+            structural_summary: "content summary",
+            line_count: 200,
+        };
+        content_cache_store_and_evict(&fx.db, row, 5000)
+            .await
+            .expect("content row");
+        fx.db
+            .with_conn(|c| {
+                c.execute(
+                    "INSERT INTO shunt_content_cache (content_sha256, query_fingerprint, kind, \
+                      structural_summary, line_count, created_at_epoch, last_hit_epoch, hits, \
+                      last_path) VALUES ('sha', 'fp', 'other_kind', 's', 1, 1, 1, 0, '/gone.rs')",
+                    [],
+                )
+            })
+            .await
+            .expect("other kind");
+        seed(&fx, "missing.rs", &sha256_hex(b"gone content\n")).await;
+        let report = delete_stale(&fx.db, &fx.audit, ctx())
+            .await
+            .expect("delete");
+        assert_eq!(report, report_of(1, 0, 0), "only the file-read row counts");
+        assert_eq!(
+            row_count(&fx).await,
+            2,
+            "content and other-kind rows survive"
         );
     }
 
@@ -331,21 +406,11 @@ mod tests {
 
     #[tokio::test]
     async fn fingerprint_variants_go_together() {
-        // Same (path, sha) cached under two questions: one stale file
-        // version takes all its fingerprint rows.
+        // One stale content cached under two questions: both rows go.
         let fx = open();
         let old_sha = sha256_hex(b"old content\n");
         let path = seed(&fx, "gone.rs", &old_sha).await;
-        cache_store(
-            &fx.db,
-            std::path::Path::new(&path),
-            &old_sha,
-            "fp0002",
-            "other summary",
-            10,
-        )
-        .await
-        .expect("second fingerprint");
+        seed_fp(&fx, "gone.rs", &old_sha, "fp0002").await;
         let report = delete_stale(&fx.db, &fx.audit, ctx())
             .await
             .expect("delete");
@@ -353,14 +418,7 @@ mod tests {
             report.removed_missing, 2,
             "counts are per cache row (one per fingerprint)"
         );
-        assert!(
-            lookup(&fx, &path, &old_sha).await.is_none(),
-            "both fingerprint rows must be gone"
-        );
-        let still: Option<String> =
-            cache_lookup(&fx.db, std::path::Path::new(&path), &old_sha, "fp0002")
-                .await
-                .expect("lookup");
-        assert!(still.is_none(), "second fingerprint row must be gone too");
+        assert!(lookup(&fx, &path, &old_sha).await.is_none());
+        assert_eq!(row_count(&fx).await, 0, "both fingerprint rows are gone");
     }
 }

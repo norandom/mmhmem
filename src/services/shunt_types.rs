@@ -46,12 +46,16 @@ pub struct ReadRequest<'a> {
     pub task: Option<&'a str>,
     /// Raw (uncanonicalized) agent-supplied path.
     pub path: &'a str,
-    /// The agent's question.
+    /// The agent's question; empty or the default question asks for the
+    /// shared structural summary (shunt-cache-efficiency Req 1.1).
     pub question: &'a str,
     /// Targeted-read offset (1-based), if given.
     pub offset: Option<u32>,
     /// Targeted-read limit, if given.
     pub limit: Option<u32>,
+    /// Ask the worker to answer a custom `question` when no answer to it is
+    /// cached, instead of serving the structural summary (Req 2.3).
+    pub answer_question: bool,
 }
 
 impl<'a> ReadRequest<'a> {
@@ -87,6 +91,7 @@ pub enum Evaluation {
         content_sha256: String,
         line_count: usize,
         question: String,
+        answer_question: bool,
     },
 }
 
@@ -110,6 +115,9 @@ pub enum ReadOutcome {
     Cached {
         summary: String,
         avoided_input_tokens_est: u64,
+        /// [`QUESTION_NOT_APPLIED`] when a custom question got the shared
+        /// structural summary (shunt-cache-efficiency Req 2.2).
+        note: Option<String>,
     },
     /// Stage 4: worker-delegated summary (Req 3.5).
     Shunted {
@@ -119,8 +127,16 @@ pub enum ReadOutcome {
         /// Worker token usage for this call (carried so batch warmup can
         /// report honest worker token totals, corpus-warmup-prune Req 1.5).
         usage: WorkerUsage,
+        /// [`QUESTION_NOT_APPLIED`] when a custom question got the shared
+        /// structural summary (shunt-cache-efficiency Req 2.2).
+        note: Option<String>,
     },
 }
+
+/// One-line note appended when a custom question was answered with the
+/// shared structural summary (shunt-cache-efficiency Req 2.2).
+pub const QUESTION_NOT_APPLIED: &str = "Served the shared structural summary; the question was not applied. \
+     Call smart_read again with answer_question: true for an answer to it.";
 
 /// smart_read input/IO errors (Req 3.8 + confinement + worker failures).
 #[derive(Debug)]

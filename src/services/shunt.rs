@@ -11,47 +11,25 @@
 //!   3. content-addressed cache hit -> cached summary, zero worker calls (Req 3.4, 3.6)
 //!   4. cache miss -> worker-model shunt, summary cached (Req 3.5-3.7)
 //!
+//! Stages 3-4 and their lookup policy live in `shunt_lookup.rs`.
+//!
 //! Path confinement (design.md "Security Considerations" + amended rule):
 //! every agent-supplied path is canonicalized and must lie under one of
 //! `AGENT_MEM_ALLOWED_ROOTS`; violations are rejected AND audited.
 
 use std::path::PathBuf;
-use std::time::Instant;
-
-use serde_json::Value;
 
 use crate::config::Config;
 use crate::services::paths::{AllowedRoots, PathError};
 pub use crate::services::security_path::{is_security_critical_in, is_security_critical_path};
 use crate::services::session_bus::SessionBus;
-use crate::services::shunt_cache as cache;
+use crate::services::shunt_lookup::SummaryAsk;
 pub use crate::services::shunt_types::{BypassReason, ReadOutcome, ShuntError};
 use crate::services::shunt_types::{CallCtx, Evaluation, FileView, ReadRequest, ShuntSource};
 use crate::services::stats;
 use crate::services::worker::WorkerClient;
 use crate::storage::audit::{AuditEventType, AuditWriter, sha256_hex};
 use crate::storage::db::Db;
-
-/// Bundled audit metadata for a shunt outcome (keeps audit_shunt under the
-/// clippy 7-arg limit, Req 13). The `ShuntSource` seam (shunt-content-tool
-/// design.md) labels the audit/stat/breadcrumb helpers for both callers.
-struct ShuntAuditMeta<'a> {
-    source: &'a ShuntSource,
-    sha: &'a str,
-    line_count: usize,
-    worker_info: Option<(&'a str, u64, crate::services::worker::WorkerUsage)>,
-    avoided_est: u64,
-}
-
-/// Cache-miss delegation inputs (bundled to stay under the clippy 7-arg limit).
-struct Miss<'a> {
-    source: ShuntSource,
-    sha: String,
-    fp: String,
-    line_count: usize,
-    question: &'a str,
-    raw_chars: usize,
-}
 
 /// The deterministic read-shunting engine (design.md ShuntEngine).
 #[derive(Clone)]
@@ -168,9 +146,16 @@ impl ShuntEngine {
                 content_sha256,
                 line_count,
                 question,
+                answer_question,
             } => {
-                self.shunt(&ctx, path, content_sha256, line_count, question)
-                    .await
+                let ask = SummaryAsk {
+                    path,
+                    sha: content_sha256,
+                    line_count,
+                    question,
+                    answer_question,
+                };
+                self.shunt(&ctx, ask).await
             }
         }
     }
@@ -204,145 +189,7 @@ impl ShuntEngine {
             content_sha256: view.sha.to_string(),
             line_count: view.total,
             question: req.question.to_string(),
-        })
-    }
-
-    /// Stage 3-4: cache lookup, then worker delegation + cache store.
-    async fn shunt(
-        &self,
-        ctx: &CallCtx<'_>,
-        path: PathBuf,
-        sha: String,
-        line_count: usize,
-        question: String,
-    ) -> Result<ReadOutcome, ShuntError> {
-        let fp = cache::query_fingerprint(&question);
-        let raw_chars = cache::raw_chars(&path).await?;
-        if let Some(summary) = cache::cache_lookup(&self.db, &path, &sha, &fp).await? {
-            let est = stats::estimate_cache_hit(raw_chars);
-            let source = ShuntSource::File(path);
-            return self
-                .serve_cached(ctx, &source, &sha, line_count, est, summary)
-                .await;
-        }
-        self.delegate(
-            ctx,
-            Miss {
-                source: ShuntSource::File(path),
-                sha,
-                fp,
-                line_count,
-                question: &question,
-                raw_chars,
-            },
-        )
-        .await
-    }
-
-    /// Cache-hit path (Req 3.4): audited, counted, breadcrumbed, < 50 ms, no worker call.
-    async fn serve_cached(
-        &self,
-        ctx: &CallCtx<'_>,
-        source: &ShuntSource,
-        sha: &str,
-        line_count: usize,
-        est: u64,
-        summary: String,
-    ) -> Result<ReadOutcome, ShuntError> {
-        let meta = ShuntAuditMeta {
-            source,
-            sha,
-            line_count,
-            worker_info: None,
-            avoided_est: est,
-        };
-        self.audit_shunt(ctx, AuditEventType::IoShuntCacheHit, &meta);
-        self.record_stat(ctx, stats::kind::SHUNT_CACHE_HIT, est, source, sha, None)
-            .await;
-        self.crumb(
-            ctx,
-            "smart_read:cache_hit",
-            source,
-            &format!("cached summary for {line_count}-line file"),
-        )
-        .await;
-        Ok(ReadOutcome::Cached {
-            summary,
-            avoided_input_tokens_est: est,
-        })
-    }
-
-    /// Cache-miss path (Req 3.5): delegate to the worker, store in the
-    /// content-addressed cache, audit + count + breadcrumb.
-    async fn delegate(&self, ctx: &CallCtx<'_>, miss: Miss<'_>) -> Result<ReadOutcome, ShuntError> {
-        let Miss {
-            source,
-            sha,
-            fp,
-            line_count,
-            question,
-            raw_chars,
-        } = miss;
-        // ShuntSource seam (task 1.1). Content delegation lives in the
-        // `shunt_content` impl (task 2.2) — only the File variant runs here.
-        let file_path = match &source {
-            ShuntSource::File(path) => path,
-            ShuntSource::Content { .. } => {
-                return Err(ShuntError::Invalid(
-                    "content delegation must go through shunt_content".to_string(),
-                ));
-            }
-        };
-        let worker = self
-            .worker
-            .as_ref()
-            .ok_or(ShuntError::WorkerNotConfigured)?;
-        let payload = cache::line_numbered_payload(file_path).await?;
-        let t0 = Instant::now();
-        let (summary, usage) = worker
-            .summarize_file(&payload, question)
-            .await
-            .map_err(|e| {
-                let _ = self.audit.write_event(
-                    AuditEventType::WorkerError,
-                    ctx.harness,
-                    ctx.project,
-                    serde_json::json!({"file": file_path.display().to_string(), "error": e.to_string()}),
-                );
-                ShuntError::Worker(e.to_string())
-            })?;
-        let latency_ms = t0.elapsed().as_millis() as u64;
-        let est = stats::estimate_delegated_read(raw_chars, summary.len());
-        cache::cache_store(&self.db, file_path, &sha, &fp, &summary, line_count).await?;
-        let meta = ShuntAuditMeta {
-            source: &source,
-            sha: &sha,
-            line_count,
-            worker_info: Some((worker.model(), latency_ms, usage)),
-            avoided_est: est,
-        };
-        self.audit_shunt(ctx, AuditEventType::IoShuntDelegated, &meta);
-        self.record_stat(
-            ctx,
-            stats::kind::SHUNT_DELEGATED,
-            est,
-            &source,
-            &sha,
-            Some(usage),
-        )
-        .await;
-        self.crumb(
-            ctx,
-            "smart_read:delegated",
-            &source,
-            &format!("worker summary for {line_count}-line file ({latency_ms} ms)"),
-        )
-        .await;
-        Ok(ReadOutcome::Shunted {
-            summary,
-            latency_ms,
-            avoided_input_tokens_est: est,
-            usage,
+            answer_question: req.answer_question,
         })
     }
 
@@ -414,26 +261,6 @@ impl ShuntEngine {
     /// of a canonical `path` inside its project.
     pub fn is_security_critical(&self, path: &std::path::Path) -> bool {
         is_security_critical_in(path, &self.projects)
-    }
-
-    /// One audit line for a shunt outcome (cache hit / delegated). Details
-    /// carry the explicit `source` label plus the source's subject
-    /// (`file` path or `hint`), the sha, the line count and the estimate
-    /// (design.md ShuntSource seam).
-    fn audit_shunt(&self, ctx: &CallCtx<'_>, event: AuditEventType, meta: &ShuntAuditMeta<'_>) {
-        let mut details = meta.source.audit_details();
-        details["sha256"] = serde_json::json!(meta.sha);
-        details["total_lines"] = serde_json::json!(meta.line_count);
-        details["avoided_input_tokens_est"] = serde_json::json!(meta.avoided_est);
-        if let Some((model, latency_ms, usage)) = meta.worker_info {
-            details["worker_model"] = Value::from(model);
-            details["latency_ms"] = Value::from(latency_ms);
-            details["worker_prompt_tokens"] = Value::from(usage.prompt_tokens);
-            details["worker_completion_tokens"] = Value::from(usage.completion_tokens);
-        }
-        let _ = self
-            .audit
-            .write_event(event, ctx.harness, ctx.project, details);
     }
 
     /// One token_stats row for a shunt outcome (Req 10.1, 10.3). The

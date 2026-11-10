@@ -354,8 +354,9 @@ fn every_event_type_is_unique_screaming_snake_case_and_written_verbatim() {
     // 21: corpus-warmup-prune added the WARMUP (Req 1.8), PRUNE
     // (Req 3.5), and MEM_SEARCH_BREADCRUMBS (Req 10); read-routing-hooks added HOOK_REDIRECT, HOOK_PASS;
     // reliable-installers added STATUS_CHECK (Req 6.1);
-    // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3) → 22.
-    assert_eq!(names.len(), 22);
+    // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3) → 22;
+    // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2) → 23.
+    assert_eq!(names.len(), 23);
     let unique: std::collections::BTreeSet<_> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "event type names must be unique");
     for name in &names {

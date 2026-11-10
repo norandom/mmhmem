@@ -106,11 +106,12 @@ pub enum AuditEventType {
     HookPass,
     StatusCheck,
     ContentCacheEvict,
+    CacheMigrated,
 }
 
 impl AuditEventType {
     /// Every variant in declaration order (used by the tests).
-    pub const ALL: [AuditEventType; 22] = [
+    pub const ALL: [AuditEventType; 23] = [
         AuditEventType::SessionResume,
         AuditEventType::SessionCheckpoint,
         AuditEventType::IoTargetedRead,
@@ -133,11 +134,12 @@ impl AuditEventType {
         AuditEventType::HookPass,
         AuditEventType::StatusCheck,
         AuditEventType::ContentCacheEvict,
+        AuditEventType::CacheMigrated,
     ];
 
     /// The SCREAMING_SNAKE_CASE name written into the record.
     pub fn as_str(self) -> &'static str {
-        const NAMES: [&str; 22] = [
+        const NAMES: [&str; 23] = [
             "SESSION_RESUME",
             "SESSION_CHECKPOINT",
             "IO_TARGETED_READ",
@@ -160,6 +162,7 @@ impl AuditEventType {
             "HOOK_PASS",
             "STATUS_CHECK",
             "CONTENT_CACHE_EVICT",
+            "CACHE_MIGRATED",
         ];
         NAMES[self as usize]
     }
@@ -370,7 +373,10 @@ mod tests {
         assert_eq!(AuditEventType::HookPass.as_str(), "HOOK_PASS");
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookRedirect));
         assert!(AuditEventType::ALL.contains(&AuditEventType::HookPass));
-        assert_eq!(AuditEventType::ALL.len(), 22); // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3)
+        // shunt-content-tool added CONTENT_CACHE_EVICT (Req 4.3);
+        // shunt-cache-efficiency added CACHE_MIGRATED (task 1.2).
+        assert_eq!(AuditEventType::ALL.len(), 23);
+        assert_eq!(AuditEventType::CacheMigrated.as_str(), "CACHE_MIGRATED");
         assert_eq!(AuditEventType::StatusCheck.as_str(), "STATUS_CHECK");
     }
 }

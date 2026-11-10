@@ -168,25 +168,17 @@ async fn seed_cache_row(data_dir: &Path, file: &Path, question: &str) {
     let fp = shunt_cache::query_fingerprint(question);
     let canonical = std::fs::canonicalize(file).unwrap();
     let db = Db::open(data_dir).unwrap();
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO shunt_file_cache \
-             (file_path, content_sha256, query_fingerprint, structural_summary, \
-              line_count, created_at_epoch) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
-                canonical.to_string_lossy(),
-                sha,
-                fp,
-                format!("summary text {CACHE_MARKER}"),
-                BIG_FILE_LINES as i64,
-                0i64
-            ],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
+    let summary = format!("summary text {CACHE_MARKER}");
+    let row = shunt_cache::SummaryRow {
+        sha: &sha,
+        fingerprint: &fp,
+        summary: &summary,
+        line_count: BIG_FILE_LINES,
+        path: &canonical,
+    };
+    shunt_cache::summary_store_and_evict(&db, row, 5000)
+        .await
+        .unwrap();
     drop(db);
 }
 

@@ -61,7 +61,8 @@ pub struct SmartReadParams {
     pub agent_harness: String,
     /// File path (confined to AGENT_MEM_ALLOWED_ROOTS).
     pub file_path: String,
-    /// Question for the worker on shunted reads.
+    /// Optional question. Omit it for the shared structural summary; another
+    /// question is answered only with `answer_question: true`.
     #[serde(default = "default_question")]
     pub question: String,
     /// Targeted-read offset (1-based); with `limit` returns an exact slice.
@@ -70,6 +71,10 @@ pub struct SmartReadParams {
     /// Targeted-read limit.
     #[serde(default)]
     pub limit: Option<u32>,
+    /// Set true only when the shared summary is not enough: the worker then
+    /// answers `question` and the answer is cached for that question.
+    #[serde(default)]
+    pub answer_question: bool,
 }
 
 fn default_question() -> String {

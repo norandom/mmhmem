@@ -23,9 +23,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+use super::audit::{AuditEventType, AuditWriter};
 use super::db_init;
-#[cfg(test)]
-use super::schema;
+use super::schema::{self, CacheMigration};
 use crate::config::{Config, DEFAULT_BUSY_TIMEOUT_MS};
 
 /// Database file name inside the configured data dir (`<data_dir>/memory.db`).
@@ -40,18 +40,28 @@ pub struct Db {
 impl Db {
     /// Opens `<config.data_dir>/memory.db` (Req 7.5 env-configurable data
     /// dir) with the profile's busy timeout (`AGENT_MEM_BUSY_TIMEOUT_MS`).
+    /// The one-time v3 summary-cache copy, when this open performed it, is
+    /// audited as `CACHE_MIGRATED` to the configured log (the product's
+    /// opens all go through here; `open`/`open_at` serve tests and tools).
     pub fn open_for_config(config: &Config) -> Result<Db> {
-        Self::open_with_timeout(&config.data_dir, config.busy_timeout_ms)
+        let (db, migrated) = Self::open_with_timeout(&config.data_dir, config.busy_timeout_ms)?;
+        if let Some(migration) = migrated {
+            audit_cache_migration(&AuditWriter::from_config(config), migration);
+        }
+        Ok(db)
     }
 
     /// Opens the database in `data_dir` with the default busy timeout,
     /// creating the directory if missing.
     pub fn open(data_dir: &Path) -> Result<Db> {
-        Self::open_with_timeout(data_dir, DEFAULT_BUSY_TIMEOUT_MS)
+        Ok(Self::open_with_timeout(data_dir, DEFAULT_BUSY_TIMEOUT_MS)?.0)
     }
 
     /// Opens `<data_dir>/memory.db`, creating the directory if missing.
-    fn open_with_timeout(data_dir: &Path, busy_timeout_ms: u64) -> Result<Db> {
+    fn open_with_timeout(
+        data_dir: &Path,
+        busy_timeout_ms: u64,
+    ) -> Result<(Db, Option<CacheMigration>)> {
         std::fs::create_dir_all(data_dir)
             .with_context(|| format!("cannot create data dir {}", data_dir.display()))?;
         Self::open_at_with_timeout(&data_dir.join(DB_FILE_NAME), busy_timeout_ms)
@@ -60,7 +70,7 @@ impl Db {
     /// Opens the database file at `db_path` (its parent directory must
     /// exist) with the default busy timeout.
     pub fn open_at(db_path: &Path) -> Result<Db> {
-        Self::open_at_with_timeout(db_path, DEFAULT_BUSY_TIMEOUT_MS)
+        Ok(Self::open_at_with_timeout(db_path, DEFAULT_BUSY_TIMEOUT_MS)?.0)
     }
 
     /// Read-only sibling of [`Db::open_at`] for reporting surfaces (Req
@@ -88,15 +98,19 @@ impl Db {
     /// and `busy_timeout`, and applies the schema idempotently. The timeout
     /// is set BEFORE the schema batch so a concurrent first-open by another
     /// process waits instead of failing (Req 6.1/6.2).
-    fn open_at_with_timeout(db_path: &Path, busy_timeout_ms: u64) -> Result<Db> {
+    fn open_at_with_timeout(
+        db_path: &Path,
+        busy_timeout_ms: u64,
+    ) -> Result<(Db, Option<CacheMigration>)> {
         let mut conn = Connection::open(db_path)
             .with_context(|| format!("cannot open sqlite db {}", db_path.display()))?;
         conn.busy_timeout(Duration::from_millis(busy_timeout_ms))
             .with_context(|| format!("cannot set busy timeout on {}", db_path.display()))?;
-        db_init::initialize(&mut conn, busy_timeout_ms)?;
-        Ok(Db {
+        let migrated = db_init::initialize(&mut conn, busy_timeout_ms)?;
+        let db = Db {
             conn: Arc::new(Mutex::new(conn)),
-        })
+        };
+        Ok((db, migrated))
     }
 
     /// Runs `f` against the connection on a blocking thread and returns its
@@ -118,6 +132,22 @@ impl Db {
         .await
         .context("storage blocking task panicked")?;
         outcome.map_err(anyhow::Error::from)
+    }
+}
+
+/// One `CACHE_MIGRATED` record for the v3 copy (shunt-cache-efficiency
+/// task 1.2): written after the schema transaction committed, so exactly
+/// one open per store ever reports it. Best-effort, like every audit write.
+fn audit_cache_migration(audit: &AuditWriter, migration: CacheMigration) {
+    let details = serde_json::json!({
+        "rows": migration.rows,
+        "from_version": migration.from_version,
+        "to_version": schema::SCHEMA_VERSION,
+        "from_table": "shunt_file_cache",
+        "to_table": "shunt_content_cache",
+    });
+    if let Err(e) = audit.write_event(AuditEventType::CacheMigrated, "mmhmem", "store", details) {
+        tracing::warn!("CACHE_MIGRATED audit failed: {e}");
     }
 }
 

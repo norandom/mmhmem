@@ -206,3 +206,42 @@ async fn direct_targeted_session_and_worker_failure_do_not_record_summary_saving
     assert_eq!(rig.count.load(Ordering::SeqCst), 1);
     assert!(rig.rows().await.is_empty());
 }
+
+#[tokio::test]
+async fn a_custom_question_gets_the_shared_summary_and_a_note_until_answer_question_is_set() {
+    // shunt-cache-efficiency 2.1-2.3 through the real tool: the note is
+    // rendered, `answer_question` reaches the service, the answer is cached.
+    let note = mmhmem::services::shunt_types::QUESTION_NOT_APPLIED;
+    let mut rig = Rig::new().await;
+    let path = rig.file("transform.rs", 320);
+    let first = rig.call("smart_read", read_args(&path)).await;
+    assert!(
+        first.contains("Shunted Summary") && first.contains(note),
+        "{first}"
+    );
+    let mut ask = read_args(&path);
+    ask["answer_question"] = json!(true);
+    let answered = rig.call("smart_read", ask).await;
+    assert!(answered.contains("Shunted Summary"), "{answered}");
+    assert!(
+        !answered.contains(note),
+        "an answer carries no note: {answered}"
+    );
+    assert_eq!(rig.count.load(Ordering::SeqCst), 2);
+    let again = rig.call("smart_read", read_args(&path)).await;
+    assert!(
+        again.contains("Cached Shunt Summary") && !again.contains(note),
+        "{again}"
+    );
+    let shared = json!({"project":"routing-fixture","agent_harness":"codex","file_path":path});
+    let shared = rig.call("smart_read", shared).await;
+    assert!(
+        shared.contains("Cached Shunt Summary") && !shared.contains(note),
+        "{shared}"
+    );
+    assert_eq!(
+        rig.count.load(Ordering::SeqCst),
+        2,
+        "both served from the cache"
+    );
+}

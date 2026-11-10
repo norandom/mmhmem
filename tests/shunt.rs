@@ -74,6 +74,7 @@ fn req<'a>(
         question,
         offset,
         limit,
+        answer_question: false,
     }
 }
 
@@ -92,6 +93,7 @@ fn req_task<'a>(
         question,
         offset: None,
         limit: None,
+        answer_question: false,
     }
 }
 
@@ -361,6 +363,7 @@ async fn cache_miss_delegates_then_hit_serves_cached_with_zero_worker_calls() {
         ReadOutcome::Cached {
             summary,
             avoided_input_tokens_est,
+            ..
         } => {
             assert_eq!(summary, "- foo [L1-L9]\n- bar [L10-L20]");
             assert!(*avoided_input_tokens_est > 0);

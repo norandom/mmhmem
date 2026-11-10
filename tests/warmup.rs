@@ -4,7 +4,7 @@
 
 use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN, ENV_WORKER_API_URL, ENV_WORKER_MODEL};
 use mmhmem::services::shunt::{ShuntEngine, ShuntError};
-use mmhmem::services::shunt_cache::{cache_store, query_fingerprint};
+use mmhmem::services::shunt_cache::{SummaryRow, query_fingerprint, summary_store_and_evict};
 use mmhmem::services::shunt_types::CallCtx;
 use mmhmem::services::warmup::{WarmupError, WarmupReport, render_report, run_warmup};
 use mmhmem::services::worker::WorkerClient;
@@ -109,15 +109,20 @@ async fn cached_row_counts_as_cached_without_worker() {
     let logs = tempfile::tempdir().expect("tempdir");
     let db = Db::open(data.path()).expect("db");
     let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
-    // Seed through the same cache API the engine uses. The key must use
-    // the canonicalized path — the engine looks up confined paths.
+    // Seed through the same cache API the engine uses: an answer cached
+    // for this question is served as is (content-keyed, any path).
     let fp = query_fingerprint(QUESTION);
     let body = std::fs::read(&big).expect("read");
     let file_sha = sha256_hex(&body);
     let canonical = std::fs::canonicalize(&big).expect("canonicalize");
-    cache_store(&db, &canonical, &file_sha, &fp, "seeded summary", 200)
-        .await
-        .expect("seed");
+    let row = SummaryRow {
+        sha: &file_sha,
+        fingerprint: &fp,
+        summary: "seeded summary",
+        line_count: 200,
+        path: &canonical,
+    };
+    summary_store_and_evict(&db, row, 5000).await.expect("seed");
     let engine = ShuntEngine::new(db, audit.clone(), test_config(dir.path()), None, None);
     let report = run_warmup(&engine, &audit, &[big], QUESTION, ctx())
         .await

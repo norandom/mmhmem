@@ -68,6 +68,7 @@ fn read_req<'a>(path: &'a str, question: &'a str) -> ReadRequest<'a> {
         question,
         offset: None,
         limit: None,
+        answer_question: false,
     }
 }
 

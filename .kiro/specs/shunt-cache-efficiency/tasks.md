@@ -8,28 +8,28 @@ the pre-commit gate (fmt, size caps, clippy default and `otel`); commit
 from native PowerShell on the Windows host.
 
 - [ ] 1. Content-keyed summary cache
-- [ ] 1.1 Canonical fingerprint and the shared table
+- [x] 1.1 Canonical fingerprint and the shared table
   - Add `canonical_fingerprint()` (the default question's fingerprint) and treat an absent, empty or default `question` as canonical.
   - Add `last_path` to `shunt_content_cache`; implement `summary_lookup` (touching hits, last hit and last path) and `summary_store_and_evict` for kind `file_read`, reusing the content cache's cap and audited eviction.
   - Done when unit tests show: the same content under two paths yields one row and a hit on the second read with `last_path` updated; a custom question yields a separate row; eviction beyond the cap is audited with the count.
   - _Boundary: Summary cache_
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 5.1, 5.2_
 
-- [ ] 1.2 Migration from the old file cache
+- [x] 1.2 Migration from the old file cache
   - Bump the schema version; on open of an older store, add the column if missing and copy every `shunt_file_cache` row into the shared table in one transaction; audit one `CACHE_MIGRATED` record with the row count; stop reading and writing the old table.
   - Done when a committed v2 store fixture opens at the new version, its rows are served without a worker call, the migration is audited exactly once, and reopening does not copy again.
   - _Boundary: Summary cache_
   - _Requirements: 1.5, 4.3_
 
 - [ ] 2. Lookup policy and the question parameter
-- [ ] 2.1 Serve canonical first, custom answers on request
+- [x] 2.1 Serve canonical first, custom answers on request
   - Implement the lookup order of the design flow: canonical for the default question; for a custom question serve a cached custom answer, else the canonical with the one-line note, producing the canonical when nothing is cached; produce and cache a custom answer only with `answer_question: true`.
   - Add `answer_question` to the `smart_read` tool and `ShuntRequest`; add `note` to the response; audit `question` and `served`; a served custom row counts as a cache hit.
   - Done when tests show: custom question without the flag → canonical plus note and no worker call; with the flag → one worker call and a custom row that is served next time; the canonical row survives both; audit fields present.
   - _Boundary: Lookup policy_
   - _Requirements: 2.1, 2.2, 2.3, 2.5_
 
-- [ ] 2.2 (P) Tool description and playbook wording
+- [x] 2.2 (P) Tool description and playbook wording
   - Rewrite the `smart_read` description and the `unified-memory` playbook line: omit the question for the shared summary; ask with `answer_question: true` only when the summary is not enough; mention `mmhmem warmup`.
   - Done when the playbook stays under its token cap test and the marketplace check passes, and the tool description test (if any) matches.
   - _Boundary: Lookup policy_
@@ -81,7 +81,7 @@ from native PowerShell on the Windows host.
   - _Depends: 1.1, 6.1_
   - _Requirements: 6.1, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 7. Prune on the shared table
+- [x] 7. Prune on the shared table
   - Point `mmhmem prune` and `shunt_prune` at rows of kind `file_read` in the shared table; stale when the last path is unknown or missing or its content hash differs; keep the dry run, grouped report and audit records as they are.
   - Done when prune tests pass on the new table with the three staleness cases and the report text is unchanged.
   - _Boundary: Summary cache_
@@ -93,3 +93,7 @@ from native PowerShell on the Windows host.
   - Done when the second session's hit rate is above 50 percent in the measurement, the live stats row shows a non-zero follow-through, and the evidence is in `validation.md`.
   - _Depends: 1.2, 2.1, 3.2, 4, 5, 6.2, 7_
   - _Requirements: 1.1, 3.1, 5.3, 5.4, 6.3_
+
+## Implementation Notes
+
+- 2026-11-10 (batch 1: tasks 1.1, 1.2, 2.1, 2.2, 7; one Opus implementer, controller inline review): file-read summaries live in `shunt_content_cache` (kind `file_read`) with a canonical fingerprint and `last_path`; schema v3 copies `shunt_file_cache` once (fixture `tests/fixtures/store/v2-file-cache.db`); stages 3–4 moved to `src/services/shunt_lookup.rs` (shunt.rs was at the 500-line cap). Accepted deviations: prune skips rows with a NULL `last_path` instead of pruning them, because `shunt_content` rows share the `file_read` kind and have no path; content summarised earlier only under custom questions gets a canonical summary on its first default read (the custom rows are kept and served). `CACHE_MIGRATED` is audited after the schema transaction commits. For batch 3: the playbook says `mmhmem warmup <repo>`, so the CLI must accept the root as a positional argument as well as `--root`; `deploy/instructions/mmhmem-routing.md` line 15 still says cache identity includes the question and must be reworded.

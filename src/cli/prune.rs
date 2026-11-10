@@ -40,7 +40,9 @@ fn run(dry_run: bool) -> anyhow::Result<String> {
     if !store_path.is_file() {
         return Ok(NO_STORE_MESSAGE.to_string());
     }
-    let db = Db::open_at(&store_path)?;
+    // Through the config so a schema migration this open performs is
+    // audited (shunt-cache-efficiency task 1.2).
+    let db = Db::open_for_config(&config)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

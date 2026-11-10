@@ -39,11 +39,10 @@ use crate::services::breadcrumbs::{BreadcrumbSearch, render_rows};
 use crate::services::memory::{RecordRequest, SearchRequest};
 use crate::services::prune::render_report as render_prune;
 use crate::services::session_bus::ClientUsage;
-use crate::services::shunt::ReadOutcome;
 use crate::services::shunt_types::{CallCtx, ReadRequest as ShuntReadRequest};
 use crate::services::warmup::{render_report as render_warmup, run_warmup};
 
-use super::tool_support::{err, ok_text, with_span};
+use super::tool_support::{err, ok_text, render_read, with_span};
 
 mod shunt_content_tool;
 
@@ -74,7 +73,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Use for ordinary repository inspection before a full native or shell read when available and authorized. Large files return cached or worker-generated structural summaries, not exact source evidence. Use offset+limit for exact line slices when editing or verifying; small/security-critical files return direct content. Unchanged content with the same cache identity (including question) hits cache without a worker call. Cache, audit and stats may be written. On worker failure use bounded authorized targeted/native fallback, not repeated retries or invented savings.",
+        description = "Use for ordinary repository inspection before a full native or shell read when available and authorized. Large files return cached or worker-generated structural summaries, not exact source evidence. Use offset+limit for exact line slices when editing or verifying; small/security-critical files return direct content. Omit `question` to get the shared structural summary (cached per file content for every agent). Pass `question` with `answer_question: true` only when the summary is not enough. Cache, audit and stats may be written. On worker failure use bounded authorized targeted/native fallback, not repeated retries or invented savings.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -87,35 +86,28 @@ impl McpServer {
         Parameters(p): Parameters<SmartReadParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let state = self.state.clone();
-        with_span(&state, "smart_read", &p.agent_harness, &p.project, || async {
-            let req = ShuntReadRequest {
-                project: &p.project,
-                harness: &p.agent_harness,
-                task: None,
-                path: &p.file_path,
-                question: &p.question,
-                offset: p.offset,
-                limit: p.limit,
-            };
-            match state.services.shunt.smart_read(&req).await {
-                Ok(ReadOutcome::Targeted { text, start, end, total_lines }) => ok_text(format!(
-                    "### Targeted Read: {} (L{start}-L{end} of {total_lines})\n```\n{text}\n```",
-                    p.file_path
-                )),
-                Ok(ReadOutcome::Direct { text, reason, total_lines }) => ok_text(format!(
-                    "### Direct Read ({}): {} ({total_lines} lines)\n```\n{text}\n```",
-                    reason.as_str(),
-                    p.file_path
-                )),
-                Ok(ReadOutcome::Cached { summary, avoided_input_tokens_est }) => ok_text(format!(
-                    "### Cached Shunt Summary\n{summary}\n\n*For edits, call smart_read with offset and limit.* (est. avoided frontier input tokens: {avoided_input_tokens_est})"
-                )),
-                Ok(ReadOutcome::Shunted { summary, latency_ms, avoided_input_tokens_est, .. }) => ok_text(format!(
-                    "### Shunted Summary (worker, {latency_ms} ms)\n{summary}\n\n*For edits, call smart_read with offset and limit.* (est. avoided frontier input tokens: {avoided_input_tokens_est})"
-                )),
-                Err(e) => Err(err(e)),
-            }
-        })
+        with_span(
+            &state,
+            "smart_read",
+            &p.agent_harness,
+            &p.project,
+            || async {
+                let req = ShuntReadRequest {
+                    project: &p.project,
+                    harness: &p.agent_harness,
+                    task: None,
+                    path: &p.file_path,
+                    question: &p.question,
+                    offset: p.offset,
+                    limit: p.limit,
+                    answer_question: p.answer_question,
+                };
+                match state.services.shunt.smart_read(&req).await {
+                    Ok(outcome) => ok_text(render_read(&p.file_path, outcome)),
+                    Err(e) => Err(err(e)),
+                }
+            },
+        )
         .await
     }
 

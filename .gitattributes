@@ -16,3 +16,4 @@ plugins/**       text eol=lf
 .claude-plugin/** text eol=lf
 .gemini-plugin/** text eol=lf
 /tests/fixtures/routing-instructions/*.bin -text
+/tests/fixtures/store/*.db binary

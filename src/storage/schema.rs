@@ -16,8 +16,35 @@ use rusqlite::ffi;
 /// index additatively: the DDL below is idempotent (`IF NOT EXISTS`), so an
 /// on-disk v1 store is upgraded in place without touching existing tables
 /// or rows — `apply` re-runs the batch because the stamped version is
-/// older, then stamps v2.
-pub const SCHEMA_VERSION: u32 = 2;
+/// older, then stamps the current version. v3 (shunt-cache-efficiency
+/// task 1.2) keeps file-read summaries in `shunt_content_cache`: it adds
+/// `last_path` and copies every `shunt_file_cache` row over once
+/// ([`migrate_file_cache`]); the old table stays but is no longer used.
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// First version whose file-read summaries live in `shunt_content_cache`.
+const SHARED_SUMMARY_VERSION: u32 = 3;
+
+/// Copies the old file cache into the shared table (design.md "Summary
+/// cache"): kind `file_read`, the LRU clock starts at the creation time,
+/// no hits, the old path becomes `last_path`. When copies of one content
+/// share a question, the newest row wins.
+const COPY_FILE_CACHE: &str = "INSERT OR IGNORE INTO shunt_content_cache \
+    (content_sha256, query_fingerprint, kind, structural_summary, line_count, \
+     created_at_epoch, last_hit_epoch, hits, last_path) \
+    SELECT content_sha256, query_fingerprint, 'file_read', structural_summary, line_count, \
+     created_at_epoch, created_at_epoch, 0, file_path \
+    FROM shunt_file_cache ORDER BY created_at_epoch DESC, file_path";
+
+/// Outcome of the one-time v3 copy, for the caller's `CACHE_MIGRATED`
+/// audit record (the audit log is written outside the SQL transaction).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheMigration {
+    /// The on-disk version the store was opened at.
+    pub from_version: u32,
+    /// Rows copied into `shunt_content_cache`.
+    pub rows: u64,
+}
 
 /// Full DDL from design.md "Physical Data Model (SQLite, WAL)", made
 /// idempotent with `IF NOT EXISTS`. Kept as one `const &str` so the Req 13.4
@@ -100,23 +127,50 @@ CREATE TABLE IF NOT EXISTS shunt_content_cache (
   created_at_epoch INTEGER NOT NULL,
   last_hit_epoch INTEGER NOT NULL,  -- LRU clock: set at store, touched at hit
   hits INTEGER NOT NULL DEFAULT 0,
+  last_path TEXT,                   -- v3: last file read path (prune, audit); NULL for content rows
   PRIMARY KEY (content_sha256, query_fingerprint, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_shunt_content_cache_lru ON shunt_content_cache (last_hit_epoch, created_at_epoch);
 "#;
 
-/// Applies the schema idempotently and stamps `PRAGMA user_version`.
-pub fn apply(conn: &Connection) -> rusqlite::Result<()> {
+/// Applies the schema idempotently and stamps `PRAGMA user_version`. The
+/// caller runs it inside one transaction, so the DDL, the v3 copy and the
+/// stamp land together or not at all. Returns the copy's outcome when an
+/// existing older store was migrated (a fresh store reports none).
+pub fn apply(conn: &Connection) -> rusqlite::Result<Option<CacheMigration>> {
     let current: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match current.cmp(&SCHEMA_VERSION) {
-        Ordering::Equal => Ok(()),
+        Ordering::Equal => Ok(None),
         Ordering::Greater => Err(newer_schema_error(current)),
         Ordering::Less => {
             conn.execute_batch(SCHEMA_DDL)?;
+            let migrated = migrate_file_cache(conn, current)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            Ok(())
+            Ok(migrated)
         }
     }
+}
+
+/// The v3 step for a store below [`SHARED_SUMMARY_VERSION`]: add
+/// `last_path` when missing (an old table predates it), then copy the old
+/// file cache. Idempotent: the column check and `INSERT OR IGNORE` make a
+/// repeated run a no-op.
+fn migrate_file_cache(conn: &Connection, from: u32) -> rusqlite::Result<Option<CacheMigration>> {
+    if from >= SHARED_SUMMARY_VERSION {
+        return Ok(None);
+    }
+    let has_last_path = conn
+        .prepare("SELECT 1 FROM pragma_table_info('shunt_content_cache') WHERE name = 'last_path'")?
+        .exists([])?;
+    if !has_last_path {
+        conn.execute_batch("ALTER TABLE shunt_content_cache ADD COLUMN last_path TEXT")?;
+    }
+    let rows = conn.execute(COPY_FILE_CACHE, [])? as u64;
+    // A brand-new store (version 0, empty old table) migrated nothing.
+    Ok((from > 0 || rows > 0).then_some(CacheMigration {
+        from_version: from,
+        rows,
+    }))
 }
 
 /// Error for an on-disk schema newer than this binary understands.

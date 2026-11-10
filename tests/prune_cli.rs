@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use mmhmem::services::shunt_cache::{
-    ContentCacheRow, cache_lookup, cache_store, content_cache_lookup, content_cache_store_and_evict,
+    ContentCacheRow, SummaryRow, content_cache_lookup, content_cache_store_and_evict,
+    summary_lookup, summary_store_and_evict,
 };
 use mmhmem::storage::audit::sha256_hex;
 use mmhmem::storage::db::Db;
@@ -37,6 +38,21 @@ fn prune(data_dir: &Path, dry_run: bool) -> (bool, String) {
     )
 }
 
+/// Seeds one file-read summary row (kind `file_read`, `last_path` set)
+/// exactly as a `smart_read` delegation would.
+async fn seed_file_row(db: &Db, path: &Path, sha: &str, summary: &str) {
+    let row = SummaryRow {
+        sha,
+        fingerprint: "fp",
+        summary,
+        line_count: 10,
+        path,
+    };
+    summary_store_and_evict(db, row, 5000)
+        .await
+        .expect("seed file row");
+}
+
 /// Seeds the store in `data_dir` with one stale-missing row (the file does
 /// not exist) and one fresh row (file present, hash matches); returns the
 /// (missing_path, missing_sha, fresh_path, fresh_sha) keys.
@@ -45,14 +61,10 @@ async fn seed_store(data_dir: &Path) -> (String, String, String, String) {
     let fresh_path = data_dir.join("fresh.rs");
     std::fs::write(&fresh_path, "current content\n").expect("write fresh file");
     let fresh_sha = sha256_hex(b"current content\n");
-    cache_store(&db, &fresh_path, &fresh_sha, "fp", "fresh summary", 10)
-        .await
-        .expect("seed fresh");
+    seed_file_row(&db, &fresh_path, &fresh_sha, "fresh summary").await;
     let missing_path = data_dir.join("gone.rs");
     let missing_sha = sha256_hex(b"gone content\n");
-    cache_store(&db, &missing_path, &missing_sha, "fp", "stale summary", 10)
-        .await
-        .expect("seed missing");
+    seed_file_row(&db, &missing_path, &missing_sha, "stale summary").await;
     drop(db);
     (
         missing_path.display().to_string(),
@@ -86,14 +98,14 @@ async fn dry_run_previews_counts_and_deletes_nothing() {
     );
     let db = Db::open(data.path()).expect("reopen store");
     assert!(
-        cache_lookup(&db, Path::new(&missing), &missing_sha, "fp")
+        summary_lookup(&db, &missing_sha, "fp", Path::new(&missing))
             .await
             .expect("lookup")
             .is_some(),
         "dry-run must not delete the stale row"
     );
     assert!(
-        cache_lookup(&db, Path::new(&fresh), &fresh_sha, "fp")
+        summary_lookup(&db, &fresh_sha, "fp", Path::new(&fresh))
             .await
             .expect("lookup")
             .is_some(),
@@ -113,14 +125,14 @@ async fn real_run_removes_stale_keeps_fresh_exits_zero() {
     assert!(out.contains("1 kept fresh"), "grouped counts: {out}");
     let db = Db::open(data.path()).expect("reopen store");
     assert!(
-        cache_lookup(&db, Path::new(&missing), &missing_sha, "fp")
+        summary_lookup(&db, &missing_sha, "fp", Path::new(&missing))
             .await
             .expect("lookup")
             .is_none(),
         "stale row must be gone"
     );
     assert!(
-        cache_lookup(&db, Path::new(&fresh), &fresh_sha, "fp")
+        summary_lookup(&db, &fresh_sha, "fp", Path::new(&fresh))
             .await
             .expect("lookup")
             .is_some(),
@@ -181,8 +193,16 @@ async fn prune_command_leaves_content_rows_untouched_and_counts_only_file_rows()
             "prune must leave content row {sha} untouched"
         );
     }
+    // The table is shared with file-read rows (shunt-cache-efficiency):
+    // content rows are the ones without a last path.
     let rows: i64 = db
-        .with_conn(|c| c.query_row("SELECT COUNT(*) FROM shunt_content_cache", [], |r| r.get(0)))
+        .with_conn(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM shunt_content_cache WHERE last_path IS NULL",
+                [],
+                |r| r.get(0),
+            )
+        })
         .await
         .expect("count content rows");
     assert_eq!(rows, 2, "both content rows survive the prune command");

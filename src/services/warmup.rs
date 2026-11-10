@@ -123,6 +123,8 @@ pub async fn run_warmup(
             question,
             offset: None,
             limit: None,
+            // Warm-up fills the shared structural summaries (Req 6.1).
+            answer_question: false,
         };
         // Req 1.7: worker-unconfigured aborts the whole batch with the
         // engine's own actionable error (smart_read parity).
