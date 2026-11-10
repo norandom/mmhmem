@@ -1,9 +1,9 @@
 {
   "feature_name": "antigravity-native-setup",
   "created_at": "2026-11-09T18:55:00+01:00",
-  "updated_at": "2026-11-09T19:05:00+01:00",
+  "updated_at": "2026-11-10T16:40:00+01:00",
   "language": "en",
-  "phase": "tasks-approved",
+  "phase": "implemented",
   "approvals": {
     "requirements": {
       "generated": true,
@@ -19,5 +19,5 @@
     }
   },
   "ready_for_implementation": true,
-  "notes": "Corrective spec from the 2026-11-09 review of the Antigravity integration shipped by reliable-installers task 3.5. Drafted in one pass; owner approved all three phases on 2026-11-09 and asked for implementation with Opus xhigh subagents. Supersedes the Antigravity rows of reliable-installers (research.md section 8, design.md 'Antigravity automation' non-goal)."
+  "notes": "Corrective spec from the 2026-11-09 review of the Antigravity integration shipped by reliable-installers task 3.5. Drafted in one pass; owner approved all three phases on 2026-11-09 and asked for implementation with Opus xhigh subagents. Supersedes the Antigravity rows of reliable-installers (research.md section 8, design.md 'Antigravity automation' non-goal). Implemented 2026-11-09/10 (tasks 1.1-5.2 committed and CI-verified; released as v0.5.3 on 2026-11-10; live run on the owner's machine passed, see validation.md). Task 5.3's interactive-prompt item awaits the owner's confirmation that the session was agy."
 }
