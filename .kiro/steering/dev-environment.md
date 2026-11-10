@@ -1,8 +1,10 @@
-# Development Environment (Windows host + Debian WSL build VM)
+# Development Environment (Windows host + Podman containers)
 
 How to build, test, and validate mmhmem from this Windows workstation. The
 daemon itself targets Linux; the dev loop runs natively, Linux-side checks run
-in WSL containers, and Dagger is the CI engine everywhere.
+in containers through Podman (the `docker` command) and Dagger is the CI
+engine everywhere. Since 2026-11-10 the Debian WSL build VM is retired (see
+"Containers" below).
 
 ## Dev shell: PowerShell 5.1 (native)
 
@@ -56,44 +58,41 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
 - `.gitignore` must stay UTF-8 — a UTF-16LE rewrite once broke git's parsing.
 - One conventional commit per task, push to `origin/main` after each.
 
-## WSL: Debian build VM only
+## Containers: Podman (as `docker`), compose, native Dagger
 
-- User clarification (2026-11-02): no Git Bash on Windows. Use native
-  PowerShell for Windows work. WSL may execute scripts only through CI;
-  use `scripts/dagger-ci.ps1`, never ad hoc WSL shell validation. Shipping
-  shell scripts target ordinary Linux/macOS and must not depend on WSL,
-  Git Bash, the developer's distro, or workstation mount paths.
+Owner decision 2026-11-10 (verified on the host the same day):
 
-- Distro `Debian` (default), user `mc`. Other distros exist (`Debian-MW`,
-  `NixOS`, `NixOS-AI`) — do not use them for this project.
-- **Never run the mmhmem service directly inside WSL.** WSL is a build/CI VM:
-  containers, Dagger, and Linux-side validation only.
-- **WSL is a build env for CI — never for execution, storing data, or use as
-  a scratchpad.** Do not stage, store, or hand-sync any files into WSL
-  yourself (no `/tmp` scratch trees, no git-archive staging). The ONLY
-  sanctioned source staging is the `~/mmhmem-ci` rsync performed by
-  `scripts\dagger-ci.ps1`, which is the ONE local dagger entrypoint — do not
-  invent `--src` recipes against DrvFS mounts or WSL paths (filesync off
-  DrvFS hits 9p metadata conflicts; crawling `target/` once killed the
-  engine). All build outputs export back to the Windows repo (D:). Never
-  execute mmhmem binaries inside WSL; Linux-side artifact validation runs
-  inside Dagger containers only.
-- Non-login shells lack `~/.local/bin`: call tools by full path,
-  `wsl -d Debian -e bash -c '~/.local/bin/dagger version'`.
-- `sudo` needs a password — no passwordless root; write checks as unprivileged
-  or inside containers.
-- `wsl.exe` stdout can arrive UTF-16LE-garbled; if output looks mangled,
-  capture to a file inside WSL and `cat` it.
-- Tools available in Debian WSL: docker 29.9 client (`docker compose config`
-  works), dagger v0.21.8 (`~/.local/bin/dagger`), python3.12 + uv/uvx,
-  systemd-analyze 257, logrotate 3.22. **No Go** — Dagger modules use the
-  Python SDK.
-- Validate Linux deploy artifacts here: `systemd-analyze verify
-  deploy/systemd/mmhmem.service` (install the binary first or expect the
-  missing-binary error; DrvFS mounts also show 0777 permission-bit noise —
-  both are environmental, not unit defects) and `logrotate --debug` (the
-  `su agent-memory` directive needs the install-time user; substitute `root`
-  for a pure syntax check).
+- `docker` is Podman 5.8.3 via Podman Desktop; `docker compose` is v5.7.0.
+  The machine `podman-machine-default` is rootful and runs on a WSL2 kernel
+  that Podman manages itself (`podman machine list` shows VM type `wsl`).
+  The default `docker context` is `podman-machine-default-root`.
+- **The Debian WSL distro is retired for this project.** Do not run
+  `wsl -d Debian ...`; do not rsync sources into WSL; do not validate
+  anything inside a WSL shell. Linux-side work runs in containers started
+  from the native Windows shell.
+- **Prefer compose over ad hoc `docker run`.** The repo already has
+  `docker-compose.yml` (production stack, `docker compose config` is a CI
+  check) and `tests/e2e/compose.e2e.yml` (override used by the gated
+  `E2E_LLM=1` suite). New local container runs should be a compose file or
+  an override on these, started with `docker compose -f ... up --wait`.
+- Dagger v0.21.11 is a native Windows CLI (`dagger version` reports
+  `image+podman://registry.dagger.io/engine:v0.21.11`); its engine runs as
+  the Podman container `dagger-engine-v0.21.11`. `dagger core version`
+  connects in about 10 s.
+- `scripts/dagger-ci.ps1` still rsyncs the repo into the retired Debian
+  distro (`wsl -d Debian -e wslpath ...`) and must be reworked before use:
+  the native path is `dagger call` from the repo root against the `ci/`
+  module with the source excluded by `.daggerignore` (it already lists
+  `target`-adjacent noise; confirm `target/` and `tmp/` are excluded before
+  the first native run, since crawling `target/` once killed the engine).
+  Until that rework lands, treat the container CI as GitHub-Actions-only
+  and say so instead of improvising a WSL path.
+- Still true: no Git Bash for shipping scripts; use native PowerShell for
+  Windows work. Shipping shell scripts target ordinary Linux/macOS and must
+  not depend on WSL, Podman, Git Bash, or workstation paths.
+- Linux deploy artifact checks (`systemd-analyze verify`, `logrotate
+  --debug`) run inside a container, not on the host; the Dagger pipeline
+  does them as root with the real `agent-memory` user.
 
 ## Temp files & scratch: project dir only
 
@@ -103,15 +102,15 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
   temp folders (`%LOCALAPPDATA%\Temp`, `%APPDATA%`, ...) or other user
   folders; if project files are found there, clean them up.
 
-## CI: Dagger (local WSL + GitHub Actions, one pipeline)
+## CI: Dagger (native Podman engine locally + GitHub Actions, one pipeline)
 
-- CI is the Dagger module `ci/` (Python SDK). Local entrypoint:
+- CI is the Dagger module `ci/` (Python SDK). Local entrypoint was
   `powershell -NoProfile -File scripts\dagger-ci.ps1` (defaults to `-Call all`;
-  pass `-Call fmt|clippy|test|release|docker-build|...` for one gate). The
-  wrapper rsyncs the repo (minus target/, .git, secrets) into the WSL home
-  (~/mmhmem-ci) and runs dagger there: dagger's source filesync OFF the
-  DrvFS mount hits 9p metadata-cache conflicts ("size changed during sync")
-  and crawling target/ once killed the engine. Actions runs the same module
+  pass `-Call fmt|clippy|test|release|docker-build|...` for one gate); since
+  2026-11-10 that wrapper is stale because it rsyncs into the retired
+  Debian WSL distro (the DrvFS 9p filesync problems it worked around no
+  longer apply to the native CLI). Rework it to call the native `dagger`
+  against the Podman engine before relying on it. Actions runs the same module
   via dagger-for-github (`.github/workflows/ci.yml`, workdir ci,
   `call all --src ..` — a fresh checkout has no target/). Never maintain two
   scripts. The pipeline owns Linux-container work: fmt, blocking clippy
@@ -128,15 +127,14 @@ caps live in every task's acceptance criteria: ≤ 500 LOC per `src/` file,
   `cfg(macos)` code must not escape the blocking lint gate (see
   `.kiro/specs/local-mode/design.md`). Runner minutes matter on private
   repos — cargo caching keeps repeat runs fast.
-- The dev-host WSL VM has ~6 GB RAM: cargo builds in the pipeline are
-  bounded (`CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`) because unbounded
-  rustc OOM-killed the dagger engine mid-run (observed twice). The engine
-  container is per-session (stops between calls) — a call right after
-  another's cleanup may hit "engine is shutting down"; just retry.
+- The Podman machine is configured with 2 GiB RAM and 12 CPUs (`podman
+  machine list`, 2026-11-10): cargo builds in the pipeline stay bounded
+  (`CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`) because unbounded rustc
+  OOM-killed the dagger engine mid-run on the previous 6 GB VM; raise the
+  machine's memory (`podman machine set --memory`) before expecting the
+  full pipeline to run locally.
 - First `dagger call` after engine bootstrap is slow (image pulls, uv setup,
-  apt installs); cache volumes make later calls fast. `wsl.exe` mangles
-  nested quotes — keep the bash -c payload quote-free or write the script
-  to a file.
+  apt installs); cache volumes make later calls fast.
 - Module internals live in `ci/src/mmhmem_ci/main.py`; `ci/sdk/` is
   generated (gitignored) — regenerate with `dagger develop` inside `ci/`.
 
