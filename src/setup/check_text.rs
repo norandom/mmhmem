@@ -218,7 +218,7 @@ pub(super) fn pending_step(step: PendingUserStep) -> &'static str {
             "restart Claude Desktop so it starts mmhmem: quit it completely, then open it again"
         }
         PendingUserStep::ImportAntigravitySnippet => {
-            "add mmhmem in Antigravity: paste the snippet setup saved as antigravity-mcp.json next to the mmhmem program"
+            "run setup again: it now configures Antigravity itself, so nothing is left for you to add there"
         }
     }
 }

@@ -294,8 +294,8 @@ pub trait Agent: Send + Sync {
     fn plan_remove(&self, env: &Env, rec: &AgentRecord) -> Vec<Change>;
 
     /// The steps only the user can do after installing `want` (approve the
-    /// Codex hook, restart Claude Desktop, import the Antigravity snippet);
-    /// the caller stores them in the agent's record. None by default.
+    /// Codex hook, restart Claude Desktop); the caller stores them in the
+    /// agent's record. None by default.
     fn pending_steps(&self, want: &Selection) -> Vec<PendingUserStep> {
         let _ = want;
         Vec::new()

@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use super::review::Planned;
 use super::{Flow, text};
-use crate::setup::agents::antigravity;
 use crate::setup::agents::{AgentId, Feature, Selection};
 use crate::setup::plan::{ApplyReport, Outcome, apply_with};
 use crate::setup::record::{AgentRecord, CheckResult, InstallRecord, Scope};
@@ -236,17 +235,7 @@ impl Flow {
             .iter()
             .filter(|v| v.report.result != CheckResult::Fail)
         {
-            if v.agent() == AgentId::Antigravity {
-                // The snippet itself, not just a pointer to it (bugfix:
-                // "paste the snippet shown above" pointed at nothing).
-                let agent = antigravity::Antigravity::new(self.deps.binary.clone());
-                next_steps.extend(text::antigravity_snippet(
-                    &agent.snippet_file().display().to_string(),
-                    &agent.snippet(),
-                ));
-            } else {
-                next_steps.push(text::next_step(v.agent()).to_owned());
-            }
+            next_steps.push(text::next_step(v.agent()).to_owned());
         }
         let ok = !failed && verify.all_passed() && verify.record_errors.is_empty();
         Progress {

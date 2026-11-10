@@ -109,7 +109,8 @@ pub const SHORT_INSTRUCTIONS: &str = "instructions";
 pub const SHORT_HOOK: &str = "read hook";
 pub const PENDING_APPROVE_HOOK: &str = "approve the hook in Codex";
 pub const PENDING_RESTART_DESKTOP: &str = "restart Claude Desktop";
-pub const PENDING_IMPORT_SNIPPET: &str = "import the snippet in Antigravity";
+/// Shown for a record from before setup configured Antigravity itself.
+pub const PENDING_ANTIGRAVITY_RERUN: &str = "run setup again for Antigravity";
 /// Contains `{version}`.
 pub const INSTALLED_VERSION: &str = "Installed: {version}";
 pub const NOTHING_INSTALLED: &str = "Installed: nothing yet";
@@ -215,20 +216,7 @@ pub const NEXT_CODEX: &str = "Codex: start a new session, and approve the read-r
 hook when Codex asks, if you turned it on.";
 pub const NEXT_OPENCODE: &str = "OpenCode: start a new session.";
 pub const NEXT_DESKTOP: &str = "Claude Desktop: quit it completely and open it again.";
-pub const NEXT_ANTIGRAVITY: &str = "Antigravity: import the snippet that setup saved, \
-then start a new session.";
-
-/// Contains `{path}`. Shown above the snippet lines in the results.
-pub const NEXT_ANTIGRAVITY_SNIPPET: &str =
-    "Antigravity: paste this JSON into its server settings (saved to {path}):";
-
-/// The Antigravity next step: where the snippet was saved, then the JSON
-/// itself, indented, one line per entry.
-pub fn antigravity_snippet(path: &str, snippet: &str) -> Vec<String> {
-    let mut lines = vec![fill(NEXT_ANTIGRAVITY_SNIPPET, &[("path", path)])];
-    lines.extend(snippet.lines().map(|l| format!("  {l}")));
-    lines
-}
+pub const NEXT_ANTIGRAVITY: &str = "Antigravity: start a new session.";
 
 /// Fills `{key}` placeholders in `template`.
 fn fill(template: &str, values: &[(&str, &str)]) -> String {
@@ -333,7 +321,7 @@ pub fn pending_short(step: PendingUserStep) -> &'static str {
     match step {
         PendingUserStep::ApproveHookInCodex => PENDING_APPROVE_HOOK,
         PendingUserStep::RestartClaudeDesktop => PENDING_RESTART_DESKTOP,
-        PendingUserStep::ImportAntigravitySnippet => PENDING_IMPORT_SNIPPET,
+        PendingUserStep::ImportAntigravitySnippet => PENDING_ANTIGRAVITY_RERUN,
     }
 }
 
@@ -434,7 +422,6 @@ pub const ALL: &[&str] = &[
     NEXT_OPENCODE,
     NEXT_DESKTOP,
     NEXT_ANTIGRAVITY,
-    NEXT_ANTIGRAVITY_SNIPPET,
     LEGEND_HOME,
     LEGEND_REVIEW,
     LEGEND_DIFF,
@@ -460,7 +447,7 @@ pub const ALL: &[&str] = &[
     SHORT_HOOK,
     PENDING_APPROVE_HOOK,
     PENDING_RESTART_DESKTOP,
-    PENDING_IMPORT_SNIPPET,
+    PENDING_ANTIGRAVITY_RERUN,
     INSTALLED_VERSION,
     NOTHING_INSTALLED,
     NEWEST,

@@ -277,6 +277,9 @@ fn finish(flow: &mut Flow, p: &mut Prompt, tag: &str, kept: Option<&str>) -> i32
 
 /// The changes per file and the tools that will be skipped.
 fn changes(p: &mut Prompt, view: &ReviewView) {
+    // Notices the review screen shows above the list (a feature left out
+    // with its reason, adoption notes) are said here too.
+    view.intro.iter().for_each(|l| p.say(l));
     for group in &view.groups {
         p.say(&group.file);
         for item in &group.items {

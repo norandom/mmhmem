@@ -116,7 +116,7 @@ pub enum AgentId {
     /// OpenCode.
     #[serde(rename = "opencode")]
     OpenCode,
-    /// Antigravity (detect and show a snippet only).
+    /// Antigravity (the `agy` CLI and the IDE).
     Antigravity,
 }
 

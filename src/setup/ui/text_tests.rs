@@ -65,14 +65,13 @@ fn next_steps_and_update_label_are_listed() {
 }
 
 #[test]
-fn snippet_and_worker_how_to_lines_are_built() {
-    let lines = text::antigravity_snippet("/opt/mmhmem/antigravity-mcp.json", "{\n  \"a\": 1\n}");
-    assert_eq!(
-        lines[0],
-        "Antigravity: paste this JSON into its server settings (saved to /opt/mmhmem/antigravity-mcp.json):"
-    );
-    assert_eq!(lines[1], "  {");
-    assert_eq!(lines[3], "  }");
+fn worker_how_to_lines_are_built_and_antigravity_needs_no_import() {
+    assert_eq!(text::NEXT_ANTIGRAVITY, "Antigravity: start a new session.");
+    for s in [text::NEXT_ANTIGRAVITY, text::PENDING_ANTIGRAVITY_RERUN] {
+        for word in ["snippet", "import", "paste"] {
+            assert!(!s.to_lowercase().contains(word), "{s} mentions {word}");
+        }
+    }
     let guide = text::worker_guide("~/.mmhmem.json", Some(&["qwen3:1.7b".to_owned()]));
     assert_eq!(
         guide[0],

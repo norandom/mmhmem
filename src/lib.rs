@@ -62,7 +62,8 @@ pub fn help_text() -> String {
          \x20   setup            Install or update mmhmem for your AI tools\n\
          \x20   update           Update mmhmem to the newest release, keeping your\n\
          \x20                    tools and choices as they are\n\
-         \x20   hook <harness>   Read-routing pre-tool hook (claude, codex, opencode): reads\n\
+         \x20   hook <harness>   Read-routing pre-tool hook (claude, codex, opencode,\n\
+         \x20                    antigravity): reads\n\
          \x20                    one hook event on stdin and declines full reads of\n\
          \x20                    large files in favour of smart_read; always exits 0\n\
          \x20   healthcheck      Probe GET /healthz on the local daemon and exit 0 on\n\

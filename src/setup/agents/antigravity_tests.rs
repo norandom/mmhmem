@@ -185,10 +185,8 @@ fn the_global_files_sit_under_the_gemini_home() {
 }
 
 #[test]
-fn the_snippet_names_the_binary_and_stdio() {
+fn the_legacy_snippet_file_sits_next_to_the_binary() {
     let (_home, agent) = setup();
-    let value: Value = serde_json::from_str(&agent.snippet()).unwrap();
-    assert_eq!(value["mcpServers"]["mmhmem"], wanted_entry(&agent));
     let file = agent.snippet_file();
     assert_eq!(
         file.file_name().and_then(|n| n.to_str()),

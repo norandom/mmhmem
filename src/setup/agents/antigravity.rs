@@ -37,7 +37,9 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+#[cfg(test)]
+use serde_json::Value;
+use serde_json::json;
 
 use super::{
     Agent, AgentId, AgentProblem, AgentRecord, CheckReport, Detection, Env, Feature, FileChain,
@@ -88,21 +90,19 @@ impl Antigravity {
         }
     }
 
-    /// The JSON older installs had the user import in Antigravity (still
-    /// shown by the results screen until task 4.1 removes it there).
-    pub fn snippet_value(&self) -> Value {
-        json!({"mcpServers": {"mmhmem": {
+    /// The JSON older installs (0.5.1) saved for the user to import; tests
+    /// recreate such an install with it. Setup never writes it any more.
+    #[cfg(test)]
+    pub fn snippet(&self) -> String {
+        let value = json!({"mcpServers": {"mmhmem": {
             "command": self.binary.to_string_lossy(),
             "args": ["stdio"],
-        }}})
-    }
-
-    /// [`Antigravity::snippet_value`] as pretty-printed text to show.
-    pub fn snippet(&self) -> String {
-        serde_json::to_string_pretty(&self.snippet_value()).expect("a JSON value serializes")
+        }}});
+        serde_json::to_string_pretty(&value).expect("a JSON value serializes")
     }
 
     /// The file older installs saved the snippet to, next to the binary.
+    #[cfg(test)]
     pub fn snippet_file(&self) -> PathBuf {
         self.binary
             .parent()
