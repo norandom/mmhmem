@@ -1,0 +1,23 @@
+{
+  "feature_name": "shunt-cache-efficiency",
+  "created_at": "2026-11-10T17:30:00+01:00",
+  "updated_at": "2026-11-10T17:30:00+01:00",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": false
+    },
+    "design": {
+      "generated": true,
+      "approved": false
+    },
+    "tasks": {
+      "generated": true,
+      "approved": false
+    }
+  },
+  "ready_for_implementation": false,
+  "notes": "Follow-up to read-routing-hooks and corpus-warmup-prune from the 2026-11-10 audit-log analysis (144 summaries, 13 cache hits, 105 distinct question texts; 273 of 404 hook redirects sidestepped by ranged reads). Owner chose the scope from a menu on 2026-11-10: content-only cache key, close the ranged-read escape, cache and redirect visibility, per-project warm-up, threshold raised to 300 lines. All three documents drafted in one pass; review each before /kiro-impl."
+}
