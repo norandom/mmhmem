@@ -36,26 +36,26 @@ from native PowerShell on the Windows host.
   - _Requirements: 2.4, 6.7_
 
 - [ ] 3. Hook range rule
-- [ ] 3.1 Typed line ranges from every adapter
+- [x] 3.1 Typed line ranges from every adapter
   - Introduce the line range type (start, optional end) and build it in the Claude Code, OpenCode, Antigravity and Codex/shell adapters from their own fields; forms that cannot be sized stay whole reads; unparsable values pass.
   - Done when adapter tests show each harness's ranged payload becomes the expected start/end, open-ended reads have no end, and the hook CLI tests still pass unchanged for whole reads.
   - _Boundary: LineRange + span rule_
   - _Requirements: 3.5_
 
-- [ ] 3.2 Span rule in the decision
+- [x] 3.2 Span rule in the decision
   - Apply the span rule: a range at or above the threshold (or open-ended with enough lines remaining) follows the whole-file rules; a smaller span passes; an I/O error passes; audit the range on both outcomes.
   - Done when hook tests show, per harness: span of exactly the threshold → redirect; threshold minus one → pass; open-ended from line 2 of a long file → redirect; `tail -n 50` → pass; and the hook CLI tests cover a Claude `Read` with `limit: 2000` on a 400-line file (deny) and `offset: 10, limit: 100` (pass).
   - _Boundary: LineRange + span rule_
   - _Depends: 3.1_
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 3.3 (P) Redirect texts
+- [x] 3.3 (P) Redirect texts
   - Rewrite the four harnesses' redirect texts: `smart_read` for the summary first; the exact-text fallback is a range under the threshold around the lines needed, naming the threshold; mention the `smart_read` slice where the harness has exact ranges; keep the 2-minute repeat hint last.
   - Done when render tests for all four harnesses assert the order and the threshold number, and the Antigravity reason stays ASCII.
   - _Boundary: Redirect texts_
   - _Requirements: 3.4, 3.6_
 
-- [ ] 4. Threshold 300
+- [x] 4. Threshold 300
   - Set the default to 300; replace literals with the constant in hook and shunt tests and the check's hook sample; update `docs/configuration.md`, the README and installation guide sentences that name the threshold, the installer's worker-guide text if it does, and the steering note in `tech.md`.
   - Done when a grep for the old literal in `src/`, `docs/`, `README.md` and steering finds only historical spec text, the install-docs test passes, and a cached 200-line summary is still served when requested.
   - _Boundary: Threshold_
@@ -97,3 +97,5 @@ from native PowerShell on the Windows host.
 ## Implementation Notes
 
 - 2026-11-10 (batch 1: tasks 1.1, 1.2, 2.1, 2.2, 7; one Opus implementer, controller inline review): file-read summaries live in `shunt_content_cache` (kind `file_read`) with a canonical fingerprint and `last_path`; schema v3 copies `shunt_file_cache` once (fixture `tests/fixtures/store/v2-file-cache.db`); stages 3–4 moved to `src/services/shunt_lookup.rs` (shunt.rs was at the 500-line cap). Accepted deviations: prune skips rows with a NULL `last_path` instead of pruning them, because `shunt_content` rows share the `file_read` kind and have no path; content summarised earlier only under custom questions gets a canonical summary on its first default read (the custom rows are kept and served). `CACHE_MIGRATED` is audited after the schema transaction commits. For batch 3: the playbook says `mmhmem warmup <repo>`, so the CLI must accept the root as a positional argument as well as `--root`; `deploy/instructions/mmhmem-routing.md` line 15 still says cache identity includes the question and must be reworded.
+- 2026-11-10 (CI for batch 1, main 9406c7b): CI run 42857053522 failed once in the Windows job on `tests/routing_adoption.rs::bounded_child_drains_both_streams` (a 5-second timeout while a PowerShell child writes 200 KB to both streams; first failure of that job in two weeks of green runs, no process code in the batch) and passed on rerun; Installer e2e run 42857053280 passed. Treat that test as timing-sensitive on the Windows runner.
+- 2026-11-10 (batch 2: tasks 3.1, 3.2, 3.3, 4; one Opus implementer, controller inline review, one remediation): `hook::LineRange` (`from_offset_limit`, `from_tail` encoded as start 0 + end n, `span_lines`), `range::span_at_or_above` and `scan_from` in `src/hook/range.rs`, shell ranges in `src/hook/shell_range.rs` (sed -n A,Bp / Ap, head -n N / -nN / -N, tail -n N / -n +N; `Get-Content` ranged forms stay unrecognised); audit `details.range` = {start,end} or {last}; redirect texts name the threshold and the smart_read slice; `DEFAULT_SHUNT_MIN_LINES = 300` with docs, README, installation guide, server docs, .env.example and steering updated; 14 tests resized from the constant, `shunt_content_fixture` pins `SHUNT_MIN_LINES=160` for its byte-compared corpus; `docs/concept.md` keeps its historical 150s. Rejected and reverted: serving a cached summary for a below-threshold file through smart_read (small files must return exact content); Req 4.3 is proven by a test that reads a 200-line file directly at 300 and from the cache at `SHUNT_MIN_LINES=150`.

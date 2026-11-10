@@ -8,11 +8,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use mmhmem::config::DEFAULT_SHUNT_MIN_LINES;
 use mmhmem::services::shunt::is_security_critical_path;
 use serde_json::{Value, json};
 
 const SECRET_KEY: &str = "sk-hooktest-0123456789abcdef";
 const MARKER: &str = "UNIQUE_FILE_CONTENT_MARKER";
+/// The default threshold the hook runs with (no `SHUNT_MIN_LINES` set).
+const THRESHOLD: usize = DEFAULT_SHUNT_MIN_LINES as usize;
 
 /// Isolated environment: project dir (the harness cwd), per-user home and
 /// data dir, all under one temp dir whose path never trips the security rule.
@@ -187,7 +190,7 @@ fn audit_records_carry_the_decision_fields_but_no_content() {
     let redirect = &audit[0]["details"];
     assert_eq!(audit[0]["event_type"], "HOOK_REDIRECT");
     assert_eq!(redirect["decision"], "redirect");
-    assert_eq!(redirect["lines"], 150);
+    assert_eq!(redirect["lines"], THRESHOLD);
     assert!(redirect["file_path"].as_str().unwrap().ends_with("big.rs"));
     let pass = &audit[1]["details"];
     assert_eq!(audit[1]["event_type"], "HOOK_PASS");
@@ -231,6 +234,86 @@ fn shell_whole_file_read_is_redirected() {
     let audit = env.audit();
     assert_eq!(audit.len(), 1);
     assert_eq!(audit[0]["details"]["tool"], "Bash");
+}
+
+/// (event type, reason, range detail) of every audit record.
+fn range_rows(env: &Env) -> Vec<(Value, Value, Value)> {
+    env.audit()
+        .iter()
+        .map(|r| {
+            let d = &r["details"];
+            (
+                r["event_type"].clone(),
+                d["reason"].clone(),
+                d["range"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// shunt-cache-efficiency task 3.2 (Req 3.1-3.5): a Claude `Read` range is
+/// sized; a large or open-ended one is redirected like a whole read, a
+/// small one passes, and a range value that is not a number is ignored.
+#[test]
+fn claude_read_ranges_are_sized_against_the_threshold() {
+    let env = Env::new();
+    let read = |name: &str, mut input: Value| {
+        input["file_path"] = json!(env.file(name, 400));
+        env.run(true, "Read", input)
+    };
+    let reason = deny_reason(&read("large.rs", json!({"limit": 2000})));
+    assert!(
+        reason.contains(&format!("a range under {THRESHOLD} lines around")),
+        "{reason}"
+    );
+    assert_pass(&read("small.rs", json!({"offset": 10, "limit": 100})));
+    deny_reason(&read("open.rs", json!({"offset": 2})));
+    deny_reason(&read("whole.rs", json!({"limit": "x"})));
+    let redirect = || (json!("HOOK_REDIRECT"), json!("large_file"));
+    let rows = range_rows(&env);
+    assert_eq!(
+        rows,
+        [
+            (redirect().0, redirect().1, json!({"start": 1, "end": 2000})),
+            (
+                json!("HOOK_PASS"),
+                json!("range"),
+                json!({"start": 10, "end": 109})
+            ),
+            (redirect().0, redirect().1, json!({"start": 2, "end": null})),
+            (redirect().0, redirect().1, Value::Null),
+        ]
+    );
+    assert!(env.audit()[3]["details"].get("range").is_none());
+}
+
+/// Task 3.2: Codex `sed -n` over the threshold is redirected; a short
+/// `tail` passes, both recorded with their range.
+#[test]
+fn codex_sed_and_tail_reads_are_sized_against_the_threshold() {
+    let env = Env::new();
+    let _ = env.file("big.rs", 400);
+    let codex = |command: &str| {
+        let event = json!({"session_id": "cx-2", "cwd": env.project,
+            "hook_event_name": "PreToolUse", "tool_name": "Bash",
+            "tool_input": {"command": command}});
+        env.run_raw("codex", true, event.to_string().as_bytes())
+    };
+    let reason = deny_reason(&codex("sed -n 1,400p big.rs"));
+    assert!(reason.contains("agent_harness \"codex\""), "{reason}");
+    assert_pass(&codex("tail -n 50 big.rs"));
+    let rows = range_rows(&env);
+    assert_eq!(
+        rows,
+        [
+            (
+                json!("HOOK_REDIRECT"),
+                json!("large_file"),
+                json!({"start": 1, "end": 400})
+            ),
+            (json!("HOOK_PASS"), json!("range"), json!({"last": 50})),
+        ]
+    );
 }
 
 /// Task 4.1 (Req 6.2): the Codex event shape observed from codex-cli
@@ -312,7 +395,7 @@ fn antigravity_whole_file_reads_at_the_threshold_are_denied() {
         ("read_file-whole", "at.txt"),
         ("read_file-whole-forward-slashes", "at-forward.txt"),
     ] {
-        let path = env.file(rel, 150);
+        let path = env.file(rel, THRESHOLD);
         let out = run(name, &path);
         let v = antigravity_answer(&out);
         assert_eq!(v["decision"], "deny", "{name}: {v}");
@@ -339,7 +422,7 @@ fn antigravity_whole_file_reads_at_the_threshold_are_denied() {
 #[test]
 fn antigravity_short_ranged_security_and_no_worker_reads_ask() {
     let env = Env::new();
-    let below = env.file("below.txt", 149);
+    let below = env.file("below.txt", THRESHOLD - 1);
     let big = env.file("big.txt", 400);
     let secret = env.file("auth.txt", 400);
     let run = |worker: bool, name: &str, path: &Path| {
@@ -366,6 +449,40 @@ fn antigravity_short_ranged_security_and_no_worker_reads_ask() {
             json!("no_worker")
         ]
     );
+}
+
+/// shunt-cache-efficiency task 3.2: a captured `read_file` range of 350
+/// lines is denied with the ranged fallback; the captured 11-line range
+/// still asks.
+#[test]
+fn antigravity_large_ranges_are_denied_and_small_ones_ask() {
+    let env = Env::new();
+    let big = env.file("big.txt", 400);
+    let ranged = |start: u64, end: u64| {
+        let bytes = antigravity_event(&env, "read_file-ranged", &big);
+        let mut event: Value = serde_json::from_slice(&bytes).expect("json");
+        event["toolCall"]["args"]["StartLine"] = json!(start);
+        event["toolCall"]["args"]["EndLine"] = json!(end);
+        env.run_raw("antigravity", true, event.to_string().as_bytes())
+    };
+    let out = ranged(1, 350);
+    let v = antigravity_answer(&out);
+    assert_eq!(v["decision"], "deny", "{v}");
+    let reason = v["reason"].as_str().expect("reason");
+    let fallback = format!("read_file with StartLine and EndLine for a range under {THRESHOLD}");
+    assert!(reason.contains(&fallback), "{reason}");
+    assert!(out.stdout.is_ascii());
+    assert_ask(&ranged(10, 20));
+    let ranges: Vec<Value> = env
+        .audit()
+        .iter()
+        .map(|r| r["details"]["range"].clone())
+        .collect();
+    let want = [
+        json!({"start": 1, "end": 350}),
+        json!({"start": 10, "end": 20}),
+    ];
+    assert_eq!(ranges, want);
 }
 
 /// Task 2.1 (Req 2.3, 2.4): other tools, bad stdin and a configuration that

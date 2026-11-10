@@ -4,13 +4,19 @@
 //! `decide` is a pure function over one read request: it touches only the
 //! target file's metadata and a bounded prefix of its bytes, never the
 //! network, configuration or secrets (the caller passes [`HookSettings`]).
+//! A line range is sized first (shunt-cache-efficiency "Hook range rule",
+//! [`range`]): a large one is judged like a whole-file read.
 
 pub mod adapters;
 mod antigravity;
 mod codex;
 mod opencode;
+mod range;
 pub mod shell;
+mod shell_range;
 pub mod state;
+
+pub use range::LineRange;
 
 use std::path::{Path, PathBuf};
 
@@ -19,8 +25,8 @@ use std::path::{Path, PathBuf};
 pub struct ReadRequest {
     /// Resolved absolute path of the file to read.
     pub path: PathBuf,
-    /// `(offset, limit)` when the call asks for an explicit line range.
-    pub range: Option<(u64, u64)>,
+    /// The lines the call asks for; `None` for a whole-file read.
+    pub range: Option<LineRange>,
     /// Harness tool name, kept for the audit record.
     pub tool: String,
 }
@@ -37,7 +43,8 @@ pub struct HookSettings {
 /// Why a read is let through unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassReason {
-    /// The call asked for an explicit line range (Req 2.2).
+    /// The call asked for a line range below the threshold (Req 2.2;
+    /// shunt-cache-efficiency Req 3.3).
     Range,
     /// The file has fewer lines than the threshold (Req 2.3).
     Short,
@@ -75,15 +82,23 @@ const TEXT_PROBE_BYTES: usize = 8 * 1024;
 /// Read buffer for the streaming line count.
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Decides one read request (design.md order: range, missing/not regular,
-/// security rule, no worker, not text, below threshold, redirect).
+/// Decides one read request (design.md order: range size, missing/not
+/// regular, security rule, no worker, not text, below threshold, redirect).
 ///
-/// A file that cannot be opened or read after its metadata check passes as
-/// [`PassReason::Missing`], so the hook fails open (Req 3.1). `project` is
-/// the harness `cwd`: the security rule only looks at the path inside it.
+/// A range below the threshold passes as [`PassReason::Range`]; a larger
+/// one, or an open-ended one with at least the threshold left, follows the
+/// whole-file rules (shunt-cache-efficiency Req 3.1-3.3). A file that
+/// cannot be opened or read passes as [`PassReason::Missing`], so the hook
+/// fails open (Req 3.1; shunt-cache-efficiency Req 3.5). `project` is the
+/// harness `cwd`: the security rule only looks at the path inside it.
 pub fn decide(req: &ReadRequest, settings: &HookSettings, project: &Path) -> Decision {
-    if req.range.is_some() {
-        return Decision::Pass(PassReason::Range);
+    let threshold = u64::from(settings.shunt_min_lines);
+    if let Some(range) = &req.range {
+        match range::span_at_or_above(range, &req.path, threshold) {
+            Err(_) => return Decision::Pass(PassReason::Missing),
+            Ok(false) => return Decision::Pass(PassReason::Range),
+            Ok(true) => {}
+        }
     }
     if !std::fs::metadata(&req.path).is_ok_and(|m| m.is_file()) {
         return Decision::Pass(PassReason::Missing);
@@ -94,7 +109,6 @@ pub fn decide(req: &ReadRequest, settings: &HookSettings, project: &Path) -> Dec
     if !settings.worker_configured {
         return Decision::Pass(PassReason::NoWorker);
     }
-    let threshold = u64::from(settings.shunt_min_lines);
     match scan(&req.path, threshold) {
         Err(_) => Decision::Pass(PassReason::Missing),
         Ok(Scan::NotText) => Decision::Pass(PassReason::NotText),
@@ -189,7 +203,7 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, Instant};
 
-    const THRESHOLD: u32 = 150;
+    const THRESHOLD: u32 = crate::config::DEFAULT_SHUNT_MIN_LINES;
 
     fn settings(worker: bool) -> HookSettings {
         HookSettings {
@@ -228,7 +242,7 @@ mod tests {
             .into_bytes()
     }
 
-    fn run(path: &Path, range: Option<(u64, u64)>, worker: bool) -> Decision {
+    fn run(path: &Path, range: Option<LineRange>, worker: bool) -> Decision {
         let req = ReadRequest {
             path: path.to_path_buf(),
             range,
@@ -279,8 +293,9 @@ mod tests {
         let secret = write(d, "auth/secret_store.rs", &text_lines(5000));
         let missing = d.join("nope.rs");
         let p = Decision::Pass;
-        assert_eq!(run(&big, Some((1, 20)), true), p(PassReason::Range));
-        assert_eq!(run(&missing, Some((1, 20)), true), p(PassReason::Range));
+        let small_range = Some(LineRange::new(1, Some(20)));
+        assert_eq!(run(&big, small_range, true), p(PassReason::Range));
+        assert_eq!(run(&missing, small_range, true), p(PassReason::Range));
         assert_eq!(run(&missing, None, true), p(PassReason::Missing));
         assert_eq!(run(d, None, true), p(PassReason::Missing));
         assert_eq!(run(&secret, None, true), p(PassReason::SecurityCritical));

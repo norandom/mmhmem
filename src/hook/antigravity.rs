@@ -13,7 +13,7 @@
 
 use super::adapters::{Harness, ParsedCall, ascii_json, load_input};
 use super::shell::resolve;
-use super::{Decision, ReadRequest};
+use super::{Decision, LineRange, ReadRequest};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -53,10 +53,10 @@ fn text(value: Option<&Value>) -> &str {
 }
 
 /// `read_file`: `Path` in either slash style (a relative one joins `cwd`).
-/// Either `StartLine` or `EndLine` makes it a ranged read, `(StartLine or 1,
-/// EndLine or 0)` where 0 means "to the end", as for Claude Code's `Read`;
-/// only non-negative integers count, and a range key of another type makes
-/// it not a read.
+/// Either `StartLine` or `EndLine` makes it a ranged read from `StartLine`
+/// (or 1) to `EndLine`, to the end when `EndLine` is absent or 0; only
+/// non-negative integers count, and a range key of another type makes it
+/// not a read.
 fn read_file(args: &Value, cwd: &str) -> Option<ReadRequest> {
     let path = resolve(args.get("Path")?.as_str()?, Path::new(cwd))?;
     let line = |key: &str| match args.get(key) {
@@ -64,7 +64,8 @@ fn read_file(args: &Value, cwd: &str) -> Option<ReadRequest> {
         Some(value) => value.as_u64().map(Some),
     };
     let (start, end) = (line("StartLine")?, line("EndLine")?);
-    let range = (start.is_some() || end.is_some()).then(|| (start.unwrap_or(1), end.unwrap_or(0)));
+    let range = (start.is_some() || end.is_some())
+        .then(|| LineRange::new(start.unwrap_or(1), end.filter(|&n| n > 0)));
     Some(ReadRequest {
         path,
         range,
@@ -75,7 +76,7 @@ fn read_file(args: &Value, cwd: &str) -> Option<ReadRequest> {
 /// Redirect: `{"decision":"deny","reason":...}` naming the `smart_read`
 /// call, ASCII only (the reason reaches the agent as "tool call denied by
 /// pre-tool hook: <reason>"); pass: [`PASS_OUTPUT`].
-pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String {
+pub(super) fn render(decision: &Decision, path: &Path, project: &str, threshold: u32) -> String {
     let Decision::Redirect { lines } = decision else {
         return PASS_OUTPUT.to_string();
     };
@@ -83,8 +84,10 @@ pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String 
         "mmhmem: {path} has at least {lines} lines. Read it through the mmhmem MCP tool \
          instead: call smart_read with project \"{project}\", agent_harness \"{harness}\" \
          and file_path \"{path}\" for a summary with exact line ranges. For exact text, for \
-         example before an edit, use read_file with StartLine and EndLine. Only if the \
-         summary is not enough, repeat this full read within 2 minutes.",
+         example before an edit, use read_file with StartLine and EndLine for a range under \
+         {threshold} lines around what you need, or ask smart_read for a slice with offset \
+         and limit. Only if the summary is not enough, repeat this full read within 2 \
+         minutes.",
         path = path.display(),
         harness = Harness::Antigravity.agent_harness(),
     );
@@ -98,6 +101,8 @@ mod tests {
     use crate::hook::{HookSettings, PassReason, ReadRequest};
     use serde_json::{Value, json};
     use std::path::PathBuf;
+
+    const T: u32 = crate::config::DEFAULT_SHUNT_MIN_LINES;
 
     /// A payload captured live from agy 1.5.3 (task 1.1; see the README in
     /// `tests/fixtures/hook/antigravity/`).
@@ -145,9 +150,9 @@ mod tests {
     fn captured_ranged_read_is_a_ranged_request_that_passes() {
         let r = call(&fixture("read_file-ranged")).read.expect("read");
         assert_eq!(r.path, PathBuf::from(r"D:\work\ws\notes.txt"));
-        assert_eq!(r.range, Some((10, 20)));
+        assert_eq!(r.range, Some(LineRange::new(10, Some(20))));
         let settings = HookSettings {
-            shunt_min_lines: 1,
+            shunt_min_lines: T,
             worker_configured: true,
         };
         let decision = crate::hook::decide(&r, &settings, Path::new("D:/work/ws"));
@@ -156,10 +161,18 @@ mod tests {
 
     #[test]
     fn one_range_key_is_a_ranged_read_and_relative_paths_join_the_workspace() {
-        let start = read_of("read_file", json!({"Path":"D:/w/a.rs","StartLine":5}));
-        assert_eq!(start.expect("read").range, Some((5, 0)));
-        let end = read_of("read_file", json!({"Path":"D:/w/a.rs","EndLine":7}));
-        assert_eq!(end.expect("read").range, Some((1, 7)));
+        let range = |args: Value| read_of("read_file", args).expect("read").range;
+        let lines = |a, b| Some(LineRange::new(a, b));
+        let open = range(json!({"Path":"D:/w/a.rs","StartLine":5}));
+        assert_eq!(open, lines(5, None), "no EndLine reads to the end");
+        assert_eq!(
+            range(json!({"Path":"D:/w/a.rs","EndLine":7})),
+            lines(1, Some(7))
+        );
+        let zero_end = json!({"Path":"D:/w/a.rs","StartLine":5,"EndLine":0});
+        assert_eq!(range(zero_end), lines(5, None));
+        let zero_start = json!({"Path":"D:/w/a.rs","StartLine":0,"EndLine":9});
+        assert_eq!(range(zero_start), lines(1, Some(9)));
         let rel = read_of("read_file", json!({"Path":"src/a.rs"})).expect("read");
         assert_eq!(rel.path, Path::new("D:/work/ws").join("src/a.rs"));
         assert_eq!(rel.range, None);
@@ -253,31 +266,28 @@ mod tests {
     #[test]
     fn redirect_renders_a_deny_naming_the_smart_read_call() {
         let path = Path::new(r"D:\work\ws\notes.txt");
-        let d = Decision::Redirect { lines: 150 };
-        let reason = reason_of(&adapters::render(Harness::Antigravity, &d, path, "ws"));
-        let head = format!("mmhmem: {} has at least 150 lines.", path.display());
+        let d = Decision::Redirect {
+            lines: u64::from(T),
+        };
+        let out = adapters::render(Harness::Antigravity, &d, path, "ws", T);
+        assert!(out.is_ascii(), "{out}");
+        let reason = reason_of(&out);
+        let head = format!("mmhmem: {} has at least {T} lines.", path.display());
         assert!(reason.starts_with(&head), "{reason}");
         let smart_read = format!(
             "smart_read with project \"ws\", agent_harness \"antigravity\" and file_path \"{}\"",
             path.display()
         );
         assert!(reason.contains(&smart_read), "{reason}");
-        assert!(
-            reason.contains("read_file with StartLine and EndLine"),
-            "{reason}"
-        );
         assert!(!reason.contains("claude-code"), "{reason}");
-        let smart = reason.find("smart_read").expect("smart_read");
-        let repeat = reason
-            .find("Only if the summary is not enough")
-            .expect("repeat");
-        assert!(smart < repeat, "{reason}");
+        let tool = "read_file with StartLine and EndLine";
+        adapters::assert_redirect_text(&reason, T, tool);
     }
 
     #[test]
     fn redirect_output_is_ascii_and_round_trips_non_ascii_paths() {
         let path = Path::new("D:/work/Übersicht \"q\" 😀.rs");
-        let out = render(&Decision::Redirect { lines: 200 }, path, "projé");
+        let out = render(&Decision::Redirect { lines: 200 }, path, "projé", 200);
         assert!(out.is_ascii(), "{out}");
         let reason = reason_of(&out);
         assert!(reason.contains("D:/work/Übersicht \"q\" 😀.rs"), "{reason}");
@@ -297,7 +307,7 @@ mod tests {
             PassReason::NotARead,
         ] {
             let d = Decision::Pass(reason);
-            let out = adapters::render(Harness::Antigravity, &d, Path::new("/x"), "p");
+            let out = adapters::render(Harness::Antigravity, &d, Path::new("/x"), "p", T);
             assert_eq!(out, r#"{"decision":"ask"}"#, "{reason:?}");
         }
         assert_eq!(

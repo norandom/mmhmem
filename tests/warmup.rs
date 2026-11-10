@@ -2,7 +2,10 @@
 //! Req 1.2-1.8). Moved here from src/services/warmup.rs to keep the src
 //! file under the Req 13.3 500-LOC cap (tests/shunt.rs precedent).
 
-use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN, ENV_WORKER_API_URL, ENV_WORKER_MODEL};
+use mmhmem::config::{
+    Config, DEFAULT_SHUNT_MIN_LINES, ENV_ALLOWED_ROOTS, ENV_TOKEN, ENV_WORKER_API_URL,
+    ENV_WORKER_MODEL,
+};
 use mmhmem::services::shunt::{ShuntEngine, ShuntError};
 use mmhmem::services::shunt_cache::{SummaryRow, query_fingerprint, summary_store_and_evict};
 use mmhmem::services::shunt_types::CallCtx;
@@ -12,6 +15,8 @@ use mmhmem::storage::audit::{AuditWriter, sha256_hex};
 use mmhmem::storage::db::Db;
 
 const QUESTION: &str = "Summarize exported symbols, signatures, and control flow.";
+/// A file length above the shipped threshold, so warm-up summarises it.
+const BIG: usize = DEFAULT_SHUNT_MIN_LINES as usize + 50;
 
 fn test_config(root: &std::path::Path) -> Config {
     let root = root.display().to_string();
@@ -104,7 +109,7 @@ async fn cap_boundary_of_25_is_accepted() {
 async fn cached_row_counts_as_cached_without_worker() {
     // Req 1.3: a seeded cache row serves the file with zero worker calls.
     let dir = tempfile::tempdir().expect("tempdir");
-    let big = write_lines(dir.path(), "big.rs", 200);
+    let big = write_lines(dir.path(), "big.rs", BIG);
     let data = tempfile::tempdir().expect("tempdir");
     let logs = tempfile::tempdir().expect("tempdir");
     let db = Db::open(data.path()).expect("db");
@@ -119,7 +124,7 @@ async fn cached_row_counts_as_cached_without_worker() {
         sha: &file_sha,
         fingerprint: &fp,
         summary: "seeded summary",
-        line_count: 200,
+        line_count: BIG,
         path: &canonical,
     };
     summary_store_and_evict(&db, row, 5000).await.expect("seed");
@@ -146,7 +151,7 @@ async fn below_threshold_is_skipped_and_counted() {
 #[tokio::test]
 async fn security_critical_is_skipped_and_counted() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let big = write_lines(dir.path(), "auth_utils.rs", 200);
+    let big = write_lines(dir.path(), "auth_utils.rs", BIG);
     let env = setup(dir.path(), None);
     let report = run_warmup(&env.engine, &env.audit, &[big], QUESTION, ctx())
         .await
@@ -175,7 +180,7 @@ async fn denied_path_is_counted_and_never_fatal() {
     // exists but lies outside the allowed root (the tempdir under it).
     let inside = tempfile::tempdir().expect("tempdir");
     let outside = tempfile::tempdir().expect("tempdir");
-    let big = write_lines(outside.path(), "big.rs", 200);
+    let big = write_lines(outside.path(), "big.rs", BIG);
     let env = setup(inside.path(), None);
     let report = run_warmup(&env.engine, &env.audit, &[big], QUESTION, ctx())
         .await
@@ -189,7 +194,7 @@ async fn worker_failure_is_counted_and_never_fatal() {
     // A real-but-dead worker endpoint: the call fails, the file counts
     // as failed, the batch continues.
     let dir = tempfile::tempdir().expect("tempdir");
-    let big = write_lines(dir.path(), "big.rs", 200);
+    let big = write_lines(dir.path(), "big.rs", BIG);
     let root = dir.path().display().to_string();
     let cfg = Config::from_env(&|k| match k {
         ENV_TOKEN => Some("tok".to_string()),
@@ -214,7 +219,7 @@ async fn worker_unconfigured_aborts_with_engine_parity() {
     // Req 1.7: without a worker, a delegable file aborts the batch with
     // the engine's own actionable error (smart_read parity).
     let dir = tempfile::tempdir().expect("tempdir");
-    let big = write_lines(dir.path(), "big.rs", 200);
+    let big = write_lines(dir.path(), "big.rs", BIG);
     let env = setup(dir.path(), None);
     let err = run_warmup(&env.engine, &env.audit, &[big], QUESTION, ctx())
         .await
@@ -255,7 +260,7 @@ async fn notes_collect_per_file_reasons_in_batch_order() {
     // path + reason, in batch order.
     let dir = tempfile::tempdir().expect("tempdir");
     let small = write_lines(dir.path(), "small.rs", 10);
-    let auth = write_lines(dir.path(), "auth_utils.rs", 200);
+    let auth = write_lines(dir.path(), "auth_utils.rs", BIG);
     let batch = [small, String::from("no-such-file.rs"), auth];
     let env = setup(dir.path(), None);
     let report = run_warmup(&env.engine, &env.audit, &batch, QUESTION, ctx())

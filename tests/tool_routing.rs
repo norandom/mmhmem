@@ -1,7 +1,7 @@
 //! Accounting acceptance through real MCP calls; no frontier-savings claims.
 mod common;
 use mmhmem::{
-    config::Config,
+    config::{Config, DEFAULT_SHUNT_MIN_LINES},
     mcp::server::AppState,
     storage::db::{DB_FILE_NAME, Db},
 };
@@ -124,6 +124,8 @@ impl Rig {
         }).await.unwrap()
     }
 }
+/// A file length above the shipped threshold, so `smart_read` summarises it.
+const LARGE: usize = DEFAULT_SHUNT_MIN_LINES as usize + 20;
 fn read_args(path: &str) -> Value {
     json!({"project":"routing-fixture","agent_harness":"claude-code","file_path":path,"question":"Explain responsibilities"})
 }
@@ -131,7 +133,7 @@ fn read_args(path: &str) -> Value {
 #[tokio::test]
 async fn same_identity_cache_hit_records_estimates_without_another_worker_call() {
     let mut rig = Rig::new().await;
-    let path = rig.file("transform.rs", 220);
+    let path = rig.file("transform.rs", LARGE);
     let raw = std::fs::read_to_string(&path).unwrap();
     assert!(rig.rows().await.is_empty());
     let first = rig.call("smart_read", read_args(&path)).await;
@@ -172,8 +174,8 @@ async fn same_identity_cache_hit_records_estimates_without_another_worker_call()
 async fn direct_targeted_session_and_worker_failure_do_not_record_summary_savings() {
     let mut rig = Rig::new().await;
     let small = rig.file("small.rs", 2);
-    let large = rig.file("transform.rs", 220);
-    let security = rig.file("auth.rs", 220);
+    let large = rig.file("transform.rs", LARGE);
+    let security = rig.file("auth.rs", LARGE);
     assert!(
         rig.call("smart_read", read_args(&small))
             .await
@@ -189,7 +191,7 @@ async fn direct_targeted_session_and_worker_failure_do_not_record_summary_saving
     assert!(
         rig.call("smart_read", read_args(&security))
             .await
-            .contains("L220:")
+            .contains(&format!("L{LARGE}:"))
     );
     assert!(rig.rows().await.is_empty());
     rig.call(

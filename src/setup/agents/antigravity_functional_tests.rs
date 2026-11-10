@@ -75,12 +75,10 @@ fn hook_prints(home: &TestHome, stdout: &str) {
 /// What the real hook prints for a redirect of the sample.
 fn redirect() -> String {
     let file = Path::new("/work").join("mmhmem-sample.txt");
-    adapters::render(
-        Harness::Antigravity,
-        &Decision::Redirect { lines: 150 },
-        &file,
-        "p",
-    )
+    let threshold = crate::config::DEFAULT_SHUNT_MIN_LINES;
+    let lines = u64::from(threshold);
+    let redirect = Decision::Redirect { lines };
+    adapters::render(Harness::Antigravity, &redirect, &file, "p", threshold)
 }
 
 fn outcome(report: &CheckReport, step: CheckStep) -> StepOutcome {

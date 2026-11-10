@@ -1,11 +1,15 @@
-//! Whole-file read recognition for shell commands (read-routing-hooks
-//! design.md "shell (`src/hook/shell.rs`)", Req 2.6).
+//! Read recognition for shell commands (read-routing-hooks design.md "shell
+//! (`src/hook/shell.rs`)", Req 2.6): whole-file readers here, the partial
+//! readers whose lines can be sized (`sed -n`, `head`, `tail`) in
+//! [`super::shell_range`] (shunt-cache-efficiency task 3.1).
 //!
 //! Pure string analysis: nothing is executed, expanded or looked up. The
 //! recogniser is conservative by design: anything it is not sure about is
 //! `None`, so the read proceeds unchanged.
 
 use std::path::{Path, PathBuf};
+
+use super::LineRange;
 
 /// Commands longer than this are never analysed (bounded untrusted input).
 pub const MAX_COMMAND_BYTES: usize = 4096;
@@ -26,28 +30,38 @@ const UNSAFE_UNQUOTED: &[char] = &[
 const PWSH_STARTUP_FLAGS: &[&str] = &["-noprofile", "-nologo", "-noninteractive"];
 
 /// One shell word after quote removal.
-struct Token {
-    text: String,
-    quoted: bool,
+pub(super) struct Token {
+    pub(super) text: String,
+    pub(super) quoted: bool,
 }
 
 impl Token {
     /// An unquoted word starting with `-` is an option (`'-n'` is a file).
-    fn is_option(&self) -> bool {
+    pub(super) fn is_option(&self) -> bool {
         !self.quoted && self.text.starts_with('-')
     }
 }
 
-/// `Some(path)` only for one simple command that reads one whole file.
+/// One recognised shell read of one file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellRead {
+    /// The file, resolved against the working folder.
+    pub path: PathBuf,
+    /// The lines a partial reader prints; `None` for a whole-file reader.
+    pub range: Option<LineRange>,
+}
+
+/// `Some` only for one simple command that reads one file.
 ///
-/// Accepted: `cat`, `type`, `less`, `more`, `gc` and `Get-Content`
-/// (case-insensitive) with exactly one file argument. The PowerShell readers
-/// (`Get-Content` and its aliases `gc`, `cat`, `type`) also take `-Path`,
-/// `-LiteralPath` and `-Raw`; `-Raw` still reads the whole file. Every other
-/// option, several files, and any compound, expanding or globbing command is
-/// `None`. The path is resolved against `cwd` unless it is absolute (Unix,
-/// `C:\`, `C:/` or UNC); a drive-relative `C:x` is `None`.
-pub fn recognise(command: &str, cwd: &Path) -> Option<PathBuf> {
+/// Accepted whole-file readers: `cat`, `type`, `less`, `more`, `gc` and
+/// `Get-Content` (case-insensitive) with exactly one file argument. The
+/// PowerShell readers (`Get-Content` and its aliases `gc`, `cat`, `type`)
+/// also take `-Path`, `-LiteralPath` and `-Raw`; `-Raw` still reads the whole
+/// file. Partial readers with a range are listed in [`super::shell_range`].
+/// Every other option, several files, and any compound, expanding or
+/// globbing command is `None`. The path is resolved against `cwd` unless it
+/// is absolute (Unix, `C:\`, `C:/` or UNC); a drive-relative `C:x` is `None`.
+pub fn recognise(command: &str, cwd: &Path) -> Option<ShellRead> {
     if command.len() > MAX_COMMAND_BYTES {
         return None;
     }
@@ -56,13 +70,24 @@ pub fn recognise(command: &str, cwd: &Path) -> Option<PathBuf> {
     if command.chars().any(|c| c.is_whitespace() && !is_blank(c)) {
         return None;
     }
-    let tokens = tokenize(command)?;
+    // `sed -n A,Bp` needs its comma; native programs get it literally in
+    // PowerShell too (only cmdlets build arrays from it).
+    let sed = command.split(is_blank).find(|w| !w.is_empty()) == Some("sed");
+    let tokens = tokenize(command, sed)?;
     let (name, args) = tokens.split_first()?;
     if name.quoted {
         return None;
     }
+    if let Some((file, range)) = super::shell_range::partial(&name.text, args) {
+        let path = resolve(file, cwd)?;
+        return Some(ShellRead {
+            path,
+            range: Some(range),
+        });
+    }
     let powershell = reader_kind(&name.text)?;
-    resolve(file_argument(args, powershell)?, cwd)
+    let path = resolve(file_argument(args, powershell)?, cwd)?;
+    Some(ShellRead { path, range: None })
 }
 
 /// The script of a shell-invocation argv such as `["bash", "-lc", "cat x"]`
@@ -131,8 +156,9 @@ fn is_blank(c: char) -> bool {
 }
 
 /// Splits a command into words; `None` for anything outside the simple
-/// subset (unsafe characters, unterminated or concatenated quotes).
-fn tokenize(command: &str) -> Option<Vec<Token>> {
+/// subset (unsafe characters, unterminated or concatenated quotes). With
+/// `comma`, an unquoted `,` is kept in a word (for `sed -n A,Bp`).
+fn tokenize(command: &str, comma: bool) -> Option<Vec<Token>> {
     let mut tokens = Vec::new();
     let mut chars = command.chars().peekable();
     loop {
@@ -140,7 +166,7 @@ fn tokenize(command: &str) -> Option<Vec<Token>> {
         let token = match chars.peek() {
             None => return Some(tokens),
             Some('\'' | '"') => quoted_word(&mut chars)?,
-            Some(_) => bare_word(&mut chars)?,
+            Some(_) => bare_word(&mut chars, comma)?,
         };
         tokens.push(token);
     }
@@ -166,10 +192,11 @@ fn quoted_word(chars: &mut Chars<'_>) -> Option<Token> {
 }
 
 /// An unquoted word; a quote inside it (concatenation) is `None`.
-fn bare_word(chars: &mut Chars<'_>) -> Option<Token> {
+fn bare_word(chars: &mut Chars<'_>, comma: bool) -> Option<Token> {
     let mut text = String::new();
     while let Some(c) = chars.next_if(|c| !is_blank(*c)) {
-        let unsafe_char = UNSAFE_ANYWHERE.contains(&c) || UNSAFE_UNQUOTED.contains(&c);
+        let unquoted = UNSAFE_UNQUOTED.contains(&c) && !(comma && c == ',');
+        let unsafe_char = UNSAFE_ANYWHERE.contains(&c) || unquoted;
         if unsafe_char || c == '\'' || c == '"' {
             return None;
         }
@@ -229,9 +256,12 @@ mod tests {
         Some(PathBuf::from(p))
     }
 
+    /// Whole-file reads only: the expected path and no range.
     fn check_accepts(cases: &[(&str, Option<PathBuf>)]) {
         for (cmd, want) in cases {
-            assert_eq!(recognise(cmd, &cwd()), *want, "command: {cmd:?}");
+            let got = recognise(cmd, &cwd());
+            assert_eq!(got.as_ref().map(|r| &r.path), want.as_ref(), "{cmd:?}");
+            assert_eq!(got.and_then(|r| r.range), None, "command: {cmd:?}");
         }
     }
 
@@ -336,9 +366,10 @@ mod tests {
             "cat -- a.txt",
             "cat -",
             "less +F a.txt",
-            "head a.txt",
-            "tail -n 5 a.txt",
-            "sed -n 1,5p a.txt",
+            "head -c 5 a.txt",
+            "tail -f a.txt",
+            "sed 1,5p a.txt",
+            "cat 1,5p a.txt",
             "grep x a.txt",
             "awk 1 a.txt",
             "bat a.txt",
@@ -427,7 +458,8 @@ mod tests {
     #[test]
     fn unwrapped_script_is_recognised() {
         let script = unwrap_invocation(&argv(&["bash", "-lc", "cat 'a b.txt'"])).expect("unwrap");
-        assert_eq!(recognise(&script, &cwd()), rel("a b.txt"));
+        let read = recognise(&script, &cwd()).expect("read");
+        assert_eq!((Some(read.path), read.range), (rel("a b.txt"), None));
         let piped = unwrap_invocation(&argv(&["bash", "-lc", "cat a | wc -l"])).expect("unwrap");
         assert_eq!(recognise(&piped, &cwd()), None);
     }

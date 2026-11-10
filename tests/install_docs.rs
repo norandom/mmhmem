@@ -317,3 +317,30 @@ fn antigravity_guidance_says_setup_configures_it_and_only_a_new_session_is_left(
     assert_eq!(entry["args"], serde_json::json!(["stdio"]), "{example}");
     assert!(entry["command"].is_string(), "{example}");
 }
+
+/// shunt-cache-efficiency task 4 (Req 4.1, 4.2): the default threshold is
+/// 300 lines, and every place that states it says the same number.
+#[test]
+fn the_documented_shunt_threshold_is_the_default_of_300_lines() {
+    let default = mmhmem::config::DEFAULT_SHUNT_MIN_LINES;
+    assert_eq!(default, 300);
+    let row = format!("| `SHUNT_MIN_LINES` | `{default}` |");
+    for doc in ["docs/configuration.md", "docs/server.md"] {
+        assert!(read(doc).contains(&row), "{doc} states {row}");
+    }
+    let lines = format!("{default} lines");
+    for doc in [
+        "README.md",
+        "docs/installation.md",
+        ".kiro/steering/tech.md",
+    ] {
+        assert!(read(doc).contains(&lines), "{doc} states {lines}");
+    }
+    let env = read(".env.example");
+    assert!(
+        env.contains(&format!("(default {default};")),
+        ".env.example"
+    );
+    let line = format!("#SHUNT_MIN_LINES={default}\n");
+    assert!(env.contains(&line), ".env.example");
+}

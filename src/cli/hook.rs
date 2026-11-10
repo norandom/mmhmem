@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::config::Config;
 use crate::hook::adapters::{self, Harness, MAX_INPUT_BYTES, ParsedCall};
 use crate::hook::state::RepeatWindow;
-use crate::hook::{Decision, HookSettings, PassReason, ReadRequest, decide};
+use crate::hook::{Decision, HookSettings, LineRange, PassReason, ReadRequest, decide};
 use crate::storage::audit::{AuditEventType, AuditWriter};
 
 /// Project name recorded when the harness `cwd` has no usable basename.
@@ -108,9 +108,17 @@ fn respond(harness: Option<&str>) -> String {
         return String::new();
     };
     let window = RepeatWindow::with_default_window(&config.data_dir);
-    let decision = decide_call(&call, req, &settings_from(&config), &window, now_ms());
+    let settings = settings_from(&config);
+    let decision = decide_call(&call, req, &settings, &window, now_ms());
     record(&AuditWriter::from_config(&config), &call, req, &decision);
-    adapters::render(harness, &decision, &req.path, project_name(&call.cwd))
+    let project = project_name(&call.cwd);
+    adapters::render(
+        harness,
+        &decision,
+        &req.path,
+        project,
+        settings.shunt_min_lines,
+    )
 }
 
 /// Reads at most `cap` bytes; `None` on a read error or more than `cap`.
@@ -171,7 +179,8 @@ fn record(writer: &AuditWriter, call: &ParsedCall, req: &ReadRequest, decision: 
     let _ = writer.write_event(event, call.harness.agent_harness(), project, details);
 }
 
-/// Event type and `{"decision","reason","tool","file_path","lines"}`.
+/// Event type and `{"decision","reason","tool","file_path","lines"}`, plus
+/// `"range"` when the read named one (shunt-cache-efficiency task 3.2).
 fn audit_details(req: &ReadRequest, decision: &Decision) -> (AuditEventType, Value) {
     let (event, verdict, reason, lines) = match decision {
         Decision::Redirect { lines } => (
@@ -187,14 +196,26 @@ fn audit_details(req: &ReadRequest, decision: &Decision) -> (AuditEventType, Val
             Value::Null,
         ),
     };
-    let details = json!({
+    let mut details = json!({
         "decision": verdict,
         "reason": reason,
         "tool": req.tool,
         "file_path": req.path.display().to_string(),
         "lines": lines,
     });
+    if let Some(range) = &req.range {
+        details["range"] = range_details(range);
+    }
     (event, details)
+}
+
+/// `{"start", "end"}` (`end` null: to the end of the file), or `{"last": n}`
+/// for the last `n` lines.
+fn range_details(range: &LineRange) -> Value {
+    match range.end {
+        Some(n) if range.is_tail() => json!({"last": n}),
+        end => json!({"start": range.start, "end": end}),
+    }
 }
 
 /// Stable snake_case name of a pass reason for the audit record.
@@ -340,6 +361,28 @@ mod tests {
         ] {
             assert_eq!(no_decision_output(other), "", "{other:?}");
         }
+    }
+
+    #[test]
+    fn audit_records_the_range_of_ranged_reads_on_both_outcomes() {
+        let req = |range| ReadRequest {
+            path: PathBuf::from("/w/a.rs"),
+            range,
+            tool: "Read".to_string(),
+        };
+        let pass = Decision::Pass(PassReason::Range);
+        let redirect = Decision::Redirect { lines: 300 };
+        let closed = Some(LineRange::new(10, Some(109)));
+        let (_, details) = audit_details(&req(closed), &pass);
+        assert_eq!(details["range"], json!({"start": 10, "end": 109}));
+        let open = Some(LineRange::new(2, None));
+        let (_, details) = audit_details(&req(open), &redirect);
+        assert_eq!(details["range"], json!({"start": 2, "end": null}));
+        let tail = Some(LineRange::from_tail(50));
+        let (_, details) = audit_details(&req(tail), &pass);
+        assert_eq!(details["range"], json!({"last": 50}));
+        let (_, details) = audit_details(&req(None), &redirect);
+        assert!(details.get("range").is_none(), "{details}");
     }
 
     #[test]

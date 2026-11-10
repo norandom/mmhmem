@@ -17,8 +17,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mmhmem::config::{
-    Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN, ENV_WORKER_API_URL,
-    ENV_WORKER_MODEL,
+    Config, DEFAULT_SHUNT_MIN_LINES, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN,
+    ENV_WORKER_API_URL, ENV_WORKER_MODEL,
 };
 use mmhmem::services::shunt_content::MAX_CONTENT_BYTES;
 use serde_json::{Value, json};
@@ -30,6 +30,8 @@ use common::{mcp_call, mcp_init, mcp_tool, spawn_server, sse_json};
 
 const STUB_MODEL: &str = "stub-model";
 const STUB_SUMMARY: &str = "- exports [L1-L160]";
+/// A benign corpus above the shipped threshold, so it is summarised.
+const CORPUS_LINES: usize = DEFAULT_SHUNT_MIN_LINES as usize + 10;
 
 /// Benign multi-line file-read tool-result fixture (no secret pattern
 /// matches; every line avoids `:`/`=` assignments).
@@ -246,14 +248,14 @@ fn tool_args(content: &str, source_hint: Option<&str>) -> Value {
 #[tokio::test]
 async fn http_round_trips_json_contract_for_summarized_cached_bypassed() {
     let mut rig = HttpRig::new().await;
-    let content = benign_content(160);
+    let content = benign_content(CORPUS_LINES);
 
     // Delegation (Req 2.1 summarized).
     let first = parse_contract(&rig.call(tool_args(&content, None)).await);
     assert_eq!(first["outcome"], "summarized");
     assert_eq!(first["summary"], STUB_SUMMARY);
     assert_eq!(first["worker_model"], STUB_MODEL);
-    assert_eq!(first["line_count"], 160);
+    assert_eq!(first["line_count"], CORPUS_LINES);
     let sha = first["content_sha256"].as_str().unwrap().to_string();
     assert_eq!(sha.len(), 64, "sha256 hex: {sha}");
     assert!(first["avoided_input_tokens_est"].is_u64());
@@ -321,7 +323,7 @@ fn store_counts(db: &Path) -> Vec<(&'static str, i64)> {
 #[tokio::test]
 async fn http_invalid_kind_empty_oversized_return_documented_errors_no_rows() {
     let mut rig = HttpRig::new().await;
-    let long = benign_content(160);
+    let long = benign_content(CORPUS_LINES);
 
     // Invalid kind (Req 1.3): supported values named, nothing recorded.
     let bad_kind = rig
@@ -461,7 +463,7 @@ async fn stdio_local_mode_round_trips_json_contract_and_documented_errors() {
     let list = mcp.request("tools/list", json!({})).await;
     routing_metadata::assert_metadata(&list["result"]["tools"]);
 
-    let content = benign_content(160);
+    let content = benign_content(CORPUS_LINES);
     let args = json!({
         "project": "proxy-econ", "agent_harness": "mvibe-proxy",
         "content": &content, "kind": "file_read"

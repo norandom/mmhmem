@@ -32,18 +32,19 @@ pub(super) fn parse(input: &[u8]) -> ParsedCall {
     }
 }
 
-/// A whole-file read only if the recogniser accepts the script; an empty
-/// `cwd` is not a read.
+/// A read only if the recogniser accepts the script, with the range of a
+/// partial reader (`sed -n A,Bp`, `head`, `tail`); an empty `cwd` is not a
+/// read.
 fn shell_read(input: &Value, cwd: &str, tool: &str) -> Option<ReadRequest> {
     if cwd.is_empty() {
         return None;
     }
     let script = command_script(input.get("command")?)?;
     let dir = working_dir(input.get("workdir"), Path::new(cwd))?;
-    let path = recognise(&script, &dir)?;
+    let read = recognise(&script, &dir)?;
     Some(ReadRequest {
-        path,
-        range: None,
+        path: read.path,
+        range: read.range,
         tool: tool.to_string(),
     })
 }
@@ -75,7 +76,7 @@ fn working_dir(workdir: Option<&Value>, cwd: &Path) -> Option<std::path::PathBuf
 
 /// Redirect: the documented deny JSON with a Codex-specific reason, ASCII
 /// only; pass: no output.
-pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String {
+pub(super) fn render(decision: &Decision, path: &Path, project: &str, threshold: u32) -> String {
     let Decision::Redirect { lines } = decision else {
         return String::new();
     };
@@ -83,10 +84,11 @@ pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String 
         "mmhmem: {path} has at least {lines} lines. Read it through the mmhmem MCP tool \
          instead: call smart_read with project \"{project}\", agent_harness \"codex\" and \
          file_path \"{path}\" for a summary with exact line ranges. For exact text, for \
-         example before an edit, read only the lines you need with a ranged shell read such \
-         as sed -n 'A,Bp' \"{path}\" or Get-Content -LiteralPath \"{path}\" -TotalCount B \
-         | Select-Object -Skip (A-1) (or -Tail N for the last lines). Only if the summary is \
-         not enough, repeat this full read within 2 minutes.",
+         example before an edit, read a range under {threshold} lines around what you need \
+         with a ranged shell read such as sed -n 'A,Bp' \"{path}\" or Get-Content \
+         -LiteralPath \"{path}\" -TotalCount B | Select-Object -Skip (A-1) (or -Tail N for \
+         the last lines), or ask smart_read for a slice with offset and limit. Only if the \
+         summary is not enough, repeat this full read within 2 minutes.",
         path = path.display()
     );
     ascii_json(&deny_output(reason).to_string())
@@ -95,10 +97,12 @@ pub(super) fn render(decision: &Decision, path: &Path, project: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hook::PassReason;
     use crate::hook::adapters;
+    use crate::hook::{LineRange, PassReason};
     use serde_json::{Value, json};
     use std::path::PathBuf;
+
+    const T: u32 = crate::config::DEFAULT_SHUNT_MIN_LINES;
 
     /// The event shape observed from codex-cli 0.166.0 (extra fields kept).
     fn event(tool: &str, input: Value) -> Value {
@@ -149,11 +153,27 @@ mod tests {
     }
 
     #[test]
-    fn partial_filtered_and_compound_commands_pass() {
+    fn sized_partial_reads_carry_their_range() {
+        let range = |cmd: &str| read_of(&event("Bash", json!({"command": cmd}))).map(|r| r.range);
+        let lines = |a, b| Some(Some(LineRange::new(a, b)));
+        assert_eq!(range("sed -n 1,400p big.rs"), lines(1, Some(400)));
+        assert_eq!(range("sed -n '1,20p' big.rs"), lines(1, Some(20)));
+        assert_eq!(range("head -n 50 big.rs"), lines(1, Some(50)));
+        assert_eq!(range("tail -n +2 big.rs"), lines(2, None), "open-ended");
+        let tail = Some(Some(LineRange::from_tail(10)));
+        assert_eq!(range("tail big.rs"), tail);
+        let argv = json!({"command":["bash","-lc","tail -n 50 big.rs"]});
+        let r = read_of(&event("Bash", argv)).expect("read");
+        assert_eq!(r.range, Some(LineRange::from_tail(50)));
+        assert_eq!(range("cat big.rs"), Some(None), "whole-file read");
+    }
+
+    #[test]
+    fn unsized_filtered_and_compound_commands_pass() {
         for cmd in [
-            "head -n 50 big.rs",
-            "tail big.rs",
-            "sed -n '1,20p' big.rs",
+            "head -n x big.rs",
+            "tail -f big.rs",
+            "sed -n '1,20p;30q' big.rs",
             "Get-Content big.rs -TotalCount 20",
             "cat big.rs | grep x",
             "cat a.rs b.rs",
@@ -226,11 +246,14 @@ mod tests {
     #[test]
     fn redirect_names_the_codex_smart_read_call_and_ranged_shell_reads() {
         let path = Path::new("/work/big notes.rs");
-        let d = Decision::Redirect { lines: 150 };
-        let out = adapters::render(Harness::Codex, &d, path, "proj");
+        let d = Decision::Redirect {
+            lines: u64::from(T),
+        };
+        let out = adapters::render(Harness::Codex, &d, path, "proj", T);
         assert!(!out.contains('\n'));
         let reason = reason_of(&out);
-        assert!(reason.starts_with("mmhmem: /work/big notes.rs has at least 150 lines."));
+        let head = format!("mmhmem: /work/big notes.rs has at least {T} lines.");
+        assert!(reason.starts_with(&head), "{reason}");
         let call = "smart_read with project \"proj\", agent_harness \"codex\" and \
                     file_path \"/work/big notes.rs\"";
         assert!(reason.contains(call), "{reason}");
@@ -241,20 +264,13 @@ mod tests {
         assert!(reason.contains("-TotalCount"), "{reason}");
         assert!(reason.contains("-Tail"), "{reason}");
         assert!(!reason.contains("claude-code"), "{reason}");
-        let smart = reason.find("smart_read").unwrap();
-        let ranged = reason.find("sed -n").unwrap();
-        let repeat = reason.find("Only if the summary is not enough").unwrap();
-        assert!(smart < ranged && ranged < repeat, "{reason}");
-        assert!(
-            reason.ends_with("repeat this full read within 2 minutes."),
-            "{reason}"
-        );
+        adapters::assert_redirect_text(&reason, T, "sed -n");
     }
 
     #[test]
     fn redirect_output_is_ascii_and_round_trips_non_ascii_paths() {
         let path = Path::new("/work/Übersicht \"q\" 😀.rs");
-        let out = render(&Decision::Redirect { lines: 200 }, path, "projé");
+        let out = render(&Decision::Redirect { lines: 200 }, path, "projé", 200);
         assert!(out.is_ascii(), "{out}");
         let reason = reason_of(&out);
         assert!(reason.contains("/work/Übersicht \"q\" 😀.rs"), "{reason}");
@@ -266,7 +282,7 @@ mod tests {
         for reason in [PassReason::Short, PassReason::Repeat, PassReason::Range] {
             let d = Decision::Pass(reason);
             assert_eq!(
-                adapters::render(Harness::Codex, &d, Path::new("/x"), "p"),
+                adapters::render(Harness::Codex, &d, Path::new("/x"), "p", T),
                 ""
             );
         }

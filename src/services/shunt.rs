@@ -68,7 +68,8 @@ impl ShuntEngine {
         }
     }
 
-    /// The configured shunt threshold in lines (Req 3.9, default 150).
+    /// The configured shunt threshold in lines (Req 3.9, default
+    /// [`crate::config::DEFAULT_SHUNT_MIN_LINES`]).
     pub fn shunt_min_lines(&self) -> u32 {
         self.config.shunt_min_lines
     }

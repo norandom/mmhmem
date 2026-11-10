@@ -254,7 +254,8 @@ async fn stdio_direct_read_without_worker_and_store_autocreate() {
 async fn stdio_shunt_required_without_worker_is_a_clear_error() {
     let data = tempfile::tempdir().unwrap();
     let file = data.path().join("big.rs");
-    write_lines_file(&file, 220, "SHUNT_REQUIRED_MARKER");
+    let lines = mmhmem::config::DEFAULT_SHUNT_MIN_LINES as usize + 20;
+    write_lines_file(&file, lines, "SHUNT_REQUIRED_MARKER");
 
     let mut mcp = StdioMcp::new(data.path()).await;
     mcp.handshake().await;

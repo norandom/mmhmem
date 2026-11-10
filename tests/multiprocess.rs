@@ -21,7 +21,8 @@ use mmhmem::storage::db::{DB_FILE_NAME, Db};
 const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
 const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
-const BIG_FILE_LINES: usize = 220;
+/// Above the shipped threshold, so the file takes the cache path.
+const BIG_FILE_LINES: usize = mmhmem::config::DEFAULT_SHUNT_MIN_LINES as usize + 20;
 const CACHE_MARKER: &str = "CACHED_SUMMARY_MARKER_9c2";
 const WORKING_STATE: &str = "working state: halfway there";
 

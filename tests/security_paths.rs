@@ -134,7 +134,9 @@ async fn concurrent_harness_checkpoints_do_not_corrupt_state() {
 async fn large_file_reaches_shunt_path_over_mcp() {
     let (roots, _d, _l, state) = test_state("secret-token");
     let big = roots.path().join("big.rs");
-    let content: String = (1..=200).map(|i| format!("line {i}\n")).collect();
+    // Above the shipped threshold (shunt-cache-efficiency task 4).
+    let lines = mmhmem::config::DEFAULT_SHUNT_MIN_LINES + 50;
+    let content: String = (1..=lines).map(|i| format!("line {i}\n")).collect();
     std::fs::write(&big, content).unwrap();
     let (port, _h) = spawn_server(state).await;
     let client = reqwest::Client::new();

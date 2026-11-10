@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mmhmem::config::{
-    Config, ENV_ALLOWED_ROOTS, ENV_SHUNT_MIN_LINES, ENV_TOKEN, ENV_WORKER_API_URL, ENV_WORKER_MODEL,
+    Config, DEFAULT_SHUNT_MIN_LINES, ENV_ALLOWED_ROOTS, ENV_SHUNT_MIN_LINES, ENV_TOKEN,
+    ENV_WORKER_API_URL, ENV_WORKER_MODEL,
 };
 use mmhmem::services::shunt::{BypassReason, ReadOutcome, ShuntEngine, ShuntError};
 use mmhmem::services::shunt_types::ReadRequest;
@@ -19,6 +20,11 @@ use mmhmem::storage::audit::AuditWriter;
 use mmhmem::storage::db::Db;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+/// The shipped default threshold (shunt-cache-efficiency task 4).
+const THRESHOLD: u32 = DEFAULT_SHUNT_MIN_LINES;
+/// A file length above the threshold, so the file is summarised.
+const BIG: usize = THRESHOLD as usize + 50;
 
 fn test_config(root: &Path, shunt_min_lines: u32, worker: Option<(&str, &str)>) -> Config {
     let mut env: HashMap<String, String> = HashMap::new();
@@ -40,7 +46,7 @@ fn engine(
     let logs = tempfile::tempdir().unwrap();
     let db = Db::open(data.path()).unwrap();
     let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
-    let cfg = test_config(root, 150, None);
+    let cfg = test_config(root, THRESHOLD, None);
     let eng = ShuntEngine::new(db, audit, cfg, None, worker);
     (data, logs, eng)
 }
@@ -49,7 +55,7 @@ fn engine_with_worker(
     root: &Path,
     url: &str,
 ) -> (tempfile::TempDir, tempfile::TempDir, ShuntEngine) {
-    let cfg = test_config(root, 150, Some((url, "stub-worker")));
+    let cfg = test_config(root, THRESHOLD, Some((url, "stub-worker")));
     let worker = WorkerClient::from_config(&cfg).ok();
     let data = tempfile::tempdir().unwrap();
     let logs = tempfile::tempdir().unwrap();
@@ -335,7 +341,7 @@ async fn cache_miss_delegates_then_hit_serves_cached_with_zero_worker_calls() {
     let root = tempfile::tempdir().unwrap();
     let (url, calls, _bodies) = spawn_stub_multi(200, SUMMARY_CHAT, 4).await;
     let (_d, logs, eng) = engine_with_worker(root.path(), &url);
-    let f = write_file(root.path(), "big.rs", 200);
+    let f = write_file(root.path(), "big.rs", BIG);
     let path = f.to_str().unwrap().to_string();
 
     let out1 = eng
@@ -389,12 +395,12 @@ async fn token_stats_rows_written_for_delegated_and_cache_hit() {
     let (url, _calls, _b) = spawn_stub_multi(200, SUMMARY_CHAT, 4).await;
     let data = tempfile::tempdir().unwrap();
     let logs = tempfile::tempdir().unwrap();
-    let cfg = test_config(root.path(), 150, Some((&url, "stub-worker")));
+    let cfg = test_config(root.path(), THRESHOLD, Some((&url, "stub-worker")));
     let db = Db::open(data.path()).unwrap();
     let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
     let worker = WorkerClient::from_config(&cfg).ok();
     let eng = ShuntEngine::new(db.clone(), audit, cfg, None, worker);
-    let f = write_file(root.path(), "big.rs", 200);
+    let f = write_file(root.path(), "big.rs", BIG);
     let path = f.to_str().unwrap().to_string();
     eng.smart_read(&req_task("t", "h", &path, "q"))
         .await
@@ -433,13 +439,13 @@ async fn content_change_invalidates_cache() {
     let root = tempfile::tempdir().unwrap();
     let (url, calls, _b) = spawn_stub_multi(200, SUMMARY_CHAT, 4).await;
     let (_d, _l, eng) = engine_with_worker(root.path(), &url);
-    let f = write_file(root.path(), "big.rs", 200);
+    let f = write_file(root.path(), "big.rs", BIG);
     let path = f.to_str().unwrap().to_string();
     let out1 = eng.smart_read(&req(&path, "q", None, None)).await.unwrap();
     assert!(matches!(out1, ReadOutcome::Shunted { .. }));
     // Change one line but keep the file above the threshold -> different
     // SHA-256 -> the stale cached summary must NOT be served (Req 3.7).
-    let mut changed: String = (1..=200).map(|i| format!("line {i}\n")).collect();
+    let mut changed: String = (1..=BIG).map(|i| format!("line {i}\n")).collect();
     changed.push_str("CHANGED TAIL\n");
     std::fs::write(&f, changed).unwrap();
     let out2 = eng.smart_read(&req(&path, "q", None, None)).await.unwrap();
@@ -455,7 +461,7 @@ async fn worker_error_is_explicit_and_not_cached() {
     let root = tempfile::tempdir().unwrap();
     let (url, calls, _b) = spawn_stub_multi(500, "{\"error\":\"boom\"}", 4).await;
     let (_d, logs, eng) = engine_with_worker(root.path(), &url);
-    let f = write_file(root.path(), "big.rs", 200);
+    let f = write_file(root.path(), "big.rs", BIG);
     let err = eng
         .smart_read(&req(f.to_str().unwrap(), "q", None, None))
         .await
@@ -480,10 +486,91 @@ async fn worker_error_is_explicit_and_not_cached() {
 async fn shuntable_file_without_worker_is_a_clear_error() {
     let root = tempfile::tempdir().unwrap();
     let (_d, _l, eng) = engine(root.path(), None);
-    let f = write_file(root.path(), "big.rs", 200);
+    let f = write_file(root.path(), "big.rs", BIG);
     let err = eng
         .smart_read(&req(f.to_str().unwrap(), "q", None, None))
         .await
         .unwrap_err();
     assert!(matches!(err, ShuntError::WorkerNotConfigured), "{err:?}");
+}
+
+/// `(hits, last_hit_epoch)` of the cache row for `sha`.
+async fn row_touch(db: &Db, sha: &str) -> (i64, i64) {
+    let sha = sha.to_string();
+    db.with_conn(move |c| {
+        c.query_row(
+            "SELECT hits, last_hit_epoch FROM shunt_content_cache WHERE content_sha256 = ?1",
+            [sha],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+    })
+    .await
+    .unwrap()
+}
+
+/// shunt-cache-efficiency task 4 (Req 4.3): raising the threshold keeps the
+/// summaries cached below it. At the default, a file under the threshold is
+/// read directly (exact content, no worker call, the row untouched); with
+/// the old threshold set again, the same read is served from the kept row.
+#[tokio::test]
+async fn summaries_cached_below_the_raised_threshold_are_kept_and_servable() {
+    use mmhmem::services::shunt_cache::summary_store_and_evict;
+    use mmhmem::services::shunt_cache::{SummaryRow, canonical_fingerprint};
+    use mmhmem::storage::audit::sha256_hex;
+    /// The default before task 4, set through `SHUNT_MIN_LINES`.
+    const OLD_THRESHOLD: u32 = 150;
+    let root = tempfile::tempdir().unwrap();
+    let (url, calls, _b) = spawn_stub_multi(200, SUMMARY_CHAT, 4).await;
+    let data = tempfile::tempdir().unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let db = Db::open(data.path()).unwrap();
+    let engine_at = |threshold: u32| {
+        let cfg = test_config(root.path(), threshold, Some((&url, "stub-worker")));
+        let worker = WorkerClient::from_config(&cfg).ok();
+        let audit = AuditWriter::new(logs.path().join("audit.jsonl"));
+        ShuntEngine::new(db.clone(), audit, cfg, None, worker)
+    };
+    let f = write_file(root.path(), "mid.rs", 200);
+    let sha = sha256_hex(&std::fs::read(&f).unwrap());
+    let row = SummaryRow {
+        sha: &sha,
+        fingerprint: canonical_fingerprint(),
+        summary: "- cached at 150 [L1-L200]",
+        line_count: 200,
+        path: &f,
+    };
+    summary_store_and_evict(&db, row, 5000).await.unwrap();
+    let stored = row_touch(&db, &sha).await;
+    let path = f.to_str().unwrap().to_string();
+    let read = |threshold: u32| {
+        let eng = engine_at(threshold);
+        let path = path.clone();
+        async move { eng.smart_read(&req(&path, "", None, None)).await.unwrap() }
+    };
+    match read(THRESHOLD).await {
+        ReadOutcome::Direct {
+            reason,
+            total_lines,
+            text,
+        } => {
+            assert_eq!((reason, total_lines), (BypassReason::BelowThreshold, 200));
+            assert!(text.starts_with("L1: line 1") && text.contains("L200: line 200"));
+        }
+        other => panic!("at {THRESHOLD}: expected a direct read, got {other:?}"),
+    }
+    let log = std::fs::read_to_string(logs.path().join("audit.jsonl")).unwrap();
+    assert!(log.contains("IO_DIRECT_READ"), "{log}");
+    assert!(log.contains("below_line_threshold"), "{log}");
+    assert!(!log.contains("IO_SHUNT_CACHE_HIT"), "{log}");
+    assert_eq!(row_touch(&db, &sha).await, stored, "the row is untouched");
+    match read(OLD_THRESHOLD).await {
+        ReadOutcome::Cached { summary, .. } => assert_eq!(summary, "- cached at 150 [L1-L200]"),
+        other => panic!("at {OLD_THRESHOLD}: expected the kept summary, got {other:?}"),
+    }
+    assert_eq!(
+        row_touch(&db, &sha).await.0,
+        stored.0 + 1,
+        "served from the row"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no worker call");
 }

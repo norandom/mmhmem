@@ -26,7 +26,8 @@ use super::agent::{AgentFailure, CommandProblem, StepResult};
 use crate::setup::agents::{CommandOutput, Env, Invocation};
 use crate::setup::record::HookHarness;
 
-/// Lines in the sample file (the default routing threshold is 150).
+/// Lines in the sample file, far above the default routing threshold
+/// ([`crate::config::DEFAULT_SHUNT_MIN_LINES`]) and any usual override.
 pub const SAMPLE_LINES: usize = 5_000;
 /// The hook's time limit (the agents allow it 10 s).
 const HOOK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -221,10 +222,18 @@ mod tests {
         (HookHarness::Antigravity, Harness::Antigravity),
     ];
 
+    const T: u32 = crate::config::DEFAULT_SHUNT_MIN_LINES;
+
     /// What the real hook prints for a redirect of a sample read.
     fn redirect(harness: Harness) -> String {
         let file = Path::new("/work").join(SAMPLE_NAME);
-        adapters::render(harness, &Decision::Redirect { lines: 150 }, &file, "p")
+        let lines = u64::from(T);
+        adapters::render(harness, &Decision::Redirect { lines }, &file, "p", T)
+    }
+
+    #[test]
+    fn the_sample_is_far_above_the_default_threshold() {
+        assert!(SAMPLE_LINES >= 10 * T as usize, "{SAMPLE_LINES} vs {T}");
     }
 
     fn not_run(problem: CommandProblem) -> StepResult {
@@ -257,7 +266,7 @@ mod tests {
         assert_eq!(ag(&redirect(Harness::Antigravity)), Answer::Redirect);
         let file = Path::new("/work").join(SAMPLE_NAME);
         let pass = Decision::Pass(PassReason::NoWorker);
-        let ask = adapters::render(Harness::Antigravity, &pass, &file, "p");
+        let ask = adapters::render(Harness::Antigravity, &pass, &file, "p", T);
         assert_eq!(ag(&ask), Answer::Pass);
         let fail_open = adapters::fail_open_output(Harness::Antigravity);
         assert_eq!(ag(fail_open), Answer::Pass);

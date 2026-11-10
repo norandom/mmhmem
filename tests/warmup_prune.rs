@@ -15,7 +15,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, Command};
 
-use mmhmem::config::{Config, ENV_ALLOWED_ROOTS, ENV_TOKEN};
+use mmhmem::config::{Config, DEFAULT_SHUNT_MIN_LINES, ENV_ALLOWED_ROOTS, ENV_TOKEN};
 use mmhmem::services::shunt::ShuntEngine;
 use mmhmem::services::shunt_cache::{
     ContentCacheRow, SummaryRow, content_cache_lookup, content_cache_store_and_evict,
@@ -33,6 +33,8 @@ const SUMMARY_CHAT: &str = r#"{"choices":[{"message":{"content":"- foo [L1-L9]\n
 /// The question every warmup call in this file passes explicitly, so the
 /// seeded cache rows can use the same fingerprint.
 const QUESTION: &str = "summarize the warmup corpus";
+/// A file length above the shipped threshold, so warm-up summarises it.
+const BIG: usize = DEFAULT_SHUNT_MIN_LINES as usize + 50;
 
 // ---------- stdio child plumbing (tests/local_stdio.rs pattern) ----------
 
@@ -336,7 +338,7 @@ async fn warmup_delegates_for_real_then_serves_cached() {
     // batch is a pure cache hit (Req 1.3).
     let data = tempfile::tempdir().unwrap();
     let files = warmup_files();
-    let big = write_lines(files.path(), "big.rs", 200);
+    let big = write_lines(files.path(), "big.rs", BIG);
     let (url, calls) = spawn_stub(SUMMARY_CHAT, 4).await;
 
     let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, Some((&url, "stub-model")))).await;
@@ -392,7 +394,7 @@ async fn warmup_mixed_batch_counts_every_outcome() {
 
     // Seed a cache row for the big file so it comes back "cached" without
     // a worker (the canonical path is the engine's lookup key).
-    let cached_file = write_lines(files.path(), "cached.rs", 200);
+    let cached_file = write_lines(files.path(), "cached.rs", BIG);
     {
         let db = open_store(data.path());
         let body = std::fs::read(&cached_file).expect("read");
@@ -402,8 +404,8 @@ async fn warmup_mixed_batch_counts_every_outcome() {
         seed_file_row(&db, &canonical, &sha, &fp, "seeded").await;
     }
     let small = write_lines(files.path(), "small.rs", 10);
-    let secure = write_lines(files.path(), "auth_util.rs", 200);
-    let outside_file = write_lines(outside.path(), "outside.rs", 200);
+    let secure = write_lines(files.path(), "auth_util.rs", BIG);
+    let outside_file = write_lines(outside.path(), "outside.rs", BIG);
 
     let mut mcp = StdioMcp::new(spawn_cmd(
         data.path(),
@@ -438,7 +440,7 @@ async fn warmup_worker_unconfigured_error_matches_smart_read() {
     // byte-identical to smart_read's wording.
     let data = tempfile::tempdir().unwrap();
     let files = warmup_files();
-    let big = write_lines(files.path(), "big.rs", 200);
+    let big = write_lines(files.path(), "big.rs", BIG);
 
     let mut mcp = StdioMcp::new(spawn_cmd(data.path(), None, None)).await;
     mcp.handshake().await;

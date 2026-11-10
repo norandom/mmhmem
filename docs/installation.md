@@ -91,8 +91,9 @@ or a plain reason and what you can do about it.
 
 ## Read-routing hook
 
-The read-routing hook sends whole-file reads of large files to `smart_read`,
-so the agent gets a cached summary instead of the full file. It is on by
+The read-routing hook sends reads of 300 lines or more (whole files, or line
+ranges that large; `SHUNT_MIN_LINES`) to `smart_read`, so the agent gets a
+cached summary instead of the full file. Smaller ranges pass. It is on by
 default for Claude Code, Codex, OpenCode and Antigravity. Untick it on the
 features screen if you do not want it.
 

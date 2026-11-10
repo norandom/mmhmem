@@ -73,8 +73,9 @@ pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8443;
 /// Default MCP Streamable HTTP path (Req 1.1).
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
-/// Default shunt threshold in lines (Req 3.9).
-pub const DEFAULT_SHUNT_MIN_LINES: u32 = 150;
+/// Default shunt threshold in lines (Req 3.9; 300 since shunt-cache-efficiency
+/// Req 4.1, where summaries pay off).
+pub const DEFAULT_SHUNT_MIN_LINES: u32 = 300;
 /// Default content cache cap in rows (shunt-content-tool Req 4.3).
 pub const DEFAULT_SHUNT_CONTENT_CACHE_MAX_ROWS: u32 = 5000;
 /// Default store busy-lock wait (Req 6.2: 5 seconds).

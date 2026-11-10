@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{mcp_init, mcp_tool, spawn_server, sse_json};
 use mmhmem::config::{
-    Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_TOKEN, ENV_WORKER_API_URL,
-    ENV_WORKER_MODEL,
+    Config, ENV_ALLOWED_ROOTS, ENV_DATA_DIR, ENV_LOG_FILE, ENV_SHUNT_MIN_LINES, ENV_TOKEN,
+    ENV_WORKER_API_URL, ENV_WORKER_MODEL,
 };
 use mmhmem::storage::audit::sha256_hex;
 use serde_json::{Value, json};
@@ -28,8 +28,11 @@ use serde_json::{Value, json};
 const STUB_MODEL: &str = "stub-model";
 const STUB_SUMMARY: &str = "- exports [L1-L160]";
 const FIXTURE_REL: &str = "tests/fixtures/shunt_content_wire_results.json";
-/// The same benign corpus as the 3.1 round-trip tests (160 lines ≥ the 150
-/// threshold; no secret pattern matches).
+/// Lines of the benign corpus the fixture was recorded with (no secret
+/// pattern matches). The fixture pins its bytes, so the rig runs with the
+/// threshold at exactly this size instead of the shipped default
+/// (shunt-cache-efficiency task 4 raised it above the corpus).
+const CORPUS_LINES: usize = 160;
 const SHORT_LINE: &str = "one short line of output\n";
 const SECRET_PEM: &str =
     "-----BEGIN RSA PRIVATE KEY-----\nMIIfake\n-----END RSA PRIVATE KEY-----\n";
@@ -100,6 +103,7 @@ impl HttpRig {
             ),
             (ENV_WORKER_API_URL.to_string(), url),
             (ENV_WORKER_MODEL.to_string(), STUB_MODEL.to_string()),
+            (ENV_SHUNT_MIN_LINES.to_string(), CORPUS_LINES.to_string()),
         ]
         .into_iter()
         .collect();
@@ -192,7 +196,7 @@ fn fixture() -> Value {
 async fn wire_results_match_the_saved_consumer_contract_fixture() {
     let fx = fixture();
     let mut rig = HttpRig::new().await;
-    let content = benign_content(160);
+    let content = benign_content(CORPUS_LINES);
     assert_eq!(
         fx["request"]["content_sha256"].as_str().unwrap(),
         sha256_hex(content.as_bytes()),

@@ -7,7 +7,7 @@
 //! Antigravity in [`super::antigravity`]; another harness adds a [`Harness`]
 //! variant and a branch in [`parse`] and [`render`].
 
-use super::{Decision, ReadRequest};
+use super::{Decision, LineRange, ReadRequest};
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -71,13 +71,20 @@ pub fn parse(harness: Harness, input: &[u8]) -> ParsedCall {
 }
 
 /// Renders a decision as the harness's stdout; a pass is the empty string
-/// for Claude Code and Codex.
-pub fn render(harness: Harness, decision: &Decision, path: &Path, project: &str) -> String {
+/// for Claude Code and Codex. `threshold` (`shunt_min_lines`) is named in
+/// the redirect's ranged fallback: a range under it passes the hook.
+pub fn render(
+    harness: Harness,
+    decision: &Decision,
+    path: &Path,
+    project: &str,
+    threshold: u32,
+) -> String {
     match harness {
-        Harness::Claude => render_claude(decision, path, project),
-        Harness::Codex => super::codex::render(decision, path, project),
-        Harness::OpenCode => super::opencode::render(decision, path, project),
-        Harness::Antigravity => super::antigravity::render(decision, path, project),
+        Harness::Claude => render_claude(decision, path, project, threshold),
+        Harness::Codex => super::codex::render(decision, path, project, threshold),
+        Harness::OpenCode => super::opencode::render(decision, path, project, threshold),
+        Harness::Antigravity => super::antigravity::render(decision, path, project, threshold),
     }
 }
 
@@ -149,9 +156,10 @@ fn parse_claude(input: &[u8]) -> ParsedCall {
     }
 }
 
-/// Native `Read`. Either `offset` or `limit` makes it a ranged read:
-/// `(offset or 1, limit or 0)` where 0 means "to the end". Only
-/// non-negative integers count; other types are ignored. A relative
+/// Native `Read`. Either `offset` or `limit` makes it a ranged read
+/// ([`LineRange::from_offset_limit`]: from `offset`, `limit` lines, to the
+/// end without a positive `limit`). Only non-negative integers count; other
+/// types are ignored, so such a call stays a whole-file read. A relative
 /// `file_path` (Claude Code sends absolute ones) joins `cwd`, and with no
 /// `cwd` it is not a read.
 fn claude_read(input: &Value, cwd: &str) -> Option<ReadRequest> {
@@ -165,34 +173,34 @@ fn claude_read(input: &Value, cwd: &str) -> Option<ReadRequest> {
         Path::new(cwd).join(path)
     };
     let num = |key: &str| input.get(key).and_then(Value::as_u64);
-    let (offset, limit) = (num("offset"), num("limit"));
-    let range =
-        (offset.is_some() || limit.is_some()).then(|| (offset.unwrap_or(1), limit.unwrap_or(0)));
     Some(ReadRequest {
         path,
-        range,
+        range: LineRange::from_offset_limit(num("offset"), num("limit")),
         tool: "Read".to_string(),
     })
 }
 
-/// `Bash` / `PowerShell`: a whole-file read only if the shell recogniser
-/// accepts the command (an empty `cwd` is not a read).
+/// `Bash` / `PowerShell`: a read only if the shell recogniser accepts the
+/// command, with the range of a partial reader (an empty `cwd` is not a
+/// read).
 fn claude_shell(input: &Value, cwd: &str, tool: &str) -> Option<ReadRequest> {
     let command = input.get("command")?.as_str()?;
     if cwd.is_empty() {
         return None;
     }
-    let path = super::shell::recognise(command, Path::new(cwd))?;
+    let read = super::shell::recognise(command, Path::new(cwd))?;
     Some(ReadRequest {
-        path,
-        range: None,
+        path: read.path,
+        range: read.range,
         tool: tool.to_string(),
     })
 }
 
 /// Redirect: the documented `PreToolUse` deny with a one-line reason and no
-/// file content; pass: no output.
-fn render_claude(decision: &Decision, path: &Path, project: &str) -> String {
+/// file content (shunt-cache-efficiency Req 3.4, 3.6: summary first, then a
+/// range under the threshold or a `smart_read` slice, the repeat last);
+/// pass: no output.
+fn render_claude(decision: &Decision, path: &Path, project: &str, threshold: u32) -> String {
     let Decision::Redirect { lines } = decision else {
         return String::new();
     };
@@ -200,11 +208,42 @@ fn render_claude(decision: &Decision, path: &Path, project: &str) -> String {
         "mmhmem: {path} has at least {lines} lines. Read it through the mmhmem MCP tool \
          instead: call smart_read with project \"{project}\", agent_harness \"claude-code\" \
          and file_path \"{path}\" for a summary with exact line ranges. For exact text, for \
-         example before an edit, use Read with offset and limit. Only if the summary is not \
-         enough, repeat this full read within 2 minutes.",
+         example before an edit, use Read with offset and limit for a range under \
+         {threshold} lines around what you need, or ask smart_read for a slice with offset \
+         and limit. Only if the summary is not enough, repeat this full read within 2 \
+         minutes.",
         path = path.display()
     );
     deny_output(reason).to_string()
+}
+
+/// Every harness's redirect text (shunt-cache-efficiency Req 3.4, 3.6):
+/// `smart_read` for the summary first, then the native `tool` for a range
+/// under `threshold` lines around what is needed, then the `smart_read`
+/// slice, and the repeat hint last.
+#[cfg(test)]
+pub(super) fn assert_redirect_text(reason: &str, threshold: u32, tool: &str) {
+    let at = |needle: &str| {
+        reason
+            .find(needle)
+            .unwrap_or_else(|| panic!("{needle:?} missing: {reason}"))
+    };
+    let summary = at("call smart_read with project");
+    let native = at(tool);
+    let range = at(&format!(
+        "a range under {threshold} lines around what you need"
+    ));
+    let slice = at("ask smart_read for a slice with offset and limit");
+    let repeat = at("Only if the summary is not enough");
+    assert!(summary < native && summary < range, "{reason}");
+    assert!(
+        native < slice && range < slice && slice < repeat,
+        "{reason}"
+    );
+    assert!(
+        reason.ends_with("repeat this full read within 2 minutes."),
+        "{reason}"
+    );
 }
 
 #[cfg(test)]
@@ -237,27 +276,45 @@ mod tests {
         assert_eq!((r.range, r.tool.as_str()), (None, "Read"));
     }
 
-    #[test]
-    fn read_with_offset_or_limit_is_ranged() {
-        let both = json!({"file_path":"/work/a.rs","offset":10,"limit":20});
-        assert_eq!(read_of(&event("Read", both)).unwrap().range, Some((10, 20)));
-        let off = json!({"file_path":"/work/a.rs","offset":5});
-        assert_eq!(read_of(&event("Read", off)).unwrap().range, Some((5, 0)));
-        let lim = json!({"file_path":"/work/a.rs","limit":7});
-        assert_eq!(read_of(&event("Read", lim)).unwrap().range, Some((1, 7)));
+    fn range_of(input: Value) -> Option<LineRange> {
+        let mut input = input;
+        input["file_path"] = json!("/work/a.rs");
+        read_of(&event("Read", input)).expect("read").range
     }
 
     #[test]
-    fn ranged_requests_pass_decide() {
-        let r = read_of(&event("Read", json!({"file_path":"/nope","offset":5}))).unwrap();
+    fn read_with_offset_or_limit_is_ranged() {
+        let lines = |a, b| Some(LineRange::new(a, b));
+        assert_eq!(
+            range_of(json!({"offset":10,"limit":20})),
+            lines(10, Some(29))
+        );
+        assert_eq!(range_of(json!({"offset":5})), lines(5, None), "open-ended");
+        assert_eq!(range_of(json!({"limit":7})), lines(1, Some(7)));
+        assert_eq!(range_of(json!({"offset":0,"limit":3})), lines(1, Some(3)));
+        assert_eq!(range_of(json!({"offset":4,"limit":0})), lines(4, None));
+        // Values that are not non-negative integers are ignored (Req 3.5):
+        // the call is not sized and stays what it was without them.
+        assert_eq!(range_of(json!({"limit":"x"})), None);
+        assert_eq!(range_of(json!({"offset":-1,"limit":1.5})), None);
+        assert_eq!(range_of(json!({"offset":10,"limit":"x"})), lines(10, None));
+    }
+
+    #[test]
+    fn ranged_requests_are_sized_by_decide() {
         let s = crate::hook::HookSettings {
-            shunt_min_lines: 1,
+            shunt_min_lines: 300,
             worker_configured: true,
         };
-        assert_eq!(
-            crate::hook::decide(&r, &s, Path::new("/work")),
-            Decision::Pass(PassReason::Range)
-        );
+        let decide = |input: Value| {
+            let r = read_of(&event("Read", input)).expect("read");
+            crate::hook::decide(&r, &s, Path::new("/work"))
+        };
+        let small = json!({"file_path":"/nope","offset":5,"limit":10});
+        assert_eq!(decide(small), Decision::Pass(PassReason::Range));
+        // Open-ended on a missing file: the count fails, the read passes.
+        let open = json!({"file_path":"/nope","offset":5});
+        assert_eq!(decide(open), Decision::Pass(PassReason::Missing));
     }
 
     #[test]
@@ -274,6 +331,10 @@ mod tests {
         assert_eq!(bash.tool, "Bash");
         let pipe = event("Bash", json!({"command":"cat a | grep x"}));
         assert!(read_of(&pipe).is_none());
+        let sed = read_of(&event("Bash", json!({"command":"sed -n 1,400p big.rs"}))).unwrap();
+        assert_eq!(sed.range, Some(LineRange::new(1, Some(400))));
+        let tail = read_of(&event("Bash", json!({"command":"tail -n 50 big.rs"}))).unwrap();
+        assert_eq!(tail.range, Some(LineRange::from_tail(50)));
         let ps = event("PowerShell", json!({"command":"Get-Content -Path x.rs"}));
         let ps = read_of(&ps).unwrap();
         assert_eq!(ps.path, Path::new("/work").join("x.rs"));
@@ -320,14 +381,16 @@ mod tests {
         assert!(call(&v).read.is_none());
     }
 
-    #[test]
-    fn redirect_renders_the_documented_deny_json() {
-        let path = Path::new(r#"C:\Users\a "b"\x.rs"#);
+    const T: u32 = crate::config::DEFAULT_SHUNT_MIN_LINES;
+
+    fn claude_reason(path: &Path, threshold: u32) -> String {
+        let lines = u64::from(threshold);
         let out = render(
             Harness::Claude,
-            &Decision::Redirect { lines: 150 },
+            &Decision::Redirect { lines },
             path,
             "proj",
+            threshold,
         );
         assert!(!out.contains('\n'));
         let v: Value = serde_json::from_str(&out).expect("valid json");
@@ -335,7 +398,13 @@ mod tests {
         assert_eq!(v.as_object().unwrap().len(), 1);
         assert_eq!(h["hookEventName"], "PreToolUse");
         assert_eq!(h["permissionDecision"], "deny");
-        let reason = h["permissionDecisionReason"].as_str().unwrap();
+        h["permissionDecisionReason"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn redirect_renders_the_documented_deny_json() {
+        let path = Path::new(r#"C:\Users\a "b"\x.rs"#);
+        let reason = claude_reason(path, T);
         // Live check 2.3: agents need every required smart_read argument, and a
         // "repeat to read anyway" hint must come last, as a last resort.
         let call = format!(
@@ -343,19 +412,18 @@ mod tests {
             path.display()
         );
         assert!(reason.starts_with(&format!(
-            "mmhmem: {} has at least 150 lines.",
+            "mmhmem: {} has at least {T} lines.",
             path.display()
         )));
         assert!(reason.contains(&call), "{reason}");
-        assert!(reason.contains("Read with offset and limit"), "{reason}");
-        let smart = reason.find("smart_read").unwrap();
-        let repeat = reason.find("Only if the summary is not enough").unwrap();
-        assert!(smart < repeat, "{reason}");
+        assert_redirect_text(&reason, T, "Read with offset and limit");
+        // The threshold comes from the settings, not from a constant.
+        assert_redirect_text(&claude_reason(path, 40), 40, "Read with offset and limit");
     }
 
     #[test]
     fn pass_renders_nothing() {
         let d = Decision::Pass(PassReason::Short);
-        assert_eq!(render(Harness::Claude, &d, Path::new("/x"), "proj"), "");
+        assert_eq!(render(Harness::Claude, &d, Path::new("/x"), "proj", T), "");
     }
 }
