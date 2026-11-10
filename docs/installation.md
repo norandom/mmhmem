@@ -70,9 +70,9 @@ over first and shows it as its own step. Nothing changes until you confirm.
 After applying, setup starts mmhmem exactly as each tool's configuration
 starts it, lists its tools and calls the read-only `status` tool. It then
 asks each tool's own command (`claude mcp get mmhmem`, `codex mcp list`,
-`opencode mcp list`) whether it sees mmhmem, and, with the read-routing hook
-on, runs a sample read through it. Each tool gets a pass or a plain reason and what you can
-do about it.
+`opencode mcp list`, `agy mcp list`) whether it sees mmhmem, and, with the
+read-routing hook on, runs a sample read through it. Each tool gets a pass
+or a plain reason and what you can do about it.
 
 ### Next steps per tool
 
@@ -83,16 +83,18 @@ do about it.
   `~/.config/opencode/plugins/mmhmem-read-routing.js`; OpenCode loads it
   without an approval step.
 - **Claude Desktop**: quit it completely and open it again.
-- **Antigravity**: import the snippet setup shows (in its MCP server
-  settings), then start a new session. Antigravity has no command line, so
-  setup does not edit its files.
+- **Antigravity**: start a new session. Setup configures Antigravity itself:
+  mmhmem's server entry in `~/.gemini/config/mcp_config.json` and the
+  read-routing hook in `~/.gemini/config/hooks.json`, the files the
+  Antigravity CLI (`agy`) and IDE read. Without `agy` on your `PATH`, the
+  check reads the server file only and says so.
 
 ## Read-routing hook
 
 The read-routing hook sends whole-file reads of large files to `smart_read`,
 so the agent gets a cached summary instead of the full file. It is on by
-default for Claude Code, Codex and OpenCode. Untick it on the features
-screen if you do not want it.
+default for Claude Code, Codex, OpenCode and Antigravity. Untick it on the
+features screen if you do not want it.
 
 It needs a worker model to make summaries. Without one it stays inactive and
 setup says so; memory and targeted reads still work. See
@@ -107,6 +109,7 @@ Where the hook goes:
 | Claude Code | `hooks.PreToolUse` in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) | none |
 | Codex | `PreToolUse` in `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) | approve in `/hooks` |
 | OpenCode | `~/.config/opencode/plugins/mmhmem-read-routing.js` | none |
+| Antigravity | `mmhmem-read-routing` in `~/.gemini/config/hooks.json`, for the `read_file` tool | none |
 
 Setup never writes a trust or approval record for you. Every other key and
 hook in those files stays as it was.
@@ -192,7 +195,7 @@ Windows installer; WSL is not an install target.
 
 For manual local registrations, use [Claude Code's stdio command](../deploy/examples/claude-code.md),
 [OpenCode](../deploy/examples/opencode-local.json), [Antigravity](../deploy/examples/antigravity-mcp_config-local.json)
-or the local section of [Claude Desktop](../deploy/examples/claude-desktop.md).
+(for `~/.gemini/config/mcp_config.json`) or the local section of [Claude Desktop](../deploy/examples/claude-desktop.md).
 The [playbook guide](../deploy/skills/unified-memory/README.md) lists per-agent paths.
 
 Setup installs the memory guide as a standalone skill. To manage it as a

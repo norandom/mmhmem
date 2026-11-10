@@ -83,7 +83,7 @@ CI-verified install counts as done.
   - _Requirements: 1.4, 1.5, 6.2_
 
 - [ ] 5. Validation
-- [ ] 5.1 Integration tests for install, update and removal
+- [x] 5.1 Integration tests for install, update and removal
   - Setup CLI test from a clean test home with a fake `agy`: both entries written, check passes, record lists both managed entries and no pending step.
   - Update test from a snippet-era record plus a stale data-folder server file: new entries present, snippet file and stale entry gone, record has no import step.
   - Removal test: both entries gone, other servers and hooks byte-identical, check reports nothing left to undo. Rollback test: a failing handshake restores the original bytes of both files.
@@ -91,7 +91,7 @@ CI-verified install counts as done.
   - _Depends: 3.4, 3.5, 4.1_
   - _Requirements: 1.1, 1.2, 2.1, 2.5, 4.1, 4.3, 4.4, 5.1, 5.2, 5.3, 5.4_
 
-- [ ] 5.2 (P) Installer end-to-end scenario and documentation
+- [x] 5.2 (P) Installer end-to-end scenario and documentation
   - Add the Antigravity scenario (fake `agy` on PATH) to the installer e2e workflow on the Windows and Linux runners.
   - Update `README.md`, `docs/installation.md` and the Antigravity example under `deploy/examples/` so they say setup configures Antigravity itself and the user starts a new session; remove the "no command line" sentence.
   - Done when the e2e workflow is green with the new scenario and the install-docs test passes against the updated text.
@@ -123,3 +123,4 @@ CI-verified install counts as done.
 - 2026-11-10 (task 3.4): approved in round 3. The stale-location cleanup runs in every plan whatever is selected and on removal (Req 5.2). Lesson: a reviewer stopped mid-mutation (restart) left a re-gated file in the tree; after any interrupted review, diff the files against the implementer's description before trusting a green run, and `touch` restored files so cargo rebuilds. `record_tests.rs` is at 489/500 lines; `#[deprecated]` on the legacy pending step waits for 4.1.
 - 2026-11-10 (task 3.5 review): an entry with `"disabled": true`, or a `disabled` STATUS in `agy mcp list`, still passes the check (design prescribes the shared parser and a line containing `mmhmem`). Task 5.3: capture `agy mcp list` after `agy mcp disable mmhmem` and decide whether to fail it. `listed()` matches the word `mmhmem` in any column; matching the NAME column only would be stricter. The integration tests live in `tests/setup_verify.rs` (rollback flow), not `setup_check.rs`. During the implementer's RED run the old snippet check once started the real binary without the isolating environment; nothing on the owner's machine is known to have changed.
 - 2026-11-10 (task 4.1, controller inline review per the owner's request to save time): next step is "Antigravity: start a new session."; snippet/import texts, the flow_apply special case and the manual removal instruction are gone; an old record's legacy step now reads "run setup again for Antigravity" until the first re-run rewrites it; `hook <harness>` help lists antigravity; the update text path now says the review intro lines (left-out feature, adoption notes). `snippet()`/`snippet_file()` are `#[cfg(test)]` helpers that recreate a 0.5.1 install for the migration tests. `#[deprecated]` on the legacy variant is still not applied because the two text match arms would trip `-D warnings`; the variant stays documented as legacy. No UI snapshot changed.
+- 2026-11-10 (tasks 5.1 + 5.2, one implementer, controller inline review): integration tests in `tests/setup_cli_antigravity.rs` (clean install, snippet-era re-run in both record shapes, removal) and `tests/setup_verify.rs` (handshake-failure rollback sharing the existing helper); e2e phase `antigravity` in `scripts/e2e-scenarios.ps1` with a fake `agy` on PATH, three workflow steps on all five matrix rows, proven only by the CI run (machine phases refuse to run locally); README, installation guide and `tests/install_docs.rs` updated. For 5.3: re-running setup on the owner's snippet-era record keeps `read_hook: false` (recorded choices win), so pick "Change agents and features" to turn the hook on; the owner's machine has no `antigravity-mcp.json` next to the binary (checked 2026-11-09), so only the stale `~/.gemini/antigravity/mcp_config.json` entry needs migrating there. Req 5.3's "nothing left to undo" is met by "mmhmem was removed." with no Antigravity follow-up line.

@@ -47,7 +47,10 @@ left for you to do:
 - **Codex**: start a new session and approve the mmhmem hook in `/hooks`.
   Codex skips hooks you have not approved.
 - **Claude Desktop**: quit it completely and open it again.
-- **Antigravity**: import the snippet setup saved, then start a new session.
+- **Antigravity**: start a new session. Setup configures Antigravity itself:
+  mmhmem's server entry in `~/.gemini/config/mcp_config.json` and the
+  read-routing hook in `~/.gemini/config/hooks.json`, the files its CLI and
+  IDE read.
 
 The read-routing hook sends whole-file reads of large files to `smart_read`.
 It needs a worker model; without one it stays inactive and setup says so.

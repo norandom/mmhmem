@@ -457,19 +457,23 @@ fn antigravity_without_agy_skips_the_listing_and_says_why() {
     saved_agent_command(&home, "skipped");
 }
 
-#[test]
-fn a_wrong_antigravity_command_fails_the_registration_and_restores_both_files() {
+/// Installs Antigravity over the seeded files, changes the server file with
+/// `break_entry` (the check reads the file Antigravity loads, not the
+/// plan) and runs the check: it fails at `step` with a first line starting
+/// with `failed`, and both files are back to their seeded bytes
+/// (Requirement 4.4; antigravity-native-setup task 5.1 rollback).
+fn assert_antigravity_rolled_back(
+    break_entry: impl Fn(&Home, &str) -> String,
+    step: CheckStep,
+    failed: &str,
+) {
     let (home, seeds) = antigravity_home(true);
     let registry = Registry::builtin(Path::new(BIN));
     let mut record = InstallRecord::new();
     let mut applied = install(&home, &registry, &antigravity(), &mut record);
-    // The server file now names a program that is not there: the check reads
-    // the file Antigravity loads, not the plan.
     let servers = home.path(".gemini/config/mcp_config.json");
     let text = std::fs::read_to_string(&servers).unwrap();
-    let gone = home.dir.path().join("gone").join("mmhmem");
-    let (bin, wrong) = (serde_json::to_string(BIN), serde_json::to_string(&gone));
-    let broken = text.replace(&bin.unwrap(), &wrong.unwrap());
+    let broken = break_entry(&home, &text);
     assert_ne!(broken, text);
     std::fs::write(&servers, broken).unwrap();
     let checker = Checker {
@@ -480,12 +484,8 @@ fn a_wrong_antigravity_command_fails_the_registration_and_restores_both_files() 
     let verdicts = checker.run(&antigravity(), &mut applied, &mut record);
     let verdict = verdicts.agent(AgentId::Antigravity).unwrap();
     let lines = verdict.lines();
-    let failed = "✘ Antigravity — mmhmem did not start: the program at ";
     assert!(lines[0].starts_with(failed), "{lines:?}");
-    assert_eq!(
-        outcome_of(verdict, CheckStep::Registration),
-        StepOutcome::Fail
-    );
+    assert_eq!(outcome_of(verdict, step), StepOutcome::Fail);
     for step in [CheckStep::AgentCommand, CheckStep::HookSample] {
         assert_eq!(outcome_of(verdict, step), StepOutcome::Skipped, "{step:?}");
     }
@@ -499,4 +499,25 @@ fn a_wrong_antigravity_command_fails_the_registration_and_restores_both_files() 
         assert_eq!(&now, seed, "{}", file.display());
     }
     assert!(!record.agents.contains_key(&AgentId::Antigravity));
+}
+
+#[test]
+fn a_wrong_antigravity_command_fails_the_registration_and_restores_both_files() {
+    // The server file names a program that is not there.
+    let gone = |home: &Home, text: &str| {
+        let gone = home.dir.path().join("gone").join("mmhmem");
+        let (bin, wrong) = (serde_json::to_string(BIN), serde_json::to_string(&gone));
+        text.replace(&bin.unwrap(), &wrong.unwrap())
+    };
+    let failed = "✘ Antigravity — mmhmem did not start: the program at ";
+    assert_antigravity_rolled_back(gone, CheckStep::Registration, failed);
+}
+
+#[test]
+fn a_failing_antigravity_handshake_restores_both_files() {
+    // The program is there but stops at once instead of answering: the
+    // handshake fails (`args` is mmhmem's only "stdio" in the file).
+    let stops = |_: &Home, text: &str| text.replace("\"stdio\"", "\"--no-such-option\"");
+    let failed = "✘ Antigravity — mmhmem did not start: mmhmem stopped right after it started.";
+    assert_antigravity_rolled_back(stops, CheckStep::Handshake, failed);
 }

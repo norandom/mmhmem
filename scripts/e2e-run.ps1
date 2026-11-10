@@ -40,10 +40,11 @@ Phases (harness, task 8.1):
                       irm <url>/install.ps1 | iex
                     in the isolated environment of home/ (default path,
                     amended Requirement 4.9: the bootstrap passes --bootstrap)
-  assert-installed  for -Run (install, default, or menu-install): exit 0,
-                    install record and program in place, every agent's check
-                    passed with its own CLI (agent_command=pass), and every
-                    seeded file not managed by mmhmem byte-identical
+  assert-installed  for -Run (install, default; menu-install; antigravity):
+                    exit 0, install record and program in place, every
+                    agent's check passed with its own CLI
+                    (agent_command=pass), and every seeded file not managed
+                    by mmhmem byte-identical
   compare-seed      compare home/ (and HKCU Path) with the manifest;
                     -AllowChanged lists seeded paths that may differ
   stop              stop the server; restore HKCU Path if it changed
@@ -51,6 +52,7 @@ Phases (harness, task 8.1):
 Scenarios (task 8.2, scripts/e2e-scenarios.ps1, which describes each):
   pty-selftest cancel-at-review download-404 bad-hash rerun remove
   menu-install install-old bad-signature update update-command invalid-config
+  antigravity
 
 Published release (task 9.2, scripts/e2e-published.ps1, which describes each;
 .github/workflows/published-install.yml): published-release -Tag <latest>,
@@ -72,7 +74,7 @@ param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('keygen','release','seed','serve','install','assert-installed','compare-seed','stop',
         'pty-selftest','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
-        'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics',
+        'download-404','bad-hash','bad-signature','invalid-config','antigravity','agent-diagnostics',
         'published-release','published-install','assert-published')]
     [string]$Phase,
     [string]$WorkDir,
@@ -83,7 +85,7 @@ param(
     [string[]]$AllowChanged=@(),
     [ValidateSet('current','old','badsig')]
     [string]$Role='current',
-    [ValidateSet('install','menu-install','published-install')]
+    [ValidateSet('install','menu-install','antigravity','published-install')]
     [string]$Run='install',
     [switch]$BreakHash,
     [int]$TimeoutSeconds=900
@@ -377,15 +379,16 @@ function Set-ProcessVariable([string]$Name,$Value) {
     if ($null -eq $Value) {[Environment]::SetEnvironmentVariable($Name,[NullString]::Value)}
     else {[Environment]::SetEnvironmentVariable($Name,[string]$Value)}
 }
-# Runs a program with the isolated environment, stdin from an empty file
-# (so there is no terminal), output to logs/<Name>.out|.err. Returns the exit code.
-function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[string]$HomeDir) {
+# Runs a program with the isolated environment, stdin from a file holding
+# -StdinText (empty by default, so there is no terminal), output to
+# logs/<Name>.out|.err. Returns the exit code.
+function Invoke-Isolated([string]$Name,[string]$FilePath,[string]$Arguments,[string]$HomeDir,[string]$StdinText='') {
     $vars=Get-IsolatedEnvironment $HomeDir
     $state=Read-Json $script:StateFile
     if ($HomeDir) {$state.home=$HomeDir}
     $saved=@{}
     foreach ($k in $vars.Keys) {$saved[$k]=[Environment]::GetEnvironmentVariable($k)}
-    $stdin=Join-Path $script:Logs "$Name.stdin";Write-Utf8 $stdin ''
+    $stdin=Join-Path $script:Logs "$Name.stdin";Write-Utf8 $stdin $StdinText
     $out=Join-Path $script:Logs "$Name.out";$err=Join-Path $script:Logs "$Name.err"
     try {
         foreach ($k in $vars.Keys) {Set-ProcessVariable $k $vars[$k]}
@@ -634,7 +637,7 @@ function Restore-UserPath {
 # home cannot isolate (on Windows the user PATH lives in HKCU). They run only
 # on a disposable CI runner, or when a maintainer explicitly opts in.
 $machinePhases = @('install','menu-install','rerun','install-old','update','update-command','remove','cancel-at-review',
-    'download-404','bad-hash','bad-signature','invalid-config','agent-diagnostics','published-install')
+    'download-404','bad-hash','bad-signature','invalid-config','antigravity','agent-diagnostics','published-install')
 if ($machinePhases -contains $Phase -and $env:GITHUB_ACTIONS -ne 'true' -and
     $env:MMHMEM_E2E_ALLOW_LOCAL -ne 'I understand this changes my user PATH') {
     throw ("Phase '$Phase' runs the real installer, which changes this machine's user PATH. " +
@@ -663,6 +666,7 @@ switch ($Phase) {
     'update' {Invoke-UpdatePhase}
     'update-command' {Invoke-UpdateCommandPhase}
     'invalid-config' {Invoke-InvalidConfigPhase}
+    'antigravity' {Invoke-AntigravityPhase}
     'agent-diagnostics' {Invoke-AgentDiagnosticsPhase}
     'published-release' {Invoke-PublishedReleasePhase}
     'published-install' {Invoke-PublishedInstallPhase}

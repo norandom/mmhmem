@@ -238,3 +238,82 @@ fn root_stubs_print_the_readme_one_liners_and_download_nothing() {
         assert!(!has_word(&code, word), "install.sh uses {word}");
     }
 }
+
+/// The paragraphs, list items, headings and table rows of a Markdown text,
+/// each with its wrapped lines joined by a space.
+fn items(text: &str) -> Vec<String> {
+    let mut items: Vec<String> = Vec::new();
+    let mut open = false;
+    for line in text.lines() {
+        let line = line.trim();
+        let numbered = line
+            .split_once(". ")
+            .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        let single = line.starts_with('|') || line.starts_with('#');
+        let starts = single || numbered || line.starts_with("- ") || line.starts_with("* ");
+        match items.last_mut() {
+            _ if line.is_empty() => open = false,
+            Some(item) if open && !starts => {
+                item.push(' ');
+                item.push_str(line);
+            }
+            _ => {
+                items.push(line.to_owned());
+                open = !single;
+            }
+        }
+    }
+    items
+}
+
+/// antigravity-native-setup task 5.2 (Requirements 1.5, 6.1 and 6.2): the
+/// README and the installation guide say that setup configures Antigravity
+/// itself (its server entry and read hook in `~/.gemini/config/`) and that
+/// only a new session is left; nothing about Antigravity tells the user to
+/// import or paste a snippet. The manual example they point to is valid JSON
+/// for that file.
+#[test]
+fn antigravity_guidance_says_setup_configures_it_and_only_a_new_session_is_left() {
+    for doc in ["README.md", "docs/installation.md"] {
+        let items = items(&read(doc));
+        let step = items
+            .iter()
+            .find(|i| i.starts_with("- **Antigravity**:"))
+            .unwrap_or_else(|| panic!("{doc} has no Antigravity next step"));
+        assert!(
+            step.starts_with("- **Antigravity**: start a new session."),
+            "{doc}: {step}"
+        );
+        for file in [
+            "~/.gemini/config/mcp_config.json",
+            "~/.gemini/config/hooks.json",
+        ] {
+            assert!(
+                step.contains(file),
+                "{doc}: the Antigravity step names {file}: {step}"
+            );
+        }
+        for item in items.iter().filter(|i| i.contains("Antigravity")) {
+            let lower = item.to_lowercase();
+            for bad in ["snippet", "import", "paste", "no command line"] {
+                assert!(
+                    !lower.contains(bad),
+                    "{doc} says {bad:?} for Antigravity: {item}"
+                );
+            }
+        }
+    }
+    let example = "deploy/examples/antigravity-mcp_config-local.json";
+    let manual = items(&read("docs/installation.md"))
+        .into_iter()
+        .find(|i| i.contains(example.trim_start_matches("deploy/examples/")))
+        .expect("the installation guide points at the Antigravity example");
+    assert!(
+        manual.contains("~/.gemini/config/mcp_config.json"),
+        "{manual}"
+    );
+    let value: serde_json::Value = serde_json::from_str(&read(example)).expect("valid JSON");
+    let entry = &value["mcpServers"]["mmhmem"];
+    assert_eq!(entry["args"], serde_json::json!(["stdio"]), "{example}");
+    assert!(entry["command"].is_string(), "{example}");
+}

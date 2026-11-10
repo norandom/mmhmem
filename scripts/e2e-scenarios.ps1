@@ -35,6 +35,11 @@ menu is driven, and its exit code is the program's.
                    the previous release: same checks as update
   invalid-config   an invalid opencode.json: OpenCode skipped with a plain
                    message and left byte-identical, the others installed
+  antigravity      Antigravity's data folder and a fake agy on PATH, the
+                   one-liner without a terminal: its server entry and read
+                   hook written, recorded and checked (agy listing, hook
+                   sample), and the hook command answers like Antigravity
+                   needs (antigravity-native-setup task 5.2)
 #>
 
 # The release this platform downloads (archive key in package-release-archives.ps1).
@@ -441,4 +446,161 @@ function Invoke-InvalidConfigPhase {
     foreach ($f in (Compare-HomeState $before (Get-HomeState 'after-invalid-config') $expected -ClaudeMode installed -HooksInstalled)) {$failures.Add($f)}
     foreach ($p in (Wait-NoLeftoverProcesses)) {$failures.Add("still running after setup finished: $p")}
     Assert-NoFailures 'invalid-config' $failures
+}
+
+# --------------------------------------------------------- antigravity ---
+# antigravity-native-setup task 5.2 (Requirements 1.1, 1.5, 2.1, 4.2, 4.3):
+# a home where Antigravity is installed (its CLI data folder, and `agy` on
+# PATH), the one-liner without a terminal, then Antigravity's two global
+# files, its install record entry and its check. `agy` is a fake (New-FakeAgy)
+# answering like the captured agy 1.5.3 (tests/fixtures/setup/agents/
+# antigravity/): `--version` prints 1.5.3, `mcp list` prints the populated
+# table while ~/.gemini/config/mcp_config.json names mmhmem and "No MCP
+# servers configured." otherwise, so the check's agent_command step passes
+# only when the file Antigravity reads has the entry.
+$script:AgyVersion='1.5.3'
+$script:AgyHeader='NAME    TYPE   STATUS   COMMAND/URL'
+$script:AgyEmpty='No MCP servers configured.'
+# Writes the fake `agy` into -Directory (made fresh): a POSIX sh script (LF)
+# or, on Windows, a batch file. Returns its path.
+function New-FakeAgy([string]$Directory) {
+    if (Test-Path -LiteralPath $Directory) {Remove-Item -LiteralPath $Directory -Recurse -Force}
+    New-Item -ItemType Directory -Path $Directory | Out-Null
+    if ($script:OnWindows) {
+        $path=Join-Path $Directory 'agy.cmd'
+        $lines=@('@echo off',
+            'rem Fake Antigravity CLI for the installer e2e (scripts/e2e-scenarios.ps1).',
+            'if "%~1"=="--version" if "%~2"=="" goto version',
+            'if "%~1"=="mcp" if "%~2"=="list" if "%~3"=="" goto list',
+            'echo agy: unexpected arguments: %* 1>&2',
+            'exit /b 2',
+            ':version',"echo $script:AgyVersion",'exit /b 0',
+            ':list',
+            'findstr /l /c:"\"mmhmem\"" "%USERPROFILE%\.gemini\config\mcp_config.json" >nul 2>&1',
+            'if errorlevel 1 goto empty',
+            "echo $script:AgyHeader",
+            'echo mmhmem  stdio  enabled  %LOCALAPPDATA%\Programs\mmhmem\mmhmem.exe stdio',
+            'exit /b 0',
+            ':empty',"echo $script:AgyEmpty",'exit /b 0')
+        Write-Utf8 $path (($lines -join "`r`n")+"`r`n")
+        return $path
+    }
+    $path=Join-Path $Directory 'agy'
+    $lines=@('#!/bin/sh',
+        '# Fake Antigravity CLI for the installer e2e (scripts/e2e-scenarios.ps1).',
+        'if [ "$#" -eq 1 ] && [ "$1" = --version ]; then',"  echo '$script:AgyVersion'",'  exit 0','fi',
+        'if [ "$#" -eq 2 ] && [ "$1" = mcp ] && [ "$2" = list ]; then',
+        '  if grep -qF ''"mmhmem"'' "$HOME/.gemini/config/mcp_config.json" 2>/dev/null; then',
+        "    echo '$script:AgyHeader'",
+        '    echo "mmhmem  stdio  enabled  $HOME/.local/bin/mmhmem stdio"',
+        '  else',"    echo '$script:AgyEmpty'",'  fi','  exit 0','fi',
+        'echo "agy: unexpected arguments: $*" >&2','exit 2')
+    Write-Utf8 $path (($lines -join "`n")+"`n")
+    & chmod 755 $path
+    if ($LASTEXITCODE -ne 0) {throw "could not make $path executable"}
+    return $path
+}
+# The outcome of one step in a record entry's last check ('' when it is not
+# reported, or reported more than once).
+function Get-CheckOutcome($Entry,[string]$Step) {
+    $found=@($Entry.last_check.details | Where-Object {$_ -and [string]$_.step -ceq $Step} | ForEach-Object {[string]$_.outcome})
+    if ($found.Count -eq 1) {return $found[0]}
+    return ''
+}
+# What an install with Antigravity selected must leave (design.md "Data
+# Models"): mmhmem's server entry and its named read-routing hook in the
+# global files, both managed by the record with both features on and no
+# step left for the user, a check that passed with agy's own listing and the
+# hook sample, and results that only ask for a new session. -Program is the
+# installed program as setup names it. Returns failure messages.
+function Get-AntigravityFailures([string]$HomeDir,$Record,[string]$Program,[string]$Output) {
+    $failures=New-Object Collections.Generic.List[string]
+    $servers=[IO.Path]::GetFullPath((Join-Path $HomeDir '.gemini/config/mcp_config.json'))
+    $hooks=[IO.Path]::GetFullPath((Join-Path $HomeDir '.gemini/config/hooks.json'))
+    $entry=$null;$hook=$null
+    try {$entry=(Read-Json $servers).mcpServers.mmhmem} catch {$failures.Add("Antigravity's server file: $_")}
+    try {$hook=(Read-Json $hooks).'mmhmem-read-routing'} catch {$failures.Add("Antigravity's hook file: $_")}
+    if (-not $entry) {$failures.Add('~/.gemini/config/mcp_config.json has no mcpServers.mmhmem')}
+    elseif ([string]$entry.command -cne $Program -or (@($entry.args) -join ' ') -cne 'stdio') {
+        $failures.Add("mcpServers.mmhmem starts '$($entry.command) $(@($entry.args) -join ' ')', expected '$Program stdio'")
+    }
+    $groups=@(if ($hook) {$hook.PreToolUse})
+    $handlers=@(if ($groups.Count -eq 1) {$groups[0].hooks})
+    $command="$Program hook antigravity"
+    if ($groups.Count -ne 1 -or [string]$groups[0].matcher -cne '^read_file$') {$failures.Add('mmhmem-read-routing is not one PreToolUse group for ^read_file$')}
+    elseif ($handlers.Count -ne 1 -or [string]$handlers[0].type -cne 'command' -or [string]$handlers[0].command -cne $command -or [int]$handlers[0].timeout -ne 10) {
+        $failures.Add("mmhmem-read-routing does not run '$command' with a 10 s timeout")
+    }
+    $agent=$null
+    if ($Record -and $Record.agents) {$agent=$Record.agents.antigravity}
+    if (-not $agent) {$failures.Add('the install record has no antigravity entry');return ,$failures.ToArray()}
+    if ($agent.features.mcp -ne $true -or $agent.features.read_hook -ne $true) {$failures.Add('antigravity is not recorded with shared memory and the read hook on')}
+    $managed=@($agent.managed | Where-Object {$_} | ForEach-Object {"$($_.kind) $($_.file) $(@($_.pointer) -join '/') $($_.state)"})
+    $want=@("json_entry $servers mcpServers/mmhmem done","json_entry $hooks mmhmem-read-routing done")
+    if (($managed -join ' | ') -cne ($want -join ' | ')) {$failures.Add("antigravity manages '$($managed -join ' | ')', expected '$($want -join ' | ')'")}
+    $pending=@($agent.pending_user_steps | Where-Object {$_})
+    if ($pending.Count) {$failures.Add("antigravity has steps left for the user: $($pending -join ', ')")}
+    if ([string]$agent.last_check.result -cne 'pass') {$failures.Add("antigravity's check result is '$($agent.last_check.result)'")}
+    foreach ($step in @('registration','handshake','tools_list','status_tool','agent_command','hook_sample')) {
+        $outcome=Get-CheckOutcome $agent $step
+        if ($outcome -cne 'pass') {$failures.Add("antigravity check step $step is '$outcome', expected 'pass'")}
+    }
+    # U+2714 then U+2014, as the results print them.
+    $line=[string][char]0x2714+' Antigravity '+[char]0x2014+' mmhmem connected'
+    if (-not $Output.Contains($line)) {$failures.Add("the output has no line '$line'")}
+    if (-not $Output.Contains('Antigravity: start a new session.')) {$failures.Add('the output does not say: Antigravity: start a new session.')}
+    if ($Output -match '(?i)snippet|paste') {$failures.Add('the output still mentions a snippet to paste')}
+    return ,$failures.ToArray()
+}
+# Runs mmhmem's hook command as Antigravity runs the one in hooks.json (split
+# on whitespace, nothing quoted) on a read_file payload of Antigravity's
+# shape for a short seeded file. Without a worker model the hook must exit 0
+# with the pass form {"decision":"ask"}: an empty or invalid answer would
+# block every read in Antigravity. Returns failure messages.
+function Test-AntigravityHookCommand([string]$Command) {
+    $tokens=@($Command -split '\s+' | Where-Object {$_})
+    if ($tokens.Count -lt 2) {return ,@("the hook command '$Command' has no arguments")}
+    $file=[IO.Path]::GetFullPath((Join-Path $script:SeedHome '.profile'))
+    $payload=[ordered]@{conversationId='e2e-antigravity';workspacePaths=@($script:SeedHome.Replace('\','/'))
+        toolCall=[ordered]@{name='read_file';args=[ordered]@{Path=$file}};stepIdx=1}
+    $json=$payload | ConvertTo-Json -Depth 5 -Compress
+    $code=Invoke-Isolated 'antigravity-hook' $tokens[0] (($tokens | Select-Object -Skip 1) -join ' ') '' $json
+    $out=Join-Path $script:Logs 'antigravity-hook.out'
+    $answer=if (Test-Path -LiteralPath $out) {[IO.File]::ReadAllText($out).Trim()} else {''}
+    $failures=@()
+    if ($code -ne 0) {$failures+="the hook command exited with $code"}
+    $decision=$null
+    try {$decision=($answer | ConvertFrom-Json).decision} catch {}
+    if ([string]$decision -cne 'ask') {$failures+="the hook answered '$answer', expected {""decision"":""ask""}"}
+    return ,$failures
+}
+function Invoke-AntigravityPhase {
+    Start-Server
+    $paths=Get-InstalledPaths
+    New-Item -ItemType Directory -Path (Join-Path $script:SeedHome '.gemini/antigravity-cli') -Force | Out-Null
+    $fake=Join-Path $WorkDir 'fake-agy'
+    $agy=New-FakeAgy $fake
+    Write-Host "Antigravity: CLI data folder seeded, fake agy at $agy first on PATH"
+    $saved=$env:PATH
+    try {
+        $env:PATH=$fake+[IO.Path]::PathSeparator+$env:PATH
+        $code=Invoke-OneLinerNoTerminal 'antigravity' (Get-ReleaseInfo).base_url
+    } finally {$env:PATH=$saved}
+    $failures=New-Object Collections.Generic.List[string]
+    if ($code -ne 0) {$failures.Add("the one-liner exited with $code")}
+    $record=if (Test-Path -LiteralPath $paths.Record -PathType Leaf) {Read-Json $paths.Record} else {$null}
+    $program=[IO.Path]::GetFullPath($paths.Program)
+    foreach ($f in (Get-AntigravityFailures $script:SeedHome $record $program (Read-Log 'antigravity'))) {$failures.Add($f)}
+    if ($record -and $record.agents.antigravity) {
+        $steps=@($record.agents.antigravity.last_check.details | ForEach-Object {"$($_.step)=$($_.outcome)"}) -join ' '
+        Write-Host "antigravity check: $($record.agents.antigravity.last_check.result) ($steps)"
+    }
+    # The hook command exactly as hooks.json holds it (its absence is a
+    # failure above already).
+    $command=$null
+    try {$command=[string]@(@((Read-Json (Join-Path $script:SeedHome '.gemini/config/hooks.json')).'mmhmem-read-routing'.PreToolUse)[0].hooks)[0].command} catch {}
+    if ($command) {foreach ($f in (Test-AntigravityHookCommand $command)) {$failures.Add($f)}}
+    $failures.AddRange([string[]]@(Wait-NoLeftoverProcesses | ForEach-Object {"still running after setup finished: $_"}))
+    $failures.AddRange([string[]]@(Get-BootstrapLeftovers | ForEach-Object {"the bootstrap left $_"}))
+    Assert-NoFailures 'antigravity' $failures
 }

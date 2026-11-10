@@ -21,6 +21,7 @@
 #   e2e     ubuntu-latest, macos-15 (arm64), macos-15-intel (x86_64),
 #           windows-latest x {Windows PowerShell 5.1, PowerShell 7}: every
 #           scenario of scripts/e2e-scenarios.ps1, one step each, in order
+#           (Antigravity last: its data folder and a fake agy on PATH)
 #   installer-e2e  one required status for branch protection and for the
 #           release gate (task 8.3): scripts/publish-ci-release.ps1 publishes
 #           a tag only when the newest PUSH run of this workflow on main for
@@ -529,6 +530,14 @@ jobs:
         run: ./scripts/e2e-run.ps1 -Phase seed
       - name: Invalid opencode.json - only OpenCode skipped, the others installed
         run: ./scripts/e2e-run.ps1 -Phase invalid-config
+      # antigravity-native-setup task 5.2: Antigravity found by its CLI data
+      # folder and a fake agy on PATH (scripts/e2e-scenarios.ps1, New-FakeAgy).
+      - name: Fresh home for Antigravity
+        run: ./scripts/e2e-run.ps1 -Phase seed
+      - name: Antigravity - server entry and read hook written, recorded and checked (agy listing, hook sample)
+        run: ./scripts/e2e-run.ps1 -Phase antigravity
+      - name: Antigravity install - the other tools passed, unrelated seeded files byte-identical
+        run: ./scripts/e2e-run.ps1 -Phase assert-installed -Run antigravity
       # Diagnostics only: what the real `claude mcp get/list` answer for a
       # throwaway mmhmem entry in a separate isolated home (no installer runs;
       # env values are masked). Evidence for research.md §8, never a pass.

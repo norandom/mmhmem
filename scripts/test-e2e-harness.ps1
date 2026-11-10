@@ -338,6 +338,60 @@ try {
     Assert-True (-not (Test-AgentCheckOk 'codex' (& $check 'fail' @()))) 'a failed check is not OK'
     Assert-True (-not (Test-AgentCheckOk 'codex' $null)) 'no record entry is not OK'
 
+    # ---- antigravity (antigravity-native-setup task 5.2): the fake agy and
+    # what the scenario asserts after the install.
+    $agyHome=Join-Path $work 'agy-home'
+    $servers=[IO.Path]::GetFullPath((Join-Path $agyHome '.gemini/config/mcp_config.json'))
+    $hooksFile=[IO.Path]::GetFullPath((Join-Path $agyHome '.gemini/config/hooks.json'))
+    New-Item -ItemType Directory -Path (Split-Path -Parent $servers) -Force | Out-Null
+    $agy=New-FakeAgy (Join-Path $work 'fake-agy')
+    $profileVars=@{HOME=$env:HOME;USERPROFILE=$env:USERPROFILE}
+    try {
+        $env:HOME=$agyHome;$env:USERPROFILE=$agyHome
+        Assert-True ((@(& $agy --version) -join '|') -ceq '1.5.3') 'fake agy --version prints the captured version'
+        Assert-True ((@(& $agy mcp list) -join '|') -ceq $script:AgyEmpty) 'fake agy lists nothing without a server file'
+        Write-Utf8 $servers '{"mcpServers": {"other": {"command": "mmhmem-like", "args": []}}}'
+        Assert-True ((@(& $agy mcp list) -join '|') -ceq $script:AgyEmpty) 'fake agy lists nothing while the file has no mmhmem entry'
+        Write-Utf8 $servers '{"mcpServers": {"mmhmem": {"command": "/x/mmhmem", "args": ["stdio"]}}}'
+        $listed=@(& $agy mcp list)
+        Assert-True ($listed.Count -eq 2 -and $listed[0] -ceq $script:AgyHeader -and $listed[1] -cmatch '^mmhmem\s+stdio\s+enabled\s+\S+ stdio$') "fake agy lists mmhmem once the file names it ($($listed -join '|'))"
+        # Windows PowerShell 5.1 turns a native command's stderr into an error.
+        $preference=$ErrorActionPreference;$ErrorActionPreference='Continue'
+        try {$null=& $agy mcp add mmhmem x 2>&1} finally {$ErrorActionPreference=$preference}
+        Assert-True ($LASTEXITCODE -eq 2) 'fake agy refuses any other command'
+    } finally {
+        foreach ($k in $profileVars.Keys) {[Environment]::SetEnvironmentVariable($k,$profileVars[$k])}
+        $global:LASTEXITCODE=0
+    }
+    $program=[IO.Path]::GetFullPath((Join-Path $agyHome 'bin/mmhmem'))
+    $entry=[ordered]@{mcpServers=[ordered]@{other=[ordered]@{command='x'};mmhmem=[ordered]@{command=$program;args=@('stdio')}}}
+    Write-Utf8 $servers ($entry | ConvertTo-Json -Depth 6)
+    $handler=[ordered]@{type='command';command="$program hook antigravity";timeout=10}
+    $hookJson={param($matcher) ([ordered]@{'other-hook'=[ordered]@{enabled=$false};'mmhmem-read-routing'=[ordered]@{PreToolUse=@([ordered]@{matcher=$matcher;hooks=@($handler)})}} | ConvertTo-Json -Depth 8)}
+    Write-Utf8 $hooksFile (& $hookJson '^read_file$')
+    $steps=@('registration','handshake','tools_list','status_tool','agent_command','hook_sample')
+    $agRecord={param($pending,$skippedStep)
+        $details=@($steps | ForEach-Object {[ordered]@{step=$_;outcome=$(if ($_ -ceq $skippedStep) {'skipped'} else {'pass'})}})
+        $managed=@([ordered]@{kind='json_entry';file=$servers;pointer=@('mcpServers','mmhmem');managed_keys=@('command','args');sha256='a';backup=$null;state='done'},
+            [ordered]@{kind='json_entry';file=$hooksFile;pointer=@('mmhmem-read-routing');sha256='b';backup=$null;state='done'})
+        $agent=[ordered]@{features=[ordered]@{mcp=$true;read_hook=$true};managed=$managed;pending_user_steps=@($pending)
+            last_check=[ordered]@{at='2026-11-10T10:00:00Z';result='pass';details=$details}}
+        ([ordered]@{schema=1;agents=[ordered]@{antigravity=$agent}} | ConvertTo-Json -Depth 10) | ConvertFrom-Json
+    }
+    $connected=[string][char]0x2714+' Antigravity '+[char]0x2014+' mmhmem connected, 11 tools'
+    $agOutput="$connected`n`nDone. Next steps:`nAntigravity: start a new session.`n"
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() '') $program $agOutput) 0 'a complete Antigravity install passes'
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() 'agent_command') $program $agOutput) 1 'agy not listing mmhmem fails' 'agent_command'
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() 'hook_sample') $program $agOutput) 1 'a hook sample that did not run fails' 'hook_sample'
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @('import_antigravity_snippet') '') $program $agOutput) 1 'a step left for the user fails' 'import_antigravity_snippet'
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() '') $program "$agOutput`nAntigravity: paste this JSON") 1 'a snippet in the output fails' 'snippet'
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() '') ($program+'x') $agOutput) 2 'another program in both files fails' 'expected'
+    Assert-Failures (Get-AntigravityFailures $agyHome ('{"agents": {}}' | ConvertFrom-Json) $program $agOutput) 1 'no record entry fails' 'no antigravity entry'
+    Write-Utf8 $hooksFile (& $hookJson '.*')
+    Assert-Failures (Get-AntigravityFailures $agyHome (& $agRecord @() '') $program $agOutput) 1 'a hook matching every tool fails' '^read_file$'
+    Remove-Item -LiteralPath $hooksFile
+    Assert-True (@(Get-AntigravityFailures $agyHome (& $agRecord @() '') $program $agOutput) -match 'hook file').Count -eq 1 'a missing hook file fails'
+
     # ---- small helpers.
     Assert-True ((ConvertTo-TagPattern 'v0.4.1') -ceq 'v0\.4\.1') 'tag pattern escapes dots only'
     Assert-True (@('windows','linux','macos-aarch64','macos-x86_64') -ccontains (Get-PlatformKey)) 'platform key'
