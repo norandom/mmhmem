@@ -1,7 +1,7 @@
 # mmhmem
 
 <p align="center">
-  <img src="assets/mmhmem.jpg" alt="mmhmem motto" width="560">
+  <img src="assets/mmhmem.png" alt="Before and after mmhmem: fewer tokens sent to the credit card company" width="560">
 </p>
 
 Shared memory and file-reading tools for AI coding agents. Switch between
