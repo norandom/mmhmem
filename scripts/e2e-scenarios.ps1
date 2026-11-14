@@ -385,7 +385,10 @@ function Invoke-UpdateCommandPhase {
         # "Downloading ..." prefix; the verified suffix lands after it.
         "expect Downloading $(ConvertTo-TagPattern $current.tag).*signature and checksum OK\.",
         "expect Updated to $(ConvertTo-TagPattern $current.tag)\. Checking your tools",
-        'timeout 900','exit 0')
+        # Since v1.1.0 every update ends by confirming the Worker model;
+        # Enter keeps the current state whether or not one is set up.
+        'timeout 900','expect (Keep this Worker model\? \[Y/n\]|Enter a model name \(or press Enter to skip\):)','send enter',
+        'timeout 60','exit 0')
     Assert-Updated 'update-command'
 }
 # After `update` or `update-command`: the new program and its hash recorded,

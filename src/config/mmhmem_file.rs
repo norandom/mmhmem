@@ -44,6 +44,8 @@ pub struct MmhmemFile {
     /// `shunt_content_cache_max_rows` — content-cache row cap (u32 > 0,
     /// shunt-content-tool Req 4.3).
     pub shunt_content_cache_max_rows: Option<u32>,
+    /// `compact_commands` — `true` opts in to the command rewrite (`hook::compact`).
+    pub compact_commands: Option<bool>,
 }
 
 impl MmhmemFile {
@@ -69,6 +71,7 @@ impl MmhmemFile {
             shunt_content_cache_max_rows: p
                 .shunt_content_cache_max_rows
                 .or(g.shunt_content_cache_max_rows),
+            compact_commands: p.compact_commands.or(g.compact_commands),
         })
     }
 
@@ -411,6 +414,17 @@ mod tests {
             Config::from_env_local(&MmhmemFile::merged_lookup(&get(&map), &file)).expect("ok");
         assert_eq!(cfg.worker_api_url, "p-url");
         let _ = ENV_WORKER_API_URL; // referenced for the doc link
+    }
+
+    #[test]
+    fn compact_commands_key_merges_project_over_global() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let g = write_file(dir.path(), "g.json", r#"{"compact_commands":true}"#);
+        let p = write_file(dir.path(), "p.json", r#"{"compact_commands":false}"#);
+        let n = dir.path().join("absent.json");
+        let load = |g: &Path, p: &Path| MmhmemFile::load(g, p).expect("load").compact_commands;
+        let got = (load(&g, &n), load(&g, &p), load(&n, &n));
+        assert_eq!(got, (Some(true), Some(false), None));
     }
 
     #[test]

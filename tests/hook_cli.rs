@@ -77,6 +77,7 @@ impl Env {
             .env("XDG_CONFIG_HOME", &self.home)
             .env_remove("AGENT_MEM_LOG_FILE")
             .env_remove("SHUNT_MIN_LINES")
+            .env_remove("MMHMEM_COMPACT_COMMANDS")
             .env_remove("AGENT_MEM_AUDIT_MAX_BYTES")
             .env_remove("AGENT_MEM_AUDIT_ROTATE_KEEP")
             .env("RUST_LOG", "trace")
@@ -515,6 +516,51 @@ fn non_read_tools_pass_without_an_audit_record() {
     assert_pass(&env.run(true, "Edit", edit));
     assert_pass(&env.run(true, "Bash", json!({"command": "cargo test"})));
     assert!(env.audit().is_empty(), "{:?}", env.audit());
+}
+
+/// Runs one Claude `Bash` event with the command rewrite turned on.
+fn run_bash_compact_on(env: &Env, command: &str) -> Output {
+    let event = json!({"session_id": "sess-1", "cwd": env.project,
+        "hook_event_name": "PreToolUse", "tool_name": "Bash",
+        "tool_input": {"command": command}});
+    let mut child = env
+        .command("claude", true)
+        .env("MMHMEM_COMPACT_COMMANDS", "1")
+        .spawn()
+        .expect("spawn");
+    let mut pipe = child.stdin.take().expect("stdin");
+    let _ = pipe.write_all(event.to_string().as_bytes());
+    drop(pipe);
+    child.wait_with_output().expect("wait")
+}
+
+#[test]
+fn opted_in_rewrite_wraps_one_plain_command_without_approving_it() {
+    let env = Env::new();
+    let out = run_bash_compact_on(&env, "cargo test --workspace");
+    assert!(out.status.success(), "exit: {:?}", out.status);
+    let v: Value = serde_json::from_slice(&out.stdout).expect("stdout is one JSON object");
+    let hso = &v["hookSpecificOutput"];
+    assert_eq!(hso["hookEventName"], "PreToolUse");
+    // No decision: Claude Code's own permission flow judges the call.
+    assert!(hso.get("permissionDecision").is_none(), "{v}");
+    assert_eq!(
+        hso["updatedInput"]["command"],
+        "mmhmem compact --harness claude-code --run 'cargo test --workspace'"
+    );
+    assert!(env.audit().is_empty(), "{:?}", env.audit());
+}
+
+#[test]
+fn opted_in_rewrite_leaves_compound_commands_alone() {
+    let env = Env::new();
+    for cmd in [
+        "rm -rf build; make",
+        "cd sub && cargo test",
+        "git diff > p.patch",
+    ] {
+        assert_pass(&run_bash_compact_on(&env, cmd));
+    }
 }
 
 #[test]

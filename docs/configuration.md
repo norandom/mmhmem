@@ -22,8 +22,8 @@ Create `~/.mmhmem.json` for all projects, or `./.mmhmem.json` for one project:
 Use the model name and URL supplied by your provider; hosted providers may
 require an API key. Per-setting precedence is **environment > project file >
 global file > default**. Only `worker_model`, `worker_api_url`,
-`worker_api_key`, `update_check` and `shunt_content_cache_max_rows` are
-read. Unknown keys are ignored and
+`worker_api_key`, `update_check`, `shunt_content_cache_max_rows` and
+`compact_commands` are read. Unknown keys are ignored and
 preserved by updates. Invalid JSON fails startup and names the file.
 
 `mmhmem setup` never stores worker secrets in agent registrations; keep them
@@ -42,6 +42,27 @@ the data directory; a tool call never waits for it, and without network
 nothing changes. Server mode (`mmhmem serve`) never shows the note. To turn
 it off, set `MMHMEM_NO_UPDATE_CHECK=1` or add `"update_check": false` to
 `.mmhmem.json`.
+
+## Command output compaction (Claude Code, opt-in)
+
+`mmhmem compact` shortens noisy command output: it strips colour codes,
+folds `Compiling …`/passing-test/lockfile-diff runs into one line each,
+keeps every error, warning and summary line, and cuts output over 120 lines
+to its head and tail. Use it directly (`cargo test 2>&1 | mmhmem compact`)
+or let the Claude Code hook rewrite commands for you by adding
+`"compact_commands": true` to `.mmhmem.json` (or `MMHMEM_COMPACT_COMMANDS=1`).
+
+The hook only rewrites one plain call of `cargo test/build/check/clippy`,
+`npm/pnpm/yarn test`, `pytest`, `jest`, `vitest`, `git diff`, unbounded
+`git log`, `docker/kubectl logs`, `make`, `gradle` or `mvn`. Anything with
+`;`, `&`, `|`, `<`, `>`, a backquote, `$(` or a line break runs unchanged.
+The rewritten command is `mmhmem compact --harness claude-code --run '<cmd>'`.
+The hook does not approve it: Claude Code checks its permission rules against
+that rewritten text, so a rule written for the original command (for example
+`Bash(cargo test:*)`) no longer matches and you are asked instead. The command
+runs in a child `sh -c`, and its output appears only when it finishes.
+Each run that shortens output records an estimate (`command_compact`,
+removed characters ÷ 4) shown by `mmhmem stats`.
 
 ## Local environment reference
 

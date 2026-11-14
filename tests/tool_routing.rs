@@ -201,11 +201,13 @@ async fn direct_targeted_session_and_worker_failure_do_not_record_summary_saving
     .await;
     rig.call("session_resume_or_handoff",json!({"project":"routing-fixture","agent_harness":"opencode","updated_working_state_md":"verified fixture","active_objective":"test"})).await;
     assert!(rig.rows().await.is_empty());
-    assert_eq!(rig.count.load(Ordering::SeqCst), 0);
+    // The resume (not the checkpoint save) pings the worker once as its
+    // self-test (v1.1.0); no read reached the worker.
+    assert_eq!(rig.count.load(Ordering::SeqCst), 1);
     rig.fail.store(true, Ordering::SeqCst);
     let error = rig.call("smart_read", read_args(&large)).await;
     assert!(!error.contains("Shunted Summary"), "{error}");
-    assert_eq!(rig.count.load(Ordering::SeqCst), 1);
+    assert_eq!(rig.count.load(Ordering::SeqCst), 2);
     assert!(rig.rows().await.is_empty());
 }
 

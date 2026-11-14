@@ -26,6 +26,9 @@ pub mod kind {
     pub const CODE_WRITE: &str = "code_write";
     /// Harness-reported frontier totals (Req 10.4).
     pub const CLIENT_REPORTED: &str = "client_reported";
+    /// `mmhmem compact --run`: command output shortened before the agent
+    /// saw it (raw − kept chars ÷ 4; no worker involved).
+    pub const COMMAND_COMPACT: &str = "command_compact";
 }
 
 /// One `token_stats` row (design.md Physical Data Model).

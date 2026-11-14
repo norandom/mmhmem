@@ -102,6 +102,7 @@ fn respond(harness: Option<&str>) -> String {
     let Some(req) = call.read.as_ref() else {
         if harness == Harness::Claude
             && let Some(cmd) = call.command.as_deref()
+            && compact_rewrite_enabled()
         {
             return adapters::render_claude_compact(cmd);
         }
@@ -124,6 +125,16 @@ fn respond(harness: Option<&str>) -> String {
         project,
         settings.shunt_min_lines,
     )
+}
+
+/// The opt-in for the command rewrite (`hook::compact::rewrite_enabled`);
+/// a `.mmhmem.json` that cannot load counts as off.
+fn compact_rewrite_enabled() -> bool {
+    let env = std::env::var(crate::hook::compact::ENV_COMPACT_COMMANDS).ok();
+    let file = crate::config::mmhmem_file::MmhmemFile::load_default_locations()
+        .ok()
+        .and_then(|f| f.compact_commands);
+    crate::hook::compact::rewrite_enabled(env.as_deref(), file)
 }
 
 /// Reads at most `cap` bytes; `None` on a read error or more than `cap`.

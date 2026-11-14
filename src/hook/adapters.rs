@@ -171,13 +171,15 @@ fn parse_claude(input: &[u8]) -> ParsedCall {
 /// Renders a Claude Code `PreToolUse` `updatedInput` response that wraps
 /// `command` with `mmhmem compact --run <quoted>` so noisy output is compacted
 /// without changing the user's shell.
+///
+/// No `permissionDecision`: Claude Code then runs its normal permission flow
+/// on the wrapped command, so the hook never approves anything by itself.
 pub fn render_claude_compact(command: &str) -> String {
     let quoted = format!("'{}'", command.replace('\'', "'\\''"));
-    let wrapped = format!("mmhmem compact --run {quoted}");
+    let wrapped = format!("mmhmem compact --harness claude-code --run {quoted}");
     json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
             "updatedInput": {
                 "command": wrapped
             }

