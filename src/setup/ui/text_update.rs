@@ -45,6 +45,16 @@ pub const CHANGES_KEPT: &str = "Your tools' files were left as they are. To see 
 changes again and make them, run: mmhmem setup";
 pub const NOTHING_CHANGED: &str = "Nothing was changed.";
 pub const DONE: &str = "Done.";
+pub const PROMPT_KEEP_WORKER: &str = "Keep this Worker model? [Y/n]";
+pub const PROMPT_NEW_WORKER: &str = "New Worker model name (press Enter to keep current):";
+pub const PROMPT_SET_WORKER: &str =
+    "Worker model: none set up. Enter a model name (or press Enter to skip):";
+/// Contains `{model}`.
+pub const WORKER_CURRENT: &str = "Worker model: {model}";
+/// Contains `{model}` and `{file}`.
+pub const WORKER_SAVED: &str = "Worker model set to {model} in {file}.";
+/// Contains `{error}`.
+pub const WORKER_SAVE_FAILED: &str = "Could not save Worker model: {error}";
 
 fn fill(template: &str, values: &[(&str, &str)]) -> String {
     values
@@ -97,6 +107,21 @@ pub fn updated_no_changes(version: &str) -> String {
     fill(UPDATED_NO_CHANGES, &[("version", version)])
 }
 
+/// "Worker model: qwen3:1.7b".
+pub fn worker_model_current(model: &str) -> String {
+    fill(WORKER_CURRENT, &[("model", model)])
+}
+
+/// "Worker model set to qwen3:1.7b in ~/.mmhmem.json.".
+pub fn worker_model_saved(model: &str, file: &str) -> String {
+    fill(WORKER_SAVED, &[("model", model), ("file", file)])
+}
+
+/// "Could not save Worker model: ...".
+pub fn worker_model_save_failed(error: &str) -> String {
+    fill(WORKER_SAVE_FAILED, &[("error", error)])
+}
+
 /// Every string above (for the plain-language test).
 pub const ALL: &[&str] = &[
     TITLE_SET_UP,
@@ -122,4 +147,10 @@ pub const ALL: &[&str] = &[
     CHANGES_KEPT,
     NOTHING_CHANGED,
     DONE,
+    PROMPT_KEEP_WORKER,
+    PROMPT_NEW_WORKER,
+    PROMPT_SET_WORKER,
+    WORKER_CURRENT,
+    WORKER_SAVED,
+    WORKER_SAVE_FAILED,
 ];

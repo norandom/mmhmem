@@ -150,6 +150,43 @@ impl Prompt<'_> {
             }
         }
     }
+
+    /// Asks `prompt` until yes (Enter too) or no; end of input defaults to yes
+    /// so non-interactive/EOF tests keep the existing configuration.
+    fn yes_or_eof(&mut self, prompt: &str) -> bool {
+        loop {
+            self.start(&format!("{prompt} "));
+            let mut line = String::new();
+            match self.input.read_line(&mut line) {
+                Ok(0) | Err(_) => {
+                    self.say("");
+                    return true;
+                }
+                Ok(_) => {}
+            }
+            match line.trim().to_lowercase().as_str() {
+                "" | "y" | "yes" => return true,
+                "n" | "no" => return false,
+                _ => self.say(text::update::BAD_ANSWER),
+            }
+        }
+    }
+
+    /// Prompts for one optional line; empty or EOF returns `None`.
+    fn line(&mut self, prompt: &str) -> Option<String> {
+        self.start(&format!("{prompt} "));
+        let mut line = String::new();
+        match self.input.read_line(&mut line) {
+            Ok(0) | Err(_) => {
+                self.say("");
+                None
+            }
+            Ok(_) => {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_owned())
+            }
+        }
+    }
 }
 
 /// `mmhmem update` over `flow` (see the module docs); `lookup` answers the
@@ -272,7 +309,31 @@ fn finish(flow: &mut Flow, p: &mut Prompt, tag: &str, kept: Option<&str>) -> i32
     for line in result_lines(flow) {
         p.say(&line);
     }
+    confirm_worker_model(flow, p);
     flow.exit_code()
+}
+
+/// Asks the user to confirm (or set/update) the worker model on each update;
+/// pressing Enter keeps the current state.
+fn confirm_worker_model(flow: &Flow, p: &mut Prompt) {
+    let file_display = flow.global_mmhmem_file().display().to_string();
+    let new_model = match flow.configured_worker_model() {
+        Some(current) => {
+            p.say(&text::update::worker_model_current(&current));
+            if p.yes_or_eof(text::update::PROMPT_KEEP_WORKER) {
+                None
+            } else {
+                p.line(text::update::PROMPT_NEW_WORKER)
+            }
+        }
+        None => p.line(text::update::PROMPT_SET_WORKER),
+    };
+    if let Some(model) = new_model {
+        match flow.save_worker_model(&model) {
+            Ok(()) => p.say(&text::update::worker_model_saved(&model, &file_display)),
+            Err(e) => p.say(&text::update::worker_model_save_failed(&e.to_string())),
+        }
+    }
 }
 
 /// The changes per file and the tools that will be skipped.

@@ -118,6 +118,39 @@ impl MmhmemFile {
     ) -> impl Fn(&str) -> Option<String> + 'a {
         move |key| get(key).or_else(|| file.setting(key))
     }
+
+    /// Updates (or creates) `path` with `worker_model = model`, preserving any
+    /// existing keys and setting `worker_api_url` to the default when absent.
+    pub fn save_worker_model(path: &Path, model: &str) -> std::io::Result<()> {
+        let mut obj = match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+            Err(e) => return Err(e),
+        };
+        obj.insert(
+            "worker_model".to_owned(),
+            serde_json::Value::String(model.to_owned()),
+        );
+        if !obj.contains_key("worker_api_url") {
+            obj.insert(
+                "worker_api_url".to_owned(),
+                serde_json::Value::String(super::DEFAULT_WORKER_API_URL.to_owned()),
+            );
+        }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+            .map_err(std::io::Error::other)?;
+        json.push('\n');
+        std::fs::write(path, json)
+    }
 }
 
 #[cfg(test)]

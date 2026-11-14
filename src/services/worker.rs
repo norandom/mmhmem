@@ -153,6 +153,13 @@ impl WorkerClient {
             .await
     }
 
+    /// Lightweight self-test to verify the worker model endpoint responds.
+    pub async fn ping(&self) -> Result<(), WorkerError> {
+        self.call(Duration::from_secs(5), "Reply with ok.", "ping")
+            .await
+            .map(|_| ())
+    }
+
     /// One POST to the chat-completions endpoint with temperature 0.0
     /// (Req 6.2); maps every failure mode to an explicit [`WorkerError`]
     /// (Req 6.3).

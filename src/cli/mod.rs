@@ -7,6 +7,7 @@
 //! with `Db::open_read_only`, never creates it, and exits 0 with a clear
 //! message when no statistics exist yet.
 
+pub mod compact;
 pub mod hook;
 pub mod prune;
 pub mod stats;
@@ -27,10 +28,11 @@ use crate::storage::db::{DB_FILE_NAME, Db};
 pub const NO_STATS_MESSAGE: &str = "No token-savings statistics recorded yet. Use mmhmem from a harness (stdio \
      or serve mode), then run `mmhmem stats` again.";
 
+pub use compact::run_compact;
 pub use hook::run_hook;
 pub use prune::run_prune;
 
-pub use stats_args::{STATS_USAGE, StatsArgs};
+pub use stats_args::{STATS_USAGE, StatsArgs, StatsMode};
 
 /// `mmhmem stats [--all] [--json]` entrypoint (Req 1.3, 8.1-8.6): read-only
 /// report from the local profile's per-user store; exits 0 even with no data.
@@ -71,6 +73,7 @@ fn build_report(args: StatsArgs) -> anyhow::Result<String> {
     }
     // Width and today are detected here so the renderer stays pure.
     let opts = stats::TableOptions {
+        mode: args.mode,
         width: stats_args::table_width(),
         today: time::OffsetDateTime::now_utc().date(),
         all: args.all,

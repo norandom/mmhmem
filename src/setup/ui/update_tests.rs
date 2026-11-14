@@ -377,3 +377,29 @@ fn the_home_title_names_the_installed_release() {
         "Update to v0.5.0 (keeps your choices)"
     );
 }
+
+#[test]
+fn update_confirms_worker_model_and_enter_keeps_or_updates_it() {
+    let fake = new_release();
+    let dir = release_dir(&fake);
+    let (mut fx, _seen) = updating(dir.path());
+    let mmhmem_json = fx.home.home().join(".mmhmem.json");
+    std::fs::write(&mmhmem_json, r#"{"worker_model":"qwen3:1.7b"}"#).unwrap();
+
+    // Pressing Enter confirms and keeps the configured worker model.
+    let mut flow = restarted(&mut fx);
+    let (code, said) = run(&mut flow, Newest::Unknown, "\n");
+    assert_eq!(code, 0, "{said}");
+    assert!(said.contains("Worker model: qwen3:1.7b"), "{said}");
+    assert!(said.contains(text::update::PROMPT_KEEP_WORKER), "{said}");
+    let kept = std::fs::read_to_string(&mmhmem_json).unwrap();
+    assert!(kept.contains("qwen3:1.7b"), "{kept}");
+
+    // Answering 'n' and typing a new model updates .mmhmem.json.
+    let mut flow = restarted(&mut fx);
+    let (code, said) = run(&mut flow, Newest::Unknown, "n\nqwen3:4b\n");
+    assert_eq!(code, 0, "{said}");
+    assert!(said.contains("Worker model set to qwen3:4b"), "{said}");
+    let updated = std::fs::read_to_string(&mmhmem_json).unwrap();
+    assert!(updated.contains("qwen3:4b"), "{updated}");
+}

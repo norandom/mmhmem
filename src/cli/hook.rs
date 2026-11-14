@@ -100,6 +100,11 @@ fn respond(harness: Option<&str>) -> String {
     };
     let call = adapters::parse(harness, &input);
     let Some(req) = call.read.as_ref() else {
+        if harness == Harness::Claude
+            && let Some(cmd) = call.command.as_deref()
+        {
+            return adapters::render_claude_compact(cmd);
+        }
         return String::new();
     };
     // Req 3.1: a configuration that cannot load means pass, unrecorded
@@ -401,6 +406,7 @@ mod tests {
             cwd: String::new(),
             tool: "Read".to_string(),
             read: None,
+            command: None,
         };
         let file = dir.path().join("plain.txt");
         std::fs::write(&file, "x\n".repeat(20)).expect("write");

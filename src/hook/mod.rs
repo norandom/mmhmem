@@ -10,6 +10,7 @@
 pub mod adapters;
 mod antigravity;
 mod codex;
+pub mod compact;
 mod opencode;
 mod range;
 pub mod shell;

@@ -66,6 +66,9 @@ pub fn help_text() -> String {
          \x20                    antigravity): reads\n\
          \x20                    one hook event on stdin and declines full reads of\n\
          \x20                    large files in favour of smart_read; always exits 0\n\
+         \x20   compact [--run <cmd>]\n\
+         \x20                    Compact noisy command output (reads stdin or runs\n\
+         \x20                    <cmd> preserving its exit code)\n\
          \x20   healthcheck      Probe GET /healthz on the local daemon and exit 0 on\n\
          \x20                    HTTP 200 (container healthchecks; no curl in the image)\n\
          \n\

@@ -4,6 +4,7 @@ use super::*;
 #[test]
 fn flags_parse_in_any_order() {
     let both = StatsArgs {
+        mode: StatsMode::Days,
         json: true,
         all: true,
     };
@@ -12,8 +13,25 @@ fn flags_parse_in_any_order() {
     assert_eq!(
         StatsArgs::parse(&["--all"]),
         Ok(StatsArgs {
+            mode: StatsMode::Days,
             json: false,
             all: true
+        })
+    );
+    assert_eq!(
+        StatsArgs::parse(&["-m", "--all"]),
+        Ok(StatsArgs {
+            mode: StatsMode::Months,
+            json: false,
+            all: true
+        })
+    );
+    assert_eq!(
+        StatsArgs::parse(&["-d"]),
+        Ok(StatsArgs {
+            mode: StatsMode::Days,
+            json: false,
+            all: false
         })
     );
     assert_eq!(StatsArgs::parse::<&str>(&[]), Ok(StatsArgs::default()));
@@ -26,7 +44,7 @@ fn an_unknown_argument_is_an_error_naming_it() {
         Err("--wide".into())
     );
     assert_eq!(StatsArgs::parse(&["json"]), Err("json".into()));
-    assert!(STATS_USAGE.contains("[--all] [--json]"));
+    assert!(STATS_USAGE.contains("[-d | -m] [--all] [--json]"));
 }
 
 #[test]

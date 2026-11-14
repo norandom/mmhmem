@@ -12,6 +12,7 @@
 //! always marked as estimates, client-reported values keep their source
 //! label, and nothing computed is ever presented as measured (Req 8.3).
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use rusqlite::params;
@@ -185,6 +186,25 @@ pub fn totals(rows: &[DayAggregate]) -> Totals {
             activity: acc.activity.plus(&r.activity),
         },
     )
+}
+
+/// Aggregates daily rows into monthly (`YYYY-MM`) rows, ordered newest first.
+pub fn by_month(rows: &[DayAggregate]) -> Vec<DayAggregate> {
+    let mut map: BTreeMap<(Reverse<String>, String, String), DayAggregate> = BTreeMap::new();
+    for r in rows {
+        let month = r.day.chars().take(7).collect::<String>();
+        let key = (Reverse(month.clone()), r.project.clone(), r.harness.clone());
+        let entry = map
+            .entry(key)
+            .or_insert_with(|| empty_row((month, r.project.clone(), r.harness.clone())));
+        entry.avoided_est += r.avoided_est;
+        entry.client_prompt += r.client_prompt;
+        entry.client_completion += r.client_completion;
+        entry.worker_prompt += r.worker_prompt;
+        entry.worker_completion += r.worker_completion;
+        entry.activity = entry.activity.plus(&r.activity);
+    }
+    map.into_values().collect()
 }
 
 /// Machine-readable JSON with the same aggregates (Req 8.4), shaped as

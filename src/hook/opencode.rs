@@ -20,6 +20,7 @@ pub(super) fn parse(input: &[u8]) -> ParsedCall {
         cwd: cwd.into(),
         tool: tool.into(),
         read,
+        command: None,
     }
 }
 

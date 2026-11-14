@@ -307,6 +307,31 @@ impl Flow {
         self.make_plan();
         Next::Review
     }
+
+    /// The configured worker model name from env or `.mmhmem.json`, if any.
+    pub fn configured_worker_model(&self) -> Option<String> {
+        if let Ok(m) = std::env::var(crate::config::ENV_WORKER_MODEL)
+            && !m.trim().is_empty()
+        {
+            return Some(m);
+        }
+        let global = self.deps.env.home().join(".mmhmem.json");
+        let project = crate::config::local_dirs::project_config_file();
+        crate::config::mmhmem_file::MmhmemFile::load(&global, &project)
+            .ok()
+            .and_then(|f| f.worker_model)
+            .filter(|m| !m.trim().is_empty())
+    }
+
+    /// Global `.mmhmem.json` path under the current home directory.
+    pub fn global_mmhmem_file(&self) -> std::path::PathBuf {
+        self.deps.env.home().join(".mmhmem.json")
+    }
+
+    /// Saves `model` as `worker_model` in the global `.mmhmem.json`.
+    pub fn save_worker_model(&self, model: &str) -> std::io::Result<()> {
+        crate::config::mmhmem_file::MmhmemFile::save_worker_model(&self.global_mmhmem_file(), model)
+    }
 }
 
 /// The new program's hash and release in the record; a managed program

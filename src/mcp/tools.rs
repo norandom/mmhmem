@@ -419,7 +419,7 @@ impl McpServer {
             return ok_text(super::session_response::checkpoint(&p.project, &ack));
         }
         let mut md = super::session_response::resume(&p.project, &view);
-        md.push_str(&self.worker_notice());
+        md.push_str(&self.worker_status_and_savings(&p.project).await);
         // Resume path only, never on a checkpoint save; reads a cache file,
         // never the network (services::update_check).
         if let Some(line) = self.state.update_notice.as_ref().and_then(|n| n.line()) {
@@ -429,16 +429,37 @@ impl McpServer {
         ok_text(md)
     }
 
-    /// One-line worker-unconfigured notice for session-start responses
-    /// (Req 8.1); empty when a worker model is configured (Req 8.2).
-    fn worker_notice(&self) -> String {
-        if self.state.worker_configured {
-            String::new()
-        } else {
-            "\n\nNo worker model configured — smart_read shunting stays \
-             off. Set worker_model in .mmhmem.json (or the WORKER_MODEL \
-             variable) to enable it."
-                .to_string()
-        }
+    /// Self-tests the worker model and reports 3-day token savings on resume.
+    async fn worker_status_and_savings(&self, project: &str) -> String {
+        let worker_line = match &self.state.worker {
+            None => "\n\nWarning: No worker model configured — token savings are not active \
+                     because the worker model is missing. Set worker_model in .mmhmem.json \
+                     (or the WORKER_MODEL variable) to enable it."
+                .to_string(),
+            Some(worker) => match worker.ping().await {
+                Ok(()) => format!("\n\nWorker model ({}): OK", worker.model()),
+                Err(e) => format!(
+                    "\n\nWarning: Token savings are not active because the worker model ({}) \
+                     is not answering ({e}).",
+                    worker.model()
+                ),
+            },
+        };
+        let savings_line = match self
+            .state
+            .services
+            .stats
+            .avoided_tokens_last_days(project, 3)
+            .await
+        {
+            Ok((proj, total)) if proj == total => {
+                format!("\nToken savings (last 3 days): {proj} tokens in '{project}' (estimated).")
+            }
+            Ok((proj, total)) => format!(
+                "\nToken savings (last 3 days): {proj} tokens in '{project}' ({total} total across all projects, estimated)."
+            ),
+            Err(_) => String::new(),
+        };
+        format!("{worker_line}{savings_line}")
     }
 }

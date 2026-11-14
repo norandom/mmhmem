@@ -288,6 +288,7 @@ fn json_exposes_stable_activity_fields_and_keeps_savings_fields() {
 #[test]
 fn table_keeps_savings_columns_and_adds_activity_columns() {
     let opts = TableOptions {
+        mode: crate::cli::StatsMode::Days,
         width: None,
         today: time::Date::from_calendar_date(2025, time::Month::January, 2).unwrap(),
         all: false,
@@ -308,13 +309,9 @@ fn table_keeps_savings_columns_and_adds_activity_columns() {
     ] {
         assert!(header.contains(label), "missing {label}: {header}");
     }
-    let total = table.lines().find(|l| l.starts_with("│ total")).unwrap();
-    let cells = |line: &str| -> Vec<String> {
-        line.split(['│', '┆'])
-            .skip(1)
-            .map(|c| c.trim().to_string())
-            .collect()
-    };
+    let total = table.lines().find(|l| l.starts_with(" total")).unwrap();
+    let cells =
+        |line: &str| -> Vec<String> { line.split('|').map(|c| c.trim().to_string()).collect() };
     let by_header: std::collections::HashMap<String, String> =
         cells(header).into_iter().zip(cells(total)).collect();
     for (label, want) in [

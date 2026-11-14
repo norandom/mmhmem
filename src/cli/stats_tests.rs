@@ -216,6 +216,7 @@ fn totals_sum_every_column() {
 /// `--all` at 2025-01-02, no width limit: every row and column.
 fn all_opts() -> TableOptions {
     TableOptions {
+        mode: crate::cli::StatsMode::Days,
         width: None,
         today: time::Date::from_calendar_date(2025, time::Month::January, 2).unwrap(),
         all: true,
@@ -230,14 +231,14 @@ fn table_labels_spent_and_estimated_tokens_with_totals() {
     assert!(header.contains("frontier out (client)"), "{header}");
     assert!(!header.contains("avoided (client)"), "{header}");
     assert!(header.contains("avoided (est.)"), "estimates stay labeled");
-    let total = table.lines().find(|l| l.starts_with("│ total")).unwrap();
+    let total = table.lines().find(|l| l.starts_with(" total")).unwrap();
     assert!(total.contains("1,400") && total.contains("700") && total.contains("70"));
 }
 
 #[test]
 fn table_renders_zero_totals_for_empty_input() {
     let table = render_table(&[], &all_opts());
-    assert!(table.contains("│ total"));
+    assert!(table.contains(" total"));
     assert!(table.contains(" 0 "));
 }
 

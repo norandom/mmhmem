@@ -182,7 +182,7 @@ async fn stats_table_shows_estimates_and_client_reported_spend() {
     );
     let total = stdout
         .lines()
-        .find(|l| l.starts_with("│ total"))
+        .find(|l| l.starts_with(" total"))
         .unwrap_or_else(|| panic!("totals row: {stdout}"));
     assert!(total.contains("1,400"), "estimates total: {total}");
     assert!(
@@ -488,12 +488,7 @@ fn stats_shows_the_hit_rate_and_the_redirect_follow_through() {
     let table = String::from_utf8(run_stats(dir.path(), false).stdout).unwrap();
     let header = table.lines().nth(2).unwrap();
     let row = table.lines().find(|l| l.contains("rates")).unwrap();
-    let cells = |l: &str| -> Vec<String> {
-        l.split(['│', '┆'])
-            .skip(1)
-            .map(|c| c.trim().to_string())
-            .collect()
-    };
+    let cells = |l: &str| -> Vec<String> { l.split('|').map(|c| c.trim().to_string()).collect() };
     let cell: std::collections::HashMap<String, String> =
         cells(header).into_iter().zip(cells(row)).collect();
     // 3 hits / (3 hits + 1 summary); 2 of 4 redirects followed.
@@ -508,7 +503,7 @@ async fn default_table_falls_back_to_the_most_recent_day() {
     let out = stats_with(dir.path(), &[]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.starts_with("shape: (2, "), "{stdout}");
+    assert!(stdout.contains("mmhmem  /  daily (last 7d)"), "{stdout}");
     assert!(
         stdout.contains("2025-01-02") && !stdout.contains("2025-01-01"),
         "{stdout}"
@@ -538,7 +533,7 @@ fn an_unknown_stats_argument_prints_usage_and_exits_2() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("--wide"), "{stderr}");
     assert!(
-        stderr.contains("usage: mmhmem stats [--all] [--json]"),
+        stderr.contains("usage: mmhmem stats [-d | -m] [--all] [--json]"),
         "{stderr}"
     );
 }

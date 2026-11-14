@@ -157,6 +157,38 @@ impl StatsCollector {
         Self { db, audit, sink }
     }
 
+    /// Estimated avoided tokens (input + output) over the last `days` days:
+    /// returns `(project_tokens, total_tokens)`.
+    pub async fn avoided_tokens_last_days(
+        &self,
+        project: &str,
+        days: i64,
+    ) -> anyhow::Result<(i64, i64)> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let cutoff_ms = now_ms.saturating_sub(days.saturating_mul(86_400_000));
+        let project = project.to_owned();
+        self.db
+            .with_conn(move |c| {
+                let total: i64 = c.query_row(
+                    "SELECT COALESCE(SUM(avoided_input_tokens_est + avoided_output_tokens_est), 0) \
+                     FROM token_stats WHERE kind != ?1 AND ts_epoch_ms >= ?2",
+                    rusqlite::params![kind::CLIENT_REPORTED, cutoff_ms],
+                    |r| r.get(0),
+                )?;
+                let proj: i64 = c.query_row(
+                    "SELECT COALESCE(SUM(avoided_input_tokens_est + avoided_output_tokens_est), 0) \
+                     FROM token_stats WHERE kind != ?1 AND ts_epoch_ms >= ?2 AND project = ?3",
+                    rusqlite::params![kind::CLIENT_REPORTED, cutoff_ms, project],
+                    |r| r.get(0),
+                )?;
+                Ok((proj, total))
+            })
+            .await
+    }
+
     /// Persists a server-side (estimate) row: token_stats insert + TOKEN_STATS
     /// audit + sink counters (Req 10.1-10.3).
     pub async fn record_estimate(&self, row: TokenStatRow) -> anyhow::Result<()> {

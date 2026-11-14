@@ -57,6 +57,8 @@ pub struct ParsedCall {
     pub tool: String,
     /// `Some` only for a recognised read; `None` means not a read.
     pub read: Option<ReadRequest>,
+    /// `Some` when a shell command should be wrapped with `mmhmem compact`.
+    pub command: Option<String>,
 }
 
 /// Parses raw stdin for `harness`; over [`MAX_INPUT_BYTES`] or malformed
@@ -147,13 +149,41 @@ fn parse_claude(input: &[u8]) -> ParsedCall {
         "Bash" | "PowerShell" => claude_shell(tool_input, cwd, tool),
         _ => None,
     };
+    let command = if tool == "Bash" && read.is_none() {
+        tool_input
+            .get("command")
+            .and_then(Value::as_str)
+            .filter(|cmd| super::compact::should_compact_command(cmd))
+            .map(str::to_owned)
+    } else {
+        None
+    };
     ParsedCall {
         harness: Harness::Claude,
         session_id: session_id.to_string(),
         cwd: cwd.to_string(),
         tool: tool.to_string(),
         read,
+        command,
     }
+}
+
+/// Renders a Claude Code `PreToolUse` `updatedInput` response that wraps
+/// `command` with `mmhmem compact --run <quoted>` so noisy output is compacted
+/// without changing the user's shell.
+pub fn render_claude_compact(command: &str) -> String {
+    let quoted = format!("'{}'", command.replace('\'', "'\\''"));
+    let wrapped = format!("mmhmem compact --run {quoted}");
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {
+                "command": wrapped
+            }
+        }
+    })
+    .to_string()
 }
 
 /// Native `Read`. Either `offset` or `limit` makes it a ranged read

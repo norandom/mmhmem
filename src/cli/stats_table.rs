@@ -1,40 +1,25 @@
 //! Human-readable `mmhmem stats` table (local-mode Req 8.1/8.3), drawn in
-//! the style of a polars DataFrame: a `shape: (rows, cols)` line, box
-//! borders, a `╞═╪═╡` header rule and the total row last, set off by a
-//! second rule.
+//! `vnstat` style: a `mmhmem  /  daily` or `monthly` heading, `|` column
+//! separators, `---+---` rules, and the `total` row last.
 //!
-//! By default the table shows what matters: rows with savings (an avoided
-//! estimate above zero; every row when none has any), of those the last 7
-//! UTC days (or, when that is empty, the most recent day with data), no
-//! all-zero numeric columns, and a width that fits the terminal. To fit, the project
-//! column is first cut to [`PROJECT_MAX`] characters, then numeric columns
-//! are dropped by [`Column::priority`] (read counts first, then frontier
-//! client-reported tokens, then worker tokens, the avoided estimate last)
-//! and one `…` column stands in their place. A short footer says what was
-//! hidden; `--all` turns all of this off. The labeling discipline holds in
-//! every header (Req 8.3): estimates say `(est.)`, client-reported values
-//! say `(client)`, and nothing computed is presented as measured.
-//!
-//! Two rates sit beside their counts (shunt-cache-efficiency Req 5.3-5.5):
-//! `hit rate` = cache hits / (cache hits + summaries) and `follow-through`
-//! = followed redirects / redirects, derived here from the counts — the
-//! total row's from the summed counts — shown as `NN%`, or `-` without a
-//! denominator. A rate column is all-zero (hidden) when no shown row has a
-//! denominator; a `0%` rate is information and stays.
-//!
-//! Pure by contract: width, today and `all` come in through
-//! [`TableOptions`]; terminal detection lives in [`super::stats_args`].
+//! By default the table shows rows with savings in the last 7 UTC days (or
+//! the most recent day with data), hides all-zero numeric columns, and fits
+//! the terminal width by truncating `project` to [`PROJECT_MAX`] and dropping
+//! numeric columns by [`Column::priority`]. `--all` disables filtering.
 
 use std::cmp::Reverse;
 
 use time::Date;
 
-use super::stats::{DayAggregate, totals};
+use super::stats::{DayAggregate, by_month, totals};
 use super::stats_activity::ActivityCounts;
+use super::stats_args::StatsMode;
 
 /// Inputs that make the rendering deterministic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableOptions {
+    /// Daily (`-d`, default) or monthly (`-m`) grouping.
+    pub mode: StatsMode,
     /// Maximum line width in characters; `None` means no limit.
     pub width: Option<usize>,
     /// The current UTC day; the row window ends here.
@@ -163,9 +148,13 @@ impl Shown {
     }
 }
 
-/// Renders the table plus, when anything was hidden, a footer.
+/// Renders the table in `vnstat` style plus, when anything was hidden, a footer.
 pub fn render_table(rows: &[DayAggregate], opts: &TableOptions) -> String {
-    let saving = saving_rows(rows, opts);
+    let grouped = match opts.mode {
+        StatsMode::Days => rows.to_vec(),
+        StatsMode::Months => by_month(rows),
+    };
+    let saving = saving_rows(&grouped, opts);
     let (shown, window) = select_rows(&saving, opts);
     let mut body = shown.clone();
     body.push(total_row(&shown));
@@ -174,24 +163,32 @@ pub fn render_table(rows: &[DayAggregate], opts: &TableOptions) -> String {
         .filter(|i| !numeric.contains(i))
         .map(|i| COLUMNS[i].header.to_string())
         .collect();
-    let mut columns = text_columns(&body);
+    let mut columns = text_columns(&body, opts.mode);
     columns.extend(numeric.iter().map(|&i| numeric_column(&COLUMNS[i], &body)));
-    let shape = (shown.len(), columns.len());
     hidden_columns.extend(fit(
         &mut columns,
         &numeric,
         opts.width.filter(|_| !opts.all),
     ));
-    let mut out = format!("shape: ({}, {})\n", shape.0, shape.1);
+    let mut out = heading(opts);
     out.push_str(&draw(&columns, shown.len()));
     let hidden = Hidden {
-        unsaved: rows.len() - saving.len(),
+        unsaved: grouped.len() - saving.len(),
         rows: saving.len() - shown.len(),
         window,
         columns: hidden_columns,
     };
     out.push_str(&footer(&hidden));
     out
+}
+
+fn heading(opts: &TableOptions) -> String {
+    match (opts.mode, opts.all) {
+        (StatsMode::Days, false) => " mmhmem  /  daily (last 7d)\n\n".to_owned(),
+        (StatsMode::Days, true) => " mmhmem  /  daily (all)\n\n".to_owned(),
+        (StatsMode::Months, false) => " mmhmem  /  monthly\n\n".to_owned(),
+        (StatsMode::Months, true) => " mmhmem  /  monthly (all)\n\n".to_owned(),
+    }
 }
 
 /// Which period the shown rows cover, for the footer.
@@ -215,7 +212,7 @@ fn saving_rows(rows: &[DayAggregate], opts: &TableOptions) -> Vec<DayAggregate> 
 /// The rows to show: everything with `all`, else the last [`WINDOW_DAYS`]
 /// UTC days, else the most recent day with data.
 fn select_rows(rows: &[DayAggregate], opts: &TableOptions) -> (Vec<DayAggregate>, Window) {
-    if opts.all {
+    if opts.all || opts.mode == StatsMode::Months {
         return (rows.to_vec(), Window::All);
     }
     let start = iso_day(opts.today - time::Duration::days(WINDOW_DAYS - 1));
@@ -265,9 +262,14 @@ fn numeric_columns(body: &[DayAggregate], all: bool) -> Vec<usize> {
     if keep.is_empty() { vec![0] } else { keep }
 }
 
-fn text_columns(body: &[DayAggregate]) -> Vec<Shown> {
+fn text_columns(body: &[DayAggregate], mode: StatsMode) -> Vec<Shown> {
+    let first = match mode {
+        StatsMode::Days => TEXT_HEADERS[0],
+        StatsMode::Months => "month",
+    };
+    let headers = [first, TEXT_HEADERS[1], TEXT_HEADERS[2]];
     let fields: [fn(&DayAggregate) -> &str; 3] = [|r| &r.day, |r| &r.project, |r| &r.harness];
-    TEXT_HEADERS
+    headers
         .iter()
         .zip(fields)
         .map(|(header, field)| Shown {
@@ -286,10 +288,14 @@ fn numeric_column(c: &Column, body: &[DayAggregate]) -> Shown {
     }
 }
 
-/// Line width of a table with these column widths:
-/// `│ a ┆ b │` is the cell widths plus three per column plus one.
+/// Line width of a `vnstat`-style table:
+/// ` a | b ` is the cell widths plus 3 per column minus 1.
 fn line_width(columns: &[Shown]) -> usize {
-    columns.iter().map(|c| c.width() + 3).sum::<usize>() + 1
+    columns
+        .iter()
+        .map(|c| c.width() + 3)
+        .sum::<usize>()
+        .saturating_sub(1)
 }
 
 /// Fits the table into `width`: truncate the project column, then drop
@@ -329,7 +335,7 @@ fn fitted_width(columns: &[Shown], drop: &[bool]) -> usize {
         .map(|c| c.width() + 3)
         .sum();
     let ellipsis = if drop.contains(&true) { 4 } else { 0 };
-    kept + ellipsis + 1
+    (kept + ellipsis).saturating_sub(1)
 }
 
 fn apply_drops(columns: &mut Vec<Shown>, drop: &[bool]) -> Vec<String> {
@@ -370,12 +376,13 @@ fn truncate_cells(column: &mut Shown, max: usize) {
     }
 }
 
-/// Draws the box: top, header, `╞═╪═╡`, data rows, `╞═╪═╡`, total, bottom.
+/// Draws the `vnstat`-style table: header, `---+---` rule, data rows,
+/// `---+---` rule, total row.
 fn draw(columns: &[Shown], data_rows: usize) -> String {
     let widths: Vec<usize> = columns.iter().map(Shown::width).collect();
-    let rule = |l: &str, fill: &str, mid: &str, r: &str| {
-        let parts: Vec<String> = widths.iter().map(|w| fill.repeat(w + 2)).collect();
-        format!("{l}{}{r}\n", parts.join(mid))
+    let rule = || {
+        let parts: Vec<String> = widths.iter().map(|w| "-".repeat(w + 2)).collect();
+        format!("{}\n", parts.join("+"))
     };
     let line = |cells: Vec<(&str, bool)>| {
         let parts: Vec<String> = cells
@@ -383,16 +390,13 @@ fn draw(columns: &[Shown], data_rows: usize) -> String {
             .zip(&widths)
             .map(|((cell, right), w)| format!(" {} ", pad(cell, *w, *right)))
             .collect();
-        format!("│{}│\n", parts.join("┆"))
+        format!("{}\n", parts.join("|").trim_end_matches(' '))
     };
-    let mut out = rule("┌", "─", "┬", "┐");
-    out.push_str(&line(
-        columns.iter().map(|c| (c.header.as_str(), false)).collect(),
-    ));
-    out.push_str(&rule("╞", "═", "╪", "╡"));
+    let mut out = line(columns.iter().map(|c| (c.header.as_str(), false)).collect());
+    out.push_str(&rule());
     for row in 0..=data_rows {
         if row == data_rows {
-            out.push_str(&rule("╞", "═", "╪", "╡"));
+            out.push_str(&rule());
         }
         out.push_str(&line(
             columns
@@ -401,7 +405,6 @@ fn draw(columns: &[Shown], data_rows: usize) -> String {
                 .collect(),
         ));
     }
-    out.push_str(&rule("└", "─", "┴", "┘"));
     out
 }
 

@@ -12,6 +12,7 @@ fn today() -> Date {
 
 fn opts(width: Option<usize>, all: bool) -> TableOptions {
     TableOptions {
+        mode: super::StatsMode::Days,
         width,
         today: today(),
         all,
@@ -115,7 +116,7 @@ fn header(table: &str) -> &str {
 }
 
 fn total_line(table: &str) -> &str {
-    table.lines().find(|l| l.starts_with("│ total")).unwrap()
+    table.lines().find(|l| l.starts_with(" total")).unwrap()
 }
 
 #[test]
@@ -146,7 +147,7 @@ fn all_table_shows_every_row_and_column() {
 #[test]
 fn the_window_keeps_the_last_seven_days_and_says_so() {
     let table = render_table(&fixture(), &opts(None, false));
-    assert!(table.starts_with("shape: (3, "), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (last 7d)"), "{table}");
     assert!(table.contains("2026-10-31") && !table.contains("2026-10-30"));
     assert!(table.contains("2 older rows hidden (showing since 2026-10-31)"));
     assert!(table.contains("The total covers the shown rows only."));
@@ -157,7 +158,7 @@ fn the_window_keeps_the_last_seven_days_and_says_so() {
 fn an_empty_window_falls_back_to_the_most_recent_day() {
     let rows: Vec<DayAggregate> = fixture().into_iter().skip(3).collect();
     let table = render_table(&rows, &opts(None, false));
-    assert!(table.starts_with("shape: (1, "), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (last 7d)"), "{table}");
     assert!(table.contains("2026-10-30") && !table.contains("2026-09-01"));
     assert!(table.contains("1 older row hidden (showing the most recent day, 2026-10-30)"));
 }
@@ -190,7 +191,7 @@ fn rows_without_savings_are_hidden_by_default() {
         )),
     );
     let table = render_table(&rows, &opts(None, false));
-    assert!(table.starts_with("shape: (3, "), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (last 7d)"), "{table}");
     assert!(
         !table.contains("reads-only") && !table.contains("nothing"),
         "{table}"
@@ -205,7 +206,7 @@ fn rows_without_savings_are_hidden_by_default() {
     // Their columns are not shown either: only hidden rows had slices.
     assert!(!header(&table).contains("slices"), "{table}");
     let all = render_table(&rows, &opts(None, true));
-    assert!(all.starts_with("shape: (7, "), "{all}");
+    assert!(all.starts_with(" mmhmem  /  daily (all)"), "{all}");
     assert!(
         all.contains("reads-only") && all.contains("nothing"),
         "{all}"
@@ -235,7 +236,7 @@ fn without_any_savings_every_row_is_shown() {
         )),
     ];
     let table = render_table(&rows, &opts(None, false));
-    assert!(table.starts_with("shape: (2, "), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (last 7d)"), "{table}");
     assert!(!table.contains("without savings"), "{table}");
 }
 
@@ -252,9 +253,12 @@ fn the_total_sums_the_shown_rows_only() {
 fn the_total_row_is_last_and_set_off_by_a_rule() {
     let table = render_table(&fixture(), &opts(None, false));
     let lines: Vec<&str> = table.lines().collect();
-    let at = lines.iter().position(|l| l.starts_with("│ total")).unwrap();
-    assert!(lines[at - 1].starts_with('╞'), "{table}");
-    assert!(lines[at + 1].starts_with('└'), "{table}");
+    let at = lines.iter().position(|l| l.starts_with(" total")).unwrap();
+    assert!(lines[at - 1].starts_with("---"), "{table}");
+    assert!(
+        !lines.get(at + 1).is_some_and(|l| l.starts_with("---")),
+        "{table}"
+    );
 }
 
 #[test]
@@ -272,7 +276,7 @@ fn every_column_zero_still_shows_the_estimate() {
     let rows = vec![agg(("2026-11-06", "p", "h", 0, (0, 0), (0, 0), [0; 6]))];
     let table = render_table(&rows, &opts(None, false));
     assert!(header(&table).contains("avoided (est.)"), "{table}");
-    assert!(table.starts_with("shape: (1, 4)"), "{table}");
+    assert!(total_line(&table).ends_with(" 0"), "{table}");
 }
 
 #[test]
@@ -281,7 +285,8 @@ fn a_narrow_table_cuts_the_project_and_drops_columns_by_priority() {
     let width = |l: &str| l.chars().count();
     let box_lines = table
         .lines()
-        .filter(|l| l.starts_with(['┌', '│', '╞', '└']));
+        .skip(2)
+        .filter(|l| l.contains('|') || l.starts_with("---"));
     for line in box_lines {
         assert!(width(line) <= 100, "{} chars: {line}", width(line));
     }
@@ -295,7 +300,7 @@ fn a_narrow_table_cuts_the_project_and_drops_columns_by_priority() {
         "rates go with the read counts: {head}"
     );
     assert!(
-        table.contains("10 columns hidden (slices, frontier in (client), …)."),
+        table.contains("9 columns hidden (slices, frontier in (client), …)."),
         "{table}"
     );
 }
@@ -326,7 +331,7 @@ fn all_ignores_the_width_limit() {
     let table = render_table(&fixture(), &opts(Some(40), true));
     assert!(header(&table).chars().count() > 40);
     assert!(table.contains("a-really-long-client-project-name"));
-    assert!(table.starts_with("shape: (5, 15)"), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (all)"), "{table}");
     assert!(!table.contains(ALL_HINT), "nothing hidden, no footer");
 }
 
@@ -355,17 +360,12 @@ fn headers_keep_the_labeling_discipline() {
 
 /// Cells of one table line, by header.
 fn cells_by_header(table: &str, line: &str) -> std::collections::HashMap<String, String> {
-    let cells = |l: &str| -> Vec<String> {
-        l.split(['│', '┆'])
-            .skip(1)
-            .map(|c| c.trim().to_string())
-            .collect()
-    };
+    let cells = |l: &str| -> Vec<String> { l.split('|').map(|c| c.trim().to_string()).collect() };
     cells(header(table)).into_iter().zip(cells(line)).collect()
 }
 
 fn row_line<'a>(table: &'a str, project: &str) -> &'a str {
-    table.lines().find(|l| l.contains(project)).unwrap()
+    table.lines().skip(2).find(|l| l.contains(project)).unwrap()
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn rates_without_any_denominator_are_hidden_like_all_zero_columns() {
         "counted in the footer: {table}"
     );
     let all = render_table(&rows, &opts(None, true));
-    let cells = cells_by_header(&all, row_line(&all, "│ 2026-11-06"));
+    let cells = cells_by_header(&all, row_line(&all, " 2026-11-06 "));
     assert_eq!(cells["hit rate (rate)"], "-", "{all}");
     assert_eq!(cells["follow-through (rate, 10 min)"], "-", "{all}");
 }
@@ -450,15 +450,28 @@ fn rate_rounds_to_whole_percent() {
 fn numbers_align_right_and_text_left() {
     let table = render_table(&fixture(), &opts(None, false));
     let row = table.lines().find(|l| l.contains("QOpenBB")).unwrap();
-    assert!(row.starts_with("│ 2026-11-06 ┆ QOpenBB "), "{row}");
-    assert!(row.contains("┆          8,574 ┆"), "{row}");
+    assert!(row.starts_with(" 2026-11-06 | QOpenBB "), "{row}");
+    assert!(row.contains("|          8,574 |"), "{row}");
 }
 
 #[test]
 fn empty_input_renders_a_zero_total() {
     let table = render_table(&[], &opts(None, false));
-    assert!(table.starts_with("shape: (0, 4)"), "{table}");
-    assert!(total_line(&table).contains(" 0 "), "{table}");
+    assert!(table.starts_with(" mmhmem  /  daily (last 7d)"), "{table}");
+    assert!(total_line(&table).ends_with(" 0"), "{table}");
+}
+
+#[test]
+fn monthly_mode_aggregates_by_month() {
+    let mut o = opts(None, false);
+    o.mode = super::StatsMode::Months;
+    let table = render_table(&fixture(), &o);
+    assert!(table.starts_with(" mmhmem  /  monthly"), "{table}");
+    assert!(header(&table).contains("month"), "{table}");
+    assert!(table.contains(" 2026-11 "), "{table}");
+    assert!(table.contains(" 2026-10 "), "{table}");
+    assert!(table.contains(" 2026-09 "), "{table}");
+    assert!(total_line(&table).contains("53,675"), "{table}");
 }
 
 #[test]

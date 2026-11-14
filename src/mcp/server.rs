@@ -74,6 +74,8 @@ pub struct AppState {
     pub telemetry: Arc<Telemetry>,
     /// Whether a worker model is configured (Req 8 notice gate).
     pub worker_configured: bool,
+    /// Optional worker client for self-tests and status checks.
+    pub worker: Option<WorkerClient>,
     /// Session-start update notice (local mode only; `mmhmem stdio` sets
     /// it, `build` leaves it off, so serve mode never notes).
     pub update_notice: Option<UpdateNotice>,
@@ -112,13 +114,14 @@ impl AppState {
             audit.clone(),
             &config,
             Some(bus.clone()),
-            worker,
+            worker.clone(),
         );
         Ok(Self {
             config,
             audit,
             telemetry,
             worker_configured,
+            worker,
             update_notice: None,
             services: Services {
                 bus,

@@ -38,6 +38,8 @@ fn main() -> ExitCode {
         }
         // Read-routing pre-tool hook; always exits 0 (read-routing-hooks Req 3).
         Some("hook") => mmhmem::cli::run_hook(std::env::args().nth(2).as_deref()),
+        // Deterministic command-output compaction.
+        Some("compact") => mmhmem::cli::run_compact(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("setup") => run_setup(),
         // Update mode of the installer (reliable-installers Req 7.5).
         Some("update") => run_update(),

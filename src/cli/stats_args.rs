@@ -9,11 +9,23 @@
 use std::io::IsTerminal;
 
 /// Printed on stderr for an unknown `stats` argument.
-pub const STATS_USAGE: &str = "usage: mmhmem stats [--all] [--json]";
+pub const STATS_USAGE: &str = "usage: mmhmem stats [-d | -m] [--all] [--json]";
+
+/// Grouping period for `mmhmem stats`, modeled after `vnstat` (`-d`, `-m`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StatsMode {
+    /// Daily breakdown (default: last 7 days).
+    #[default]
+    Days,
+    /// Monthly breakdown (`-m` / `--months`).
+    Months,
+}
 
 /// Parsed `stats` flags.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StatsArgs {
+    /// `-d` / `-m`: daily (default) or monthly aggregation.
+    pub mode: StatsMode,
     /// `--json`: the machine-readable report (all rows, all fields).
     pub json: bool,
     /// `--all`: every row and column in the table, no width limit.
@@ -26,6 +38,8 @@ impl StatsArgs {
         let mut parsed = Self::default();
         for arg in args {
             match arg.as_ref() {
+                "-d" | "--days" => parsed.mode = StatsMode::Days,
+                "-m" | "--months" => parsed.mode = StatsMode::Months,
                 "--json" => parsed.json = true,
                 "--all" => parsed.all = true,
                 other => return Err(other.to_string()),
